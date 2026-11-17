@@ -1,0 +1,17 @@
+node_modules/
+**/node_modules/
+dist/
+**/dist/
+.next/
+**/.next/
+*.tsbuildinfo
+.env
+**/.env
+.env.local
+**/.env.local
+*.db
+*.sqlite
+*.log
+.DS_Store
+.superpowers/
+**/.superpowers/

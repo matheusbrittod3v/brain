@@ -1,0 +1,14 @@
+id: BR-TEMPLATE-001
+type: business_rule
+status: draft
+priority: medium
+title: Template de Regra de Negócio
+description: Descreva a regra comercial de forma objetiva.
+conditions:
+  - Condição obrigatória 1
+effects:
+  - Efeito esperado 1
+exceptions:
+  - Exceção documentada 1
+access_policy: internal-project
+

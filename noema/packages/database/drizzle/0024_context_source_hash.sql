@@ -1,0 +1,1 @@
+ALTER TABLE "context_session_items" ADD COLUMN "source_hash" text;

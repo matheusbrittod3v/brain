@@ -1,0 +1,27 @@
+{
+  "name": "@noema/database",
+  "version": "0.1.0",
+  "type": "module",
+  "main": "./dist/src/index.js",
+  "types": "./dist/src/index.d.ts",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "node --test dist/test/*.test.js",
+    "db:generate": "drizzle-kit generate",
+    "db:migrate": "drizzle-kit migrate",
+    "db:bootstrap-roles": "npm run build && node dist/src/bootstrap-roles.js"
+  },
+  "dependencies": {
+    "@noema/auth": "*",
+    "@noema/core": "*",
+    "dotenv": "^16.4.7",
+    "drizzle-orm": "^0.45.4",
+    "postgres": "^3.4.5"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "drizzle-kit": "^0.31.11",
+    "typescript": "^5.7.2"
+  }
+}

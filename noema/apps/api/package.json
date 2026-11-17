@@ -1,0 +1,49 @@
+{
+  "name": "@noema/api",
+  "version": "0.1.0",
+  "type": "module",
+  "main": "./dist/src/server.js",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "dev": "node --env-file-if-exists=../../.env --watch dist/src/server.js",
+    "start": "node --env-file-if-exists=../../.env dist/src/server.js",
+    "test": "node --test dist/test/*.test.js test/*.test.mjs"
+  },
+  "dependencies": {
+    "@fastify/type-provider-typebox": "^5.2.0",
+    "@modelcontextprotocol/sdk": "^1.12.0",
+    "@noema/agent-handoff": "*",
+    "@noema/agent-runner": "*",
+    "@noema/approval-engine": "*",
+    "@noema/audit-engine": "*",
+    "@noema/auth": "*",
+    "@noema/code-intelligence": "*",
+    "@noema/connector-github": "*",
+    "@noema/connector-saas": "*",
+    "@noema/context-engine": "*",
+    "@noema/core": "*",
+    "@noema/cross-service": "*",
+    "@noema/database": "*",
+    "@noema/enterprise-views": "*",
+    "@noema/graph": "*",
+    "@noema/impact-analysis": "*",
+    "@noema/ingestion": "*",
+    "@noema/knowledge": "*",
+    "@noema/mcp-server": "*",
+    "@noema/observability": "*",
+    "@noema/retrieval": "*",
+    "@noema/task-engine": "*",
+    "@noema/temporal-knowledge": "*",
+    "@noema/worker": "*",
+    "@noema/workflow-orchestrator": "*",
+    "@noema/workspace-detection": "*",
+    "@sinclair/typebox": "^0.34.0",
+    "fastify": "^5.2.0",
+    "pg-boss": "^10.1.5"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "typescript": "^5.7.2"
+  }
+}

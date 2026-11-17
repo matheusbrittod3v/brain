@@ -1,0 +1,11 @@
+<idea-plugin>
+  <id>dev.noema.jetbrains</id>
+  <name>Noema — Project Brain OS 2.0</name>
+  <vendor>Noema</vendor>
+  <description>Integração nativa JetBrains com o Universal Agent Gateway (/mcp Streamable HTTP).</description>
+  <depends>com.intellij.modules.platform</depends>
+  <extensions defaultExtensionNs="com.intellij">
+    <applicationService serviceImplementation="com.noema.brain.NoemaMcpService"/>
+  </extensions>
+</idea-plugin>
+

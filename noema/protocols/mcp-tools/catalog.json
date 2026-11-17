@@ -1,0 +1,15 @@
+[
+  "brain_bootstrap_project",
+  "brain_context_build",
+  "brain_search",
+  "brain_knowledge_get",
+  "brain_get_active_rules",
+  "brain_find_related_code",
+  "brain_analyze_change_impact",
+  "brain_validate_implementation",
+  "brain_create_handoff",
+  "brain_resume_handoff",
+  "brain_record_learning",
+  "brain_change_propose",
+  "brain_delegate_task"
+]

@@ -1,0 +1,14 @@
+rules:
+  - id: noema-no-direct-env-index
+    patterns:
+      - pattern: fs.readFileSync(".env", ...)
+    message: "Nunca leia .env diretamente para indexação; use .env.example."
+    languages: [typescript, javascript]
+    severity: ERROR
+
+  - id: noema-no-raw-sql-bypass-rls
+    pattern: sql.raw(...)
+    message: "Evite sql.raw fora de migrations para não contornar Row-Level Security (RLS)."
+    languages: [typescript]
+    severity: WARNING
+

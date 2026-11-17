@@ -1,0 +1,33 @@
+{
+  "name": "@noema/worker",
+  "version": "0.1.0",
+  "type": "module",
+  "main": "./dist/src/index.js",
+  "types": "./dist/src/index.d.ts",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "node --test dist/test/*.test.js test/*.test.mjs",
+    "start": "node --env-file-if-exists=../../.env dist/src/index.js"
+  },
+  "dependencies": {
+    "@noema/agent-runner": "*",
+    "@noema/auth": "*",
+    "@noema/code-intelligence": "*",
+    "@noema/connector-framework": "*",
+    "@noema/connector-github": "*",
+    "@noema/connector-saas": "*",
+    "@noema/core": "*",
+    "@noema/database": "*",
+    "@noema/graph": "*",
+    "@noema/ingestion": "*",
+    "@noema/knowledge": "*",
+    "@noema/observability": "*",
+    "ollama": "^0.6.4",
+    "pg-boss": "^10.1.5"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "typescript": "^5.7.2"
+  }
+}

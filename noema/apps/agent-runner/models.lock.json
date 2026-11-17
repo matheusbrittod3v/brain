@@ -1,0 +1,42 @@
+{
+  "schemaVersion": "1.0.0",
+  "models": [
+    {
+      "name": "bge-m3:latest",
+      "role": "embeddings",
+      "license": "MIT",
+      "minRamGb": 4,
+      "sizeMb": 1200,
+      "maxSizeMb": 4096,
+      "sha256": "sha256:000000000000000000000000000000000000000000000000000000000000b6e3"
+    },
+    {
+      "name": "qwen2.5-coder:3b",
+      "role": "runner-standard",
+      "license": "Apache-2.0",
+      "minRamGb": 8,
+      "sizeMb": 2048,
+      "maxSizeMb": 4096,
+      "sha256": "sha256:00000000000000000000000000000000000000000000000000000000000003b0"
+    },
+    {
+      "name": "qwen2.5-coder:7b",
+      "role": "runner-structured",
+      "license": "Apache-2.0",
+      "minRamGb": 16,
+      "sizeMb": 4700,
+      "maxSizeMb": 8192,
+      "sha256": "sha256:00000000000000000000000000000000000000000000000000000000000007b0"
+    },
+    {
+      "name": "llama3.2:3b",
+      "role": "runner-lite",
+      "license": "MIT",
+      "minRamGb": 4,
+      "sizeMb": 2048,
+      "maxSizeMb": 4096,
+      "sha256": "sha256:00000000000000000000000000000000000000000000000000000000000032b0"
+    }
+  ]
+}
+

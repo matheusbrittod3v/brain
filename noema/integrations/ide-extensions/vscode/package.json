@@ -1,0 +1,15 @@
+{
+  "name": "noema-vscode",
+  "displayName": "Noema — Project Brain OS",
+  "version": "0.1.0",
+  "engines": { "vscode": "^1.90.0" },
+  "activationEvents": ["onStartupFinished"],
+  "main": "./src/extension.js",
+  "contributes": {
+    "commands": [
+      { "command": "noema.buildContextPack", "title": "Noema: Build Context Pack" },
+      { "command": "noema.createHandoff", "title": "Noema: Create Agent Handoff" }
+    ]
+  }
+}
+

@@ -1,0 +1,20 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://noema.dev/protocols/knowledge-events/schema.json",
+  "title": "KnowledgeEvent",
+  "type": "object",
+  "required": ["eventId", "eventType", "tenantId", "projectId", "timestamp"],
+  "properties": {
+    "eventId": { "type": "string" },
+    "eventType": {
+      "type": "string",
+      "enum": ["knowledge.updated", "rule.superseded", "conflict.detected", "handoff.created", "policy.revoked"]
+    },
+    "tenantId": { "type": "string" },
+    "projectId": { "type": "string" },
+    "targetId": { "type": "string" },
+    "timestamp": { "type": "string", "format": "date-time" },
+    "payload": { "type": "object" }
+  }
+}
+

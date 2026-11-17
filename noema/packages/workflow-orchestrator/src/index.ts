@@ -1,0 +1,122 @@
+import type { KnowledgeItem } from "@noema/core";
+
+export interface LivingDocDraft {
+  id: string;
+  targetItemId: string;
+  targetUri: string;
+  status: "draft";
+  title: string;
+  reason: string;
+  matchedFiles: string[];
+  proposedContent: string;
+  authorId?: string;
+  createdAt: string;
+}
+
+const LIVING_DOC_TYPES = new Set<KnowledgeItem["type"]>([
+  "architecture_decision",
+  "document",
+  "service",
+  "api_contract",
+  "event_contract"
+]);
+
+function matchesFileToItem(filePath: string, item: KnowledgeItem): boolean {
+  const normalizedFile = filePath.replace(/\\/g, "/").toLowerCase();
+  const segments = new Set(normalizedFile.split("/").filter(Boolean));
+
+  if (item.projectId && segments.has(item.projectId.toLowerCase())) {
+    return true;
+  }
+
+  if (item.tags.some((tag) => tag.length >= 3 && normalizedFile.includes(tag.toLowerCase()))) {
+    return true;
+  }
+
+  const metaModule = typeof item.metadata?.module === "string" ? item.metadata.module.toLowerCase() : undefined;
+  if (metaModule && normalizedFile.includes(metaModule)) {
+    return true;
+  }
+
+  const metaPaths = Array.isArray(item.metadata?.paths) ? item.metadata.paths : [];
+  if (metaPaths.some((p) => normalizedFile.includes(String(p).replace(/\\/g, "/").toLowerCase()))) {
+    return true;
+  }
+
+  if (item.sourceUri) {
+    const normalizedUri = item.sourceUri.replace(/\\/g, "/").toLowerCase();
+    const dir = normalizedUri.split("/").slice(0, -1).join("/");
+    if (dir && !dir.startsWith(".brain") && normalizedFile.startsWith(dir)) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+function collectMatchedFiles(changedFiles: readonly string[], item: KnowledgeItem): string[] {
+  return changedFiles.filter((file) => matchesFileToItem(file, item));
+}
+
+/**
+ * Sugere atualizações de documentação viva (ADRs e artefatos arquiteturais)
+ * correlacionando arquivos alterados com módulos, projetos, tags e paths rastreados.
+ */
+export function suggestLivingDocUpdates(changedFiles: readonly string[], items: readonly KnowledgeItem[]): string[] {
+  const suggestions: string[] = [];
+  for (const item of items) {
+    if (!LIVING_DOC_TYPES.has(item.type) || item.status === "deprecated" || item.status === "superseded") {
+      continue;
+    }
+    const matched = collectMatchedFiles(changedFiles, item);
+    for (const file of matched) {
+      suggestions.push(
+        `Revisar ${item.type} '${item.id}' (${item.sourceUri || item.title}) após alteração em '${file}'.`
+      );
+    }
+  }
+  return [...new Set(suggestions)];
+}
+
+/**
+ * Orquestra propostas de atualização de documentação viva em estado 'draft'
+ * para revisão humana ou aprovação via workflow.
+ */
+export function orchestrateLivingDocDrafts(opts: {
+  changedFiles: readonly string[];
+  items: readonly KnowledgeItem[];
+  diffSummary?: string;
+  authorId?: string;
+  now?: Date;
+}): LivingDocDraft[] {
+  const createdAt = (opts.now ?? new Date()).toISOString();
+  const drafts: LivingDocDraft[] = [];
+
+  for (const item of opts.items) {
+    if (!LIVING_DOC_TYPES.has(item.type) || item.status === "deprecated" || item.status === "superseded") {
+      continue;
+    }
+
+    const matchedFiles = collectMatchedFiles(opts.changedFiles, item);
+    if (matchedFiles.length === 0) continue;
+
+    const summaryNote = opts.diffSummary ? `\n\nResumo das alterações: ${opts.diffSummary}` : "";
+    drafts.push({
+      id: `DRAFT-${item.id}`,
+      targetItemId: item.id,
+      targetUri: item.sourceUri || `.brain/03-architecture/${item.id}.md`,
+      status: "draft",
+      title: `Atualização sugerida para ${item.id}: ${item.title}`,
+      reason: `Arquivos alterados (${matchedFiles.join(", ")}) impactam o escopo de '${item.id}'.`,
+      matchedFiles,
+      proposedContent:
+        `${item.content}\n\n## Atualização Pendente (Living Doc Draft)\n` +
+        `- Arquivos alterados: ${matchedFiles.join(", ")}` +
+        summaryNote,
+      ...(opts.authorId ? { authorId: opts.authorId } : {}),
+      createdAt
+    });
+  }
+
+  return drafts;
+}

@@ -1,0 +1,30 @@
+{
+  "name": "@noema/cli",
+  "version": "0.1.0",
+  "type": "module",
+  "bin": {
+    "noema": "./dist/src/index.js",
+    "brain": "./dist/src/index.js"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "node --test dist/test/*.test.js"
+  },
+  "dependencies": {
+    "@noema/agent-adapters": "*",
+    "@noema/agent-handoff": "*",
+    "@noema/agent-runner": "*",
+    "@noema/architecture-guardian": "*",
+    "@noema/auth": "*",
+    "@noema/business-rule-guardian": "*",
+    "@noema/core": "*",
+    "@noema/database-edge": "*",
+    "@noema/knowledge": "*",
+    "@noema/workspace-detection": "*"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "typescript": "^5.7.2"
+  }
+}

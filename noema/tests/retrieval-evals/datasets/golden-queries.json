@@ -1,0 +1,1111 @@
+[
+  {
+    "id": "EVAL-001",
+    "query": "cancelamento assinatura",
+    "projectId": "sub",
+    "expectedIds": [
+      "BR-SUB-014",
+      "ADR-021"
+    ],
+    "forbiddenIds": [
+      "SEC-999"
+    ]
+  },
+  {
+    "id": "EVAL-002",
+    "query": "subscription cancellation",
+    "projectId": "sub",
+    "expectedIds": [
+      "BR-SUB-014"
+    ],
+    "forbiddenIds": [
+      "SEC-999"
+    ]
+  },
+  {
+    "id": "EVAL-003",
+    "query": "reembolso proporcional",
+    "projectId": "sub",
+    "expectedIds": [
+      "BR-SUB-015"
+    ],
+    "forbiddenIds": [
+      "SEC-999"
+    ]
+  },
+  {
+    "id": "EVAL-004",
+    "query": "prorated refund calculation",
+    "projectId": "sub",
+    "expectedIds": [
+      "BR-SUB-015"
+    ],
+    "forbiddenIds": [
+      "SEC-999"
+    ]
+  },
+  {
+    "id": "EVAL-005",
+    "query": "maquina de estados",
+    "projectId": "sub",
+    "expectedIds": [
+      "ADR-021"
+    ],
+    "forbiddenIds": [
+      "SEC-999"
+    ]
+  },
+  {
+    "id": "EVAL-006",
+    "query": "chargeback disputa",
+    "projectId": "sub",
+    "expectedIds": [
+      "BR-FIN-002"
+    ],
+    "forbiddenIds": [
+      "SEC-999"
+    ]
+  },
+  {
+    "id": "EVAL-007",
+    "query": "rate limit api",
+    "projectId": "sub",
+    "expectedIds": [
+      "ADR-030"
+    ],
+    "forbiddenIds": [
+      "SEC-999"
+    ]
+  },
+  {
+    "id": "EVAL-008",
+    "query": "lgpd exclusao titular",
+    "projectId": "sub",
+    "expectedIds": [
+      "SEC-010"
+    ],
+    "forbiddenIds": [
+      "SEC-999"
+    ]
+  },
+  {
+    "id": "EVAL-009",
+    "query": "handoff branch efemera",
+    "projectId": "sub",
+    "expectedIds": [
+      "PROC-001"
+    ],
+    "forbiddenIds": [
+      "SEC-999"
+    ]
+  },
+  {
+    "id": "EVAL-010",
+    "query": "onboarding microservico",
+    "projectId": "sub",
+    "expectedIds": [
+      "SVC-PAY"
+    ],
+    "forbiddenIds": [
+      "SEC-999"
+    ]
+  },
+  {
+    "id": "EVAL-011",
+    "query": "cobertura testes e2e",
+    "projectId": "sub",
+    "expectedIds": [
+      "TST-001"
+    ],
+    "forbiddenIds": [
+      "SEC-999"
+    ]
+  },
+  {
+    "id": "EVAL-012",
+    "query": "deploy kubernetes rollback",
+    "projectId": "sub",
+    "expectedIds": [
+      "OPS-004"
+    ],
+    "forbiddenIds": [
+      "SEC-999"
+    ]
+  },
+  {
+    "id": "EVAL-013",
+    "query": "cancelamento assinatura regra",
+    "projectId": "sub",
+    "expectedIds": [
+      "BR-SUB-014",
+      "ADR-021"
+    ],
+    "forbiddenIds": [
+      "SEC-999"
+    ]
+  },
+  {
+    "id": "EVAL-014",
+    "query": "subscription cancellation regra",
+    "projectId": "sub",
+    "expectedIds": [
+      "BR-SUB-014"
+    ],
+    "forbiddenIds": [
+      "SEC-999"
+    ]
+  },
+  {
+    "id": "EVAL-015",
+    "query": "reembolso proporcional regra",
+    "projectId": "sub",
+    "expectedIds": [
+      "BR-SUB-015"
+    ],
+    "forbiddenIds": [
+      "SEC-999"
+    ]
+  },
+  {
+    "id": "EVAL-016",
+    "query": "prorated refund calculation regra",
+    "projectId": "sub",
+    "expectedIds": [
+      "BR-SUB-015"
+    ],
+    "forbiddenIds": [
+      "SEC-999"
+    ]
+  },
+  {
+    "id": "EVAL-017",
+    "query": "maquina de estados regra",
+    "projectId": "sub",
+    "expectedIds": [
+      "ADR-021"
+    ],
+    "forbiddenIds": [
+      "SEC-999"
+    ]
+  },
+  {
+    "id": "EVAL-018",
+    "query": "chargeback disputa regra",
+    "projectId": "sub",
+    "expectedIds": [
+      "BR-FIN-002"
+    ],
+    "forbiddenIds": [
+      "SEC-999"
+    ]
+  },
+  {
+    "id": "EVAL-019",
+    "query": "rate limit api regra",
+    "projectId": "sub",
+    "expectedIds": [
+      "ADR-030"
+    ],
+    "forbiddenIds": [
+      "SEC-999"
+    ]
+  },
+  {
+    "id": "EVAL-020",
+    "query": "lgpd exclusao titular regra",
+    "projectId": "sub",
+    "expectedIds": [
+      "SEC-010"
+    ],
+    "forbiddenIds": [
+      "SEC-999"
+    ]
+  },
+  {
+    "id": "EVAL-021",
+    "query": "handoff branch efemera regra",
+    "projectId": "sub",
+    "expectedIds": [
+      "PROC-001"
+    ],
+    "forbiddenIds": [
+      "SEC-999"
+    ]
+  },
+  {
+    "id": "EVAL-022",
+    "query": "onboarding microservico regra",
+    "projectId": "sub",
+    "expectedIds": [
+      "SVC-PAY"
+    ],
+    "forbiddenIds": [
+      "SEC-999"
+    ]
+  },
+  {
+    "id": "EVAL-023",
+    "query": "cobertura testes e2e regra",
+    "projectId": "sub",
+    "expectedIds": [
+      "TST-001"
+    ],
+    "forbiddenIds": [
+      "SEC-999"
+    ]
+  },
+  {
+    "id": "EVAL-024",
+    "query": "deploy kubernetes rollback regra",
+    "projectId": "sub",
+    "expectedIds": [
+      "OPS-004"
+    ],
+    "forbiddenIds": [
+      "SEC-999"
+    ]
+  },
+  {
+    "id": "EVAL-025",
+    "query": "cancelamento assinatura arquitetura",
+    "projectId": "sub",
+    "expectedIds": [
+      "BR-SUB-014",
+      "ADR-021"
+    ],
+    "forbiddenIds": [
+      "SEC-999"
+    ]
+  },
+  {
+    "id": "EVAL-026",
+    "query": "subscription cancellation arquitetura",
+    "projectId": "sub",
+    "expectedIds": [
+      "BR-SUB-014"
+    ],
+    "forbiddenIds": [
+      "SEC-999"
+    ]
+  },
+  {
+    "id": "EVAL-027",
+    "query": "reembolso proporcional arquitetura",
+    "projectId": "sub",
+    "expectedIds": [
+      "BR-SUB-015"
+    ],
+    "forbiddenIds": [
+      "SEC-999"
+    ]
+  },
+  {
+    "id": "EVAL-028",
+    "query": "prorated refund calculation arquitetura",
+    "projectId": "sub",
+    "expectedIds": [
+      "BR-SUB-015"
+    ],
+    "forbiddenIds": [
+      "SEC-999"
+    ]
+  },
+  {
+    "id": "EVAL-029",
+    "query": "maquina de estados arquitetura",
+    "projectId": "sub",
+    "expectedIds": [
+      "ADR-021"
+    ],
+    "forbiddenIds": [
+      "SEC-999"
+    ]
+  },
+  {
+    "id": "EVAL-030",
+    "query": "chargeback disputa arquitetura",
+    "projectId": "sub",
+    "expectedIds": [
+      "BR-FIN-002"
+    ],
+    "forbiddenIds": [
+      "SEC-999"
+    ]
+  },
+  {
+    "id": "EVAL-031",
+    "query": "rate limit api arquitetura",
+    "projectId": "sub",
+    "expectedIds": [
+      "ADR-030"
+    ],
+    "forbiddenIds": [
+      "SEC-999"
+    ]
+  },
+  {
+    "id": "EVAL-032",
+    "query": "lgpd exclusao titular arquitetura",
+    "projectId": "sub",
+    "expectedIds": [
+      "SEC-010"
+    ],
+    "forbiddenIds": [
+      "SEC-999"
+    ]
+  },
+  {
+    "id": "EVAL-033",
+    "query": "handoff branch efemera arquitetura",
+    "projectId": "sub",
+    "expectedIds": [
+      "PROC-001"
+    ],
+    "forbiddenIds": [
+      "SEC-999"
+    ]
+  },
+  {
+    "id": "EVAL-034",
+    "query": "onboarding microservico arquitetura",
+    "projectId": "sub",
+    "expectedIds": [
+      "SVC-PAY"
+    ],
+    "forbiddenIds": [
+      "SEC-999"
+    ]
+  },
+  {
+    "id": "EVAL-035",
+    "query": "cobertura testes e2e arquitetura",
+    "projectId": "sub",
+    "expectedIds": [
+      "TST-001"
+    ],
+    "forbiddenIds": [
+      "SEC-999"
+    ]
+  },
+  {
+    "id": "EVAL-036",
+    "query": "deploy kubernetes rollback arquitetura",
+    "projectId": "sub",
+    "expectedIds": [
+      "OPS-004"
+    ],
+    "forbiddenIds": [
+      "SEC-999"
+    ]
+  },
+  {
+    "id": "EVAL-037",
+    "query": "cancelamento assinatura codigo",
+    "projectId": "sub",
+    "expectedIds": [
+      "BR-SUB-014",
+      "ADR-021"
+    ],
+    "forbiddenIds": [
+      "SEC-999"
+    ]
+  },
+  {
+    "id": "EVAL-038",
+    "query": "subscription cancellation codigo",
+    "projectId": "sub",
+    "expectedIds": [
+      "BR-SUB-014"
+    ],
+    "forbiddenIds": [
+      "SEC-999"
+    ]
+  },
+  {
+    "id": "EVAL-039",
+    "query": "reembolso proporcional codigo",
+    "projectId": "sub",
+    "expectedIds": [
+      "BR-SUB-015"
+    ],
+    "forbiddenIds": [
+      "SEC-999"
+    ]
+  },
+  {
+    "id": "EVAL-040",
+    "query": "prorated refund calculation codigo",
+    "projectId": "sub",
+    "expectedIds": [
+      "BR-SUB-015"
+    ],
+    "forbiddenIds": [
+      "SEC-999"
+    ]
+  },
+  {
+    "id": "EVAL-041",
+    "query": "maquina de estados codigo",
+    "projectId": "sub",
+    "expectedIds": [
+      "ADR-021"
+    ],
+    "forbiddenIds": [
+      "SEC-999"
+    ]
+  },
+  {
+    "id": "EVAL-042",
+    "query": "chargeback disputa codigo",
+    "projectId": "sub",
+    "expectedIds": [
+      "BR-FIN-002"
+    ],
+    "forbiddenIds": [
+      "SEC-999"
+    ]
+  },
+  {
+    "id": "EVAL-043",
+    "query": "rate limit api codigo",
+    "projectId": "sub",
+    "expectedIds": [
+      "ADR-030"
+    ],
+    "forbiddenIds": [
+      "SEC-999"
+    ]
+  },
+  {
+    "id": "EVAL-044",
+    "query": "lgpd exclusao titular codigo",
+    "projectId": "sub",
+    "expectedIds": [
+      "SEC-010"
+    ],
+    "forbiddenIds": [
+      "SEC-999"
+    ]
+  },
+  {
+    "id": "EVAL-045",
+    "query": "handoff branch efemera codigo",
+    "projectId": "sub",
+    "expectedIds": [
+      "PROC-001"
+    ],
+    "forbiddenIds": [
+      "SEC-999"
+    ]
+  },
+  {
+    "id": "EVAL-046",
+    "query": "onboarding microservico codigo",
+    "projectId": "sub",
+    "expectedIds": [
+      "SVC-PAY"
+    ],
+    "forbiddenIds": [
+      "SEC-999"
+    ]
+  },
+  {
+    "id": "EVAL-047",
+    "query": "cobertura testes e2e codigo",
+    "projectId": "sub",
+    "expectedIds": [
+      "TST-001"
+    ],
+    "forbiddenIds": [
+      "SEC-999"
+    ]
+  },
+  {
+    "id": "EVAL-048",
+    "query": "deploy kubernetes rollback codigo",
+    "projectId": "sub",
+    "expectedIds": [
+      "OPS-004"
+    ],
+    "forbiddenIds": [
+      "SEC-999"
+    ]
+  },
+  {
+    "id": "EVAL-049",
+    "query": "cancelamento assinatura validacao",
+    "projectId": "sub",
+    "expectedIds": [
+      "BR-SUB-014",
+      "ADR-021"
+    ],
+    "forbiddenIds": [
+      "SEC-999"
+    ]
+  },
+  {
+    "id": "EVAL-050",
+    "query": "subscription cancellation validacao",
+    "projectId": "sub",
+    "expectedIds": [
+      "BR-SUB-014"
+    ],
+    "forbiddenIds": [
+      "SEC-999"
+    ]
+  },
+  {
+    "id": "EVAL-051",
+    "query": "reembolso proporcional validacao",
+    "projectId": "sub",
+    "expectedIds": [
+      "BR-SUB-015"
+    ],
+    "forbiddenIds": [
+      "SEC-999"
+    ]
+  },
+  {
+    "id": "EVAL-052",
+    "query": "prorated refund calculation validacao",
+    "projectId": "sub",
+    "expectedIds": [
+      "BR-SUB-015"
+    ],
+    "forbiddenIds": [
+      "SEC-999"
+    ]
+  },
+  {
+    "id": "EVAL-053",
+    "query": "maquina de estados validacao",
+    "projectId": "sub",
+    "expectedIds": [
+      "ADR-021"
+    ],
+    "forbiddenIds": [
+      "SEC-999"
+    ]
+  },
+  {
+    "id": "EVAL-054",
+    "query": "chargeback disputa validacao",
+    "projectId": "sub",
+    "expectedIds": [
+      "BR-FIN-002"
+    ],
+    "forbiddenIds": [
+      "SEC-999"
+    ]
+  },
+  {
+    "id": "EVAL-055",
+    "query": "rate limit api validacao",
+    "projectId": "sub",
+    "expectedIds": [
+      "ADR-030"
+    ],
+    "forbiddenIds": [
+      "SEC-999"
+    ]
+  },
+  {
+    "id": "EVAL-056",
+    "query": "lgpd exclusao titular validacao",
+    "projectId": "sub",
+    "expectedIds": [
+      "SEC-010"
+    ],
+    "forbiddenIds": [
+      "SEC-999"
+    ]
+  },
+  {
+    "id": "EVAL-057",
+    "query": "handoff branch efemera validacao",
+    "projectId": "sub",
+    "expectedIds": [
+      "PROC-001"
+    ],
+    "forbiddenIds": [
+      "SEC-999"
+    ]
+  },
+  {
+    "id": "EVAL-058",
+    "query": "onboarding microservico validacao",
+    "projectId": "sub",
+    "expectedIds": [
+      "SVC-PAY"
+    ],
+    "forbiddenIds": [
+      "SEC-999"
+    ]
+  },
+  {
+    "id": "EVAL-059",
+    "query": "cobertura testes e2e validacao",
+    "projectId": "sub",
+    "expectedIds": [
+      "TST-001"
+    ],
+    "forbiddenIds": [
+      "SEC-999"
+    ]
+  },
+  {
+    "id": "EVAL-060",
+    "query": "deploy kubernetes rollback validacao",
+    "projectId": "sub",
+    "expectedIds": [
+      "OPS-004"
+    ],
+    "forbiddenIds": [
+      "SEC-999"
+    ]
+  },
+  {
+    "id": "EVAL-061",
+    "query": "cancelamento assinatura policy",
+    "projectId": "sub",
+    "expectedIds": [
+      "BR-SUB-014",
+      "ADR-021"
+    ],
+    "forbiddenIds": [
+      "SEC-999"
+    ]
+  },
+  {
+    "id": "EVAL-062",
+    "query": "subscription cancellation policy",
+    "projectId": "sub",
+    "expectedIds": [
+      "BR-SUB-014"
+    ],
+    "forbiddenIds": [
+      "SEC-999"
+    ]
+  },
+  {
+    "id": "EVAL-063",
+    "query": "reembolso proporcional policy",
+    "projectId": "sub",
+    "expectedIds": [
+      "BR-SUB-015"
+    ],
+    "forbiddenIds": [
+      "SEC-999"
+    ]
+  },
+  {
+    "id": "EVAL-064",
+    "query": "prorated refund calculation policy",
+    "projectId": "sub",
+    "expectedIds": [
+      "BR-SUB-015"
+    ],
+    "forbiddenIds": [
+      "SEC-999"
+    ]
+  },
+  {
+    "id": "EVAL-065",
+    "query": "maquina de estados policy",
+    "projectId": "sub",
+    "expectedIds": [
+      "ADR-021"
+    ],
+    "forbiddenIds": [
+      "SEC-999"
+    ]
+  },
+  {
+    "id": "EVAL-066",
+    "query": "chargeback disputa policy",
+    "projectId": "sub",
+    "expectedIds": [
+      "BR-FIN-002"
+    ],
+    "forbiddenIds": [
+      "SEC-999"
+    ]
+  },
+  {
+    "id": "EVAL-067",
+    "query": "rate limit api policy",
+    "projectId": "sub",
+    "expectedIds": [
+      "ADR-030"
+    ],
+    "forbiddenIds": [
+      "SEC-999"
+    ]
+  },
+  {
+    "id": "EVAL-068",
+    "query": "lgpd exclusao titular policy",
+    "projectId": "sub",
+    "expectedIds": [
+      "SEC-010"
+    ],
+    "forbiddenIds": [
+      "SEC-999"
+    ]
+  },
+  {
+    "id": "EVAL-069",
+    "query": "handoff branch efemera policy",
+    "projectId": "sub",
+    "expectedIds": [
+      "PROC-001"
+    ],
+    "forbiddenIds": [
+      "SEC-999"
+    ]
+  },
+  {
+    "id": "EVAL-070",
+    "query": "onboarding microservico policy",
+    "projectId": "sub",
+    "expectedIds": [
+      "SVC-PAY"
+    ],
+    "forbiddenIds": [
+      "SEC-999"
+    ]
+  },
+  {
+    "id": "EVAL-071",
+    "query": "cobertura testes e2e policy",
+    "projectId": "sub",
+    "expectedIds": [
+      "TST-001"
+    ],
+    "forbiddenIds": [
+      "SEC-999"
+    ]
+  },
+  {
+    "id": "EVAL-072",
+    "query": "deploy kubernetes rollback policy",
+    "projectId": "sub",
+    "expectedIds": [
+      "OPS-004"
+    ],
+    "forbiddenIds": [
+      "SEC-999"
+    ]
+  },
+  {
+    "id": "EVAL-073",
+    "query": "cancelamento assinatura impact",
+    "projectId": "sub",
+    "expectedIds": [
+      "BR-SUB-014",
+      "ADR-021"
+    ],
+    "forbiddenIds": [
+      "SEC-999"
+    ]
+  },
+  {
+    "id": "EVAL-074",
+    "query": "subscription cancellation impact",
+    "projectId": "sub",
+    "expectedIds": [
+      "BR-SUB-014"
+    ],
+    "forbiddenIds": [
+      "SEC-999"
+    ]
+  },
+  {
+    "id": "EVAL-075",
+    "query": "reembolso proporcional impact",
+    "projectId": "sub",
+    "expectedIds": [
+      "BR-SUB-015"
+    ],
+    "forbiddenIds": [
+      "SEC-999"
+    ]
+  },
+  {
+    "id": "EVAL-076",
+    "query": "prorated refund calculation impact",
+    "projectId": "sub",
+    "expectedIds": [
+      "BR-SUB-015"
+    ],
+    "forbiddenIds": [
+      "SEC-999"
+    ]
+  },
+  {
+    "id": "EVAL-077",
+    "query": "maquina de estados impact",
+    "projectId": "sub",
+    "expectedIds": [
+      "ADR-021"
+    ],
+    "forbiddenIds": [
+      "SEC-999"
+    ]
+  },
+  {
+    "id": "EVAL-078",
+    "query": "chargeback disputa impact",
+    "projectId": "sub",
+    "expectedIds": [
+      "BR-FIN-002"
+    ],
+    "forbiddenIds": [
+      "SEC-999"
+    ]
+  },
+  {
+    "id": "EVAL-079",
+    "query": "rate limit api impact",
+    "projectId": "sub",
+    "expectedIds": [
+      "ADR-030"
+    ],
+    "forbiddenIds": [
+      "SEC-999"
+    ]
+  },
+  {
+    "id": "EVAL-080",
+    "query": "lgpd exclusao titular impact",
+    "projectId": "sub",
+    "expectedIds": [
+      "SEC-010"
+    ],
+    "forbiddenIds": [
+      "SEC-999"
+    ]
+  },
+  {
+    "id": "EVAL-081",
+    "query": "handoff branch efemera impact",
+    "projectId": "sub",
+    "expectedIds": [
+      "PROC-001"
+    ],
+    "forbiddenIds": [
+      "SEC-999"
+    ]
+  },
+  {
+    "id": "EVAL-082",
+    "query": "onboarding microservico impact",
+    "projectId": "sub",
+    "expectedIds": [
+      "SVC-PAY"
+    ],
+    "forbiddenIds": [
+      "SEC-999"
+    ]
+  },
+  {
+    "id": "EVAL-083",
+    "query": "cobertura testes e2e impact",
+    "projectId": "sub",
+    "expectedIds": [
+      "TST-001"
+    ],
+    "forbiddenIds": [
+      "SEC-999"
+    ]
+  },
+  {
+    "id": "EVAL-084",
+    "query": "deploy kubernetes rollback impact",
+    "projectId": "sub",
+    "expectedIds": [
+      "OPS-004"
+    ],
+    "forbiddenIds": [
+      "SEC-999"
+    ]
+  },
+  {
+    "id": "EVAL-085",
+    "query": "cancelamento assinatura review",
+    "projectId": "sub",
+    "expectedIds": [
+      "BR-SUB-014",
+      "ADR-021"
+    ],
+    "forbiddenIds": [
+      "SEC-999"
+    ]
+  },
+  {
+    "id": "EVAL-086",
+    "query": "subscription cancellation review",
+    "projectId": "sub",
+    "expectedIds": [
+      "BR-SUB-014"
+    ],
+    "forbiddenIds": [
+      "SEC-999"
+    ]
+  },
+  {
+    "id": "EVAL-087",
+    "query": "reembolso proporcional review",
+    "projectId": "sub",
+    "expectedIds": [
+      "BR-SUB-015"
+    ],
+    "forbiddenIds": [
+      "SEC-999"
+    ]
+  },
+  {
+    "id": "EVAL-088",
+    "query": "prorated refund calculation review",
+    "projectId": "sub",
+    "expectedIds": [
+      "BR-SUB-015"
+    ],
+    "forbiddenIds": [
+      "SEC-999"
+    ]
+  },
+  {
+    "id": "EVAL-089",
+    "query": "maquina de estados review",
+    "projectId": "sub",
+    "expectedIds": [
+      "ADR-021"
+    ],
+    "forbiddenIds": [
+      "SEC-999"
+    ]
+  },
+  {
+    "id": "EVAL-090",
+    "query": "chargeback disputa review",
+    "projectId": "sub",
+    "expectedIds": [
+      "BR-FIN-002"
+    ],
+    "forbiddenIds": [
+      "SEC-999"
+    ]
+  },
+  {
+    "id": "EVAL-091",
+    "query": "rate limit api review",
+    "projectId": "sub",
+    "expectedIds": [
+      "ADR-030"
+    ],
+    "forbiddenIds": [
+      "SEC-999"
+    ]
+  },
+  {
+    "id": "EVAL-092",
+    "query": "lgpd exclusao titular review",
+    "projectId": "sub",
+    "expectedIds": [
+      "SEC-010"
+    ],
+    "forbiddenIds": [
+      "SEC-999"
+    ]
+  },
+  {
+    "id": "EVAL-093",
+    "query": "handoff branch efemera review",
+    "projectId": "sub",
+    "expectedIds": [
+      "PROC-001"
+    ],
+    "forbiddenIds": [
+      "SEC-999"
+    ]
+  },
+  {
+    "id": "EVAL-094",
+    "query": "onboarding microservico review",
+    "projectId": "sub",
+    "expectedIds": [
+      "SVC-PAY"
+    ],
+    "forbiddenIds": [
+      "SEC-999"
+    ]
+  },
+  {
+    "id": "EVAL-095",
+    "query": "cobertura testes e2e review",
+    "projectId": "sub",
+    "expectedIds": [
+      "TST-001"
+    ],
+    "forbiddenIds": [
+      "SEC-999"
+    ]
+  },
+  {
+    "id": "EVAL-096",
+    "query": "deploy kubernetes rollback review",
+    "projectId": "sub",
+    "expectedIds": [
+      "OPS-004"
+    ],
+    "forbiddenIds": [
+      "SEC-999"
+    ]
+  },
+  {
+    "id": "EVAL-097",
+    "query": "cancelamento assinatura status",
+    "projectId": "sub",
+    "expectedIds": [
+      "BR-SUB-014",
+      "ADR-021"
+    ],
+    "forbiddenIds": [
+      "SEC-999"
+    ]
+  },
+  {
+    "id": "EVAL-098",
+    "query": "subscription cancellation status",
+    "projectId": "sub",
+    "expectedIds": [
+      "BR-SUB-014"
+    ],
+    "forbiddenIds": [
+      "SEC-999"
+    ]
+  },
+  {
+    "id": "EVAL-099",
+    "query": "reembolso proporcional status",
+    "projectId": "sub",
+    "expectedIds": [
+      "BR-SUB-015"
+    ],
+    "forbiddenIds": [
+      "SEC-999"
+    ]
+  },
+  {
+    "id": "EVAL-100",
+    "query": "prorated refund calculation status",
+    "projectId": "sub",
+    "expectedIds": [
+      "BR-SUB-015"
+    ],
+    "forbiddenIds": [
+      "SEC-999"
+    ]
+  }
+]

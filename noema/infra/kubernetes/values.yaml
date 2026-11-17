@@ -1,0 +1,54 @@
+replicaCount: 2
+
+api:
+  replicaCount: 2
+  image:
+    repository: ghcr.io/noema/api
+    tag: "0.1.0"
+    pullPolicy: IfNotPresent
+  port: 3333
+  resources:
+    requests:
+      cpu: 250m
+      memory: 256Mi
+    limits:
+      cpu: "1"
+      memory: 1Gi
+
+worker:
+  replicaCount: 2
+  image:
+    repository: ghcr.io/noema/worker
+    tag: "0.1.0"
+    pullPolicy: IfNotPresent
+  resources:
+    requests:
+      cpu: 250m
+      memory: 256Mi
+    limits:
+      cpu: "1"
+      memory: 1Gi
+
+service:
+  type: ClusterIP
+  port: 80
+  targetPort: 3333
+
+postgres:
+  image: pgvector/pgvector:pg16
+  pgBossEnabled: true
+  host: noema-postgres
+  port: 5432
+  database: noema
+
+opa:
+  enabled: true
+  image: openpolicyagent/opa:1.1.0
+
+keycloak:
+  enabled: true
+  image: quay.io/keycloak/keycloak:26.0
+
+networkPolicy:
+  enabled: true
+  ingressNamespace: ingress-nginx
