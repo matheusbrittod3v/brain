@@ -41,10 +41,12 @@
     "@noema/workspace-detection": "*",
     "@sinclair/typebox": "^0.34.0",
     "fastify": "^5.2.0",
-    "pg-boss": "^10.1.5"
+    "pg-boss": "^10.1.5",
+    "ws": "^8.23.0"
   },
   "devDependencies": {
     "@types/node": "^22.10.0",
+    "@types/ws": "^8.18.2",
     "typescript": "^5.7.2"
   }
 }

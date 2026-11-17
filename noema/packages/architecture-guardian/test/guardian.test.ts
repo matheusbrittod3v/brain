@@ -20,7 +20,7 @@ test("blocks inverted layer imports in enforced mode but allows in advisory", ()
 
 test("LAYER_ORDER covers all L0..L4 packages and resolves apps/* to L5", () => {
   assert.equal(LAYER_ORDER.core, 0);
-  assert.equal(LAYER_ORDER["database-edge"], 1);
+  assert.equal(LAYER_ORDER.database, 1);
   assert.equal(LAYER_ORDER["connector-framework"], 2);
   assert.equal(LAYER_ORDER["task-engine"], 3);
   assert.equal(LAYER_ORDER["knowledge-health"], 4);

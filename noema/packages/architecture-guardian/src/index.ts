@@ -34,7 +34,6 @@ export const LAYER_ORDER: Record<string, number> = {
   database: 1,
   observability: 1,
   "audit-engine": 1,
-  "database-edge": 1,
 
   // L2: Ingestão, Grafo & Inteligência Base
   knowledge: 2,

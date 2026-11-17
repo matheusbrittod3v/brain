@@ -46,12 +46,20 @@ allow if {
   role in write_roles
 }
 
+can_act_as_human_or_linked_agent if {
+  input.subject.actorType == "human"
+}
+
+can_act_as_human_or_linked_agent if {
+  input.subject.actorType == "agent"
+  input.subject.inheritUserPermissions == true
+}
+
 allow if {
   base_access_valid
   input.resource.action == "approve"
   is_critical_domain
-  input.subject.actorType != "agent"
-  input.subject.actorType == "human"
+  can_act_as_human_or_linked_agent
   some role in input.subject.roles
   role in critical_approve_roles
 }
@@ -60,7 +68,7 @@ allow if {
   base_access_valid
   input.resource.action == "approve"
   not is_critical_domain
-  input.subject.actorType == "human"
+  can_act_as_human_or_linked_agent
   some role in input.subject.roles
   role in standard_approve_roles
 }

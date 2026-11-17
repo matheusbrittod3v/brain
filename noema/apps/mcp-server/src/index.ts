@@ -16,6 +16,8 @@ import { CrossServiceContractRegistry, PostgresCrossServiceRegistry } from "@noe
 import { createDatabaseClient, PgOperationalRepository } from "@noema/database";
 import { findChangedWorkspaceSources, hashWorkspaceSources } from "@noema/workspace-detection";
 import { parseKnowledgeFile } from "@noema/knowledge";
+import { registerExtendedMcpTools } from "./extended-tools.js";
+import { describeMcpTool, MCP_CONNECTION_PROFILES, type McpConnectionProfileName } from "./connection-profile.js";
 import { PostgresMemoryManager } from "@noema/memory";
 import { PostgresKnowledgeRepository, type KnowledgeItemVersion, type KnowledgeRepository } from "@noema/knowledge";
 import { KnowledgeGraphStore, PostgresGraphStore, type GraphStoreContract } from "@noema/graph";
@@ -89,6 +91,7 @@ export interface NoemaRuntime {
   };
   workspaceRoot?: string;
   workspaceRoots?: Readonly<Record<string, string>>;
+  registeredProjects?: Map<string, { projectId: string; tenantId: string; name: string; description?: string; knowledgeRoot: string; createdAt: string }>;
 }
 
 export function createNoemaRuntime(
@@ -109,8 +112,9 @@ export function createNoemaRuntime(
   const runner = new BrainRunnerQueue();
   const approvals = new ApprovalQueue();
   const crossServiceRegistry = new CrossServiceContractRegistry();
+  const registeredProjects = new Map<string, { projectId: string; tenantId: string; name: string; description?: string; knowledgeRoot: string; createdAt: string }>();
   return {
-    graph, retrieval, contextEngine, handoffs, runner, audit, approvals, crossServiceRegistry,
+    graph, retrieval, contextEngine, handoffs, runner, audit, approvals, crossServiceRegistry, registeredProjects,
     workspaceRoot: options.workspaceRoot ?? process.env.NOEMA_WORKSPACE_ROOT ?? process.cwd(),
     workspaceRoots: options.workspaceRoots ?? configuredProjectWorkspaceRoots(),
     scheduleRunnerTask: options.scheduleRunnerTask
@@ -241,24 +245,101 @@ function materializeKnowledgeItemVersion(current: KnowledgeItem, version: Knowle
   };
 }
 
-export function createNoemaMcpServer(runtime: NoemaRuntime, ctx: AuthContext, auditPolicyId: string): McpServer {
+export function createNoemaMcpServer(
+  runtime: NoemaRuntime,
+  ctx: AuthContext,
+  auditPolicyId: string,
+  profile: McpConnectionProfileName = "service"
+): McpServer {
   if (!auditPolicyId?.trim() || /[* ,\0\r\n]/.test(auditPolicyId)) {
     throw new Error("auditPolicyId must be an explicit policy identifier");
   }
   assertPolicyAccess(ctx, auditPolicyId);
-  const server = new McpServer({ name: "noema-brain", version: "0.1.0" });
+  const connection = MCP_CONNECTION_PROFILES[profile];
+  const server = new McpServer(
+    { name: connection.serverName, version: "0.1.0" },
+    { instructions: connection.instructions }
+  );
 
   server.tool(
     "brain_bootstrap_project",
-    "Identifica projeto/branch e retorna visão geral, regras iniciais e alertas.",
-    { projectId: z.string(), workspacePath: z.string().optional(), branch: z.string().optional() },
-    async ({ projectId, workspacePath, branch }) => {
+    describeMcpTool(profile, "Identifica ou cadastra um projeto/branch e retorna visão geral, regras iniciais e alertas."),
+    {
+      projectId: z.string().min(1),
+      workspacePath: z.string().optional(),
+      branch: z.string().optional(),
+      createIfMissing: z.boolean().optional(),
+      name: z.string().optional(),
+      description: z.string().optional(),
+      knowledgeRoot: z.string().optional()
+    },
+    async ({ projectId, workspacePath, branch, createIfMissing, name, description, knowledgeRoot }) => {
       assertProjectAccess(ctx, projectId);
+      let created = false;
+      let project: { projectId: string; tenantId: string; name: string; description?: string; knowledgeRoot: string; createdAt: string } | undefined;
+
+      if (createIfMissing || name) {
+        const resolvedName = name?.trim() || projectId;
+        const resolvedRoot = knowledgeRoot?.trim() || ".brain/";
+        if (runtime.opRepo) {
+          const reg = await runtime.opRepo.registerProject(ctx, {
+            projectId,
+            name: resolvedName,
+            description: description?.trim() || undefined,
+            knowledgeRoot: resolvedRoot
+          });
+          created = reg.created;
+          project = reg.project;
+        } else {
+          const store = runtime.registeredProjects ?? new Map();
+          const key = `${ctx.tenantId}:${projectId}`;
+          const existing = store.get(key);
+          if (existing) {
+            project = {
+              ...existing,
+              name: resolvedName,
+              description: description?.trim() || existing.description,
+              knowledgeRoot: resolvedRoot
+            };
+            store.set(key, project);
+          } else {
+            created = true;
+            project = {
+              projectId,
+              tenantId: ctx.tenantId,
+              name: resolvedName,
+              description: description?.trim() || undefined,
+              knowledgeRoot: resolvedRoot,
+              createdAt: new Date().toISOString()
+            };
+            store.set(key, project);
+          }
+        }
+        await runtime.audit.record({
+          tenantId: ctx.tenantId,
+          projectId,
+          accessPolicyId: auditPolicyId,
+          actorId: ctx.actorId,
+          actorType: ctx.actorType,
+          action: created ? "create" : "update",
+          targetType: "project",
+          targetId: projectId,
+          metadata: { name: project?.name ?? resolvedName, knowledgeRoot: project?.knowledgeRoot ?? resolvedRoot }
+        });
+      } else if (runtime.opRepo) {
+        const list = await runtime.opRepo.listProjects(ctx);
+        project = list.find((p) => p.projectId === projectId);
+      } else if (runtime.registeredProjects) {
+        project = runtime.registeredProjects.get(`${ctx.tenantId}:${projectId}`);
+      }
+
       const overview = await runtime.retrieval.search(ctx, { projectId, query: "vision overview", domains: [1, 3, 4], limit: 5 });
       return okJson({
         projectId,
         workspacePath: workspacePath ?? ".",
         branch: branch ?? "main",
+        created,
+        ...(project ? { project } : {}),
         overviewItems: overview.map((h) => ({ id: h.item.id, title: h.item.title, status: h.item.status }))
       });
     }
@@ -266,7 +347,7 @@ export function createNoemaMcpServer(runtime: NoemaRuntime, ctx: AuthContext, au
 
   server.tool(
     "brain_context_build",
-    "Monta um Context Pack otimizado em tokens (regras, ADRs, código, testes, citações).",
+    describeMcpTool(profile, "Monta um Context Pack otimizado em tokens (regras, ADRs, código, testes, citações)."),
     {
       projectId: z.string(),
       task: z.string(),
@@ -310,7 +391,7 @@ export function createNoemaMcpServer(runtime: NoemaRuntime, ctx: AuthContext, au
 
   server.tool(
     "brain_search",
-    "Busca híbrida direta (lexical + grafo + filtros de domínio) com paginação.",
+    describeMcpTool(profile, "Busca híbrida direta (lexical + grafo + filtros de domínio) com paginação."),
     {
       projectId: z.string(),
       query: z.string(),
@@ -329,7 +410,7 @@ export function createNoemaMcpServer(runtime: NoemaRuntime, ctx: AuthContext, au
 
   server.tool(
     "brain_knowledge_get",
-    "Obtém um KnowledgeItem específico por ID e suas relações seguras no grafo.",
+    describeMcpTool(profile, "Obtém um KnowledgeItem específico por ID e suas relações seguras no grafo."),
     {
       projectId: z.string(),
       id: z.string(),
@@ -366,7 +447,7 @@ export function createNoemaMcpServer(runtime: NoemaRuntime, ctx: AuthContext, au
 
   server.tool(
     "brain_get_active_rules",
-    "Lista regras de negócio e padrões vigentes do projeto.",
+    describeMcpTool(profile, "Lista regras de negócio e padrões vigentes do projeto."),
     {
       projectId: z.string(),
       query: z.string().optional(),
@@ -393,7 +474,7 @@ export function createNoemaMcpServer(runtime: NoemaRuntime, ctx: AuthContext, au
 
   server.tool(
     "brain_find_related_code",
-    "Localiza símbolos, arquivos e testes relacionados a uma regra ou requisito.",
+    describeMcpTool(profile, "Localiza símbolos, arquivos e testes relacionados a uma regra ou requisito."),
     { projectId: z.string(), targetId: z.string(), limit: z.number().optional(), cursor: z.string().optional() },
     async ({ projectId, targetId, limit, cursor }) => {
       assertProjectAccess(ctx, projectId);
@@ -413,7 +494,7 @@ export function createNoemaMcpServer(runtime: NoemaRuntime, ctx: AuthContext, au
 
   server.tool(
     "brain_analyze_change_impact",
-    "Calcula impactos confirmados vs. hipóteses antes de alterar código ou regras.",
+    describeMcpTool(profile, "Calcula impactos confirmados vs. hipóteses antes de alterar código ou regras."),
     { projectId: z.string(), targetIds: z.array(z.string()).min(1), limit: z.number().optional() },
     async ({ projectId, targetIds, limit }) => {
       assertProjectAccess(ctx, projectId);
@@ -435,7 +516,7 @@ export function createNoemaMcpServer(runtime: NoemaRuntime, ctx: AuthContext, au
 
   server.tool(
     "brain_validate_implementation",
-    "Valida um conjunto de arquivos/diff contra regras e decisões conhecidas.",
+    describeMcpTool(profile, "Valida um conjunto de arquivos/diff contra regras e decisões conhecidas."),
     {
       projectId: z.string(),
       paths: z.array(z.string()).optional(),
@@ -498,7 +579,7 @@ export function createNoemaMcpServer(runtime: NoemaRuntime, ctx: AuthContext, au
 
   server.tool(
     "brain_create_handoff",
-    "Salva checkpoint validado (branch, commit, arquivos, testes, próximos passos) para outra IDE.",
+    describeMcpTool(profile, "Salva checkpoint validado (branch, commit, arquivos, testes, próximos passos) para outra IDE."),
     {
       projectId: z.string(),
       taskId: z.string(),
@@ -539,7 +620,7 @@ export function createNoemaMcpServer(runtime: NoemaRuntime, ctx: AuthContext, au
 
   server.tool(
     "brain_resume_handoff",
-    "Retoma tarefa iniciada em outra IDE verificando divergências de branch/commit e leases.",
+    describeMcpTool(profile, "Retoma tarefa iniciada em outra IDE verificando divergências de branch/commit e leases."),
     { projectId: z.string(), handoffId: z.string().optional(), taskId: z.string().optional(), currentBranch: z.string().optional(), currentCommitSha: z.string().optional() },
     async (input) => {
       assertProjectAccess(ctx, input.projectId);
@@ -579,7 +660,7 @@ export function createNoemaMcpServer(runtime: NoemaRuntime, ctx: AuthContext, au
 
   server.tool(
     "brain_record_learning",
-    "Registra memória episódica e feedback de utilidade (Context Hit Rate).",
+    describeMcpTool(profile, "Registra memória episódica e feedback de utilidade (Context Hit Rate)."),
     {
       projectId: z.string(),
       summary: z.string(),
@@ -653,7 +734,7 @@ export function createNoemaMcpServer(runtime: NoemaRuntime, ctx: AuthContext, au
 
   server.tool(
     "brain_change_propose",
-    "Submete proposta formal em status draft para revisão humana.",
+    describeMcpTool(profile, "Submete proposta formal em status draft para revisão humana."),
     {
       projectId: z.string(),
       title: z.string().min(1),
@@ -690,7 +771,7 @@ export function createNoemaMcpServer(runtime: NoemaRuntime, ctx: AuthContext, au
 
   server.tool(
     "brain_change_decide",
-    "Registra decisão humana autorizada sobre uma proposta. Agentes não podem aprovar propostas.",
+    describeMcpTool(profile, "Registra decisão autorizada sobre uma proposta (humanos autorizados ou agentes vinculados a usuário com herança de permissões)."),
     {
       projectId: z.string(),
       proposalId: z.string().min(1),
@@ -702,7 +783,10 @@ export function createNoemaMcpServer(runtime: NoemaRuntime, ctx: AuthContext, au
       if (!runtime.approvals) {
         throw new BrainError("BRAIN_ERR_STORAGE_UNAVAILABLE", "Fila de aprovação indisponível neste runtime MCP.", 503);
       }
-      const decided = await runtime.approvals.decide(ctx, projectId, proposalId, decision, note);
+      const effectiveCtx = runtime.opRepo
+        ? await runtime.opRepo.resolveEffectiveAuthContext(ctx, projectId)
+        : ctx;
+      const decided = await runtime.approvals.decide(effectiveCtx, projectId, proposalId, decision, note);
       if (decision === "approve") {
         if (runtime.knowledge?.upsertItem) {
           await runtime.knowledge.upsertItem(ctx, decided.item);
@@ -734,7 +818,7 @@ export function createNoemaMcpServer(runtime: NoemaRuntime, ctx: AuthContext, au
 
   server.tool(
     "brain_delegate_task",
-    "Enfileira uma tarefa em background para o Brain Runner ou agenda execuções recorrentes via cron UTC.",
+    describeMcpTool(profile, "Enfileira uma tarefa em background para o Brain Runner ou agenda execuções recorrentes via cron UTC."),
     {
       projectId: z.string(),
       instruction: z.string().min(1),
@@ -771,6 +855,8 @@ export function createNoemaMcpServer(runtime: NoemaRuntime, ctx: AuthContext, au
     }
   );
 
+  registerExtendedMcpTools(server, runtime, ctx, auditPolicyId, profile);
+
   return server;
 }
 
@@ -794,7 +880,7 @@ if (process.argv[1]?.endsWith("index.js")) {
   };
   const appPostgresClient = createAppPostgresClient();
   const runtime = createSqlNoemaRuntime(appPostgresClient, rlsContext);
-  const server = createNoemaMcpServer(runtime, localCtx, auditPolicyId);
+  const server = createNoemaMcpServer(runtime, localCtx, auditPolicyId, "local");
   const transport = new StdioServerTransport();
   server.connect(transport).catch((err) => {
     appPostgresClient.close().catch(() => {});

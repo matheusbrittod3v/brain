@@ -10,12 +10,10 @@ import {
 } from "@noema/architecture-guardian";
 import type { AuthContext } from "@noema/auth";
 import { evaluateBusinessRuleCompliance, type GuardianMode } from "@noema/business-rule-guardian";
-import { scanForSecrets } from "@noema/ingestion";
 import { parseKnowledgeFile } from "@noema/knowledge";
 import { runProjectAutodiscovery } from "@noema/project-discovery";
 import { runExternalScipIndexer } from "@noema/code-intelligence";
 import type { KnowledgeItem } from "@noema/core";
-import type { EdgeDatabase, EdgeRunnerTask } from "./edge-db.js";
 
 export async function runInit(rootDir: string, projectId?: string) {
   const resolvedId = projectId ?? basename(rootDir).toLowerCase().replace(/[^a-z0-9-]/g, "-");
@@ -248,155 +246,6 @@ export async function runRunnerUp(
     pulled: !installed && Boolean(opts.pull),
     ...selected
   };
-}
-
-export function runLocalTaskEnqueue(db: EdgeDatabase, projectId: string, instruction: string): EdgeRunnerTask {
-  if (!instruction.trim()) throw new Error("A tarefa local precisa de uma instrução.");
-  return db.enqueueRunnerTask(projectId, instruction.trim());
-}
-
-export function runLocalTaskList(db: EdgeDatabase, projectId?: string): EdgeRunnerTask[] {
-  return db.listRunnerTasks(projectId);
-}
-
-export function enforceOfflineLeaseIfStored(db: EdgeDatabase, now = new Date()): void {
-  if (db.hasOfflineLease()) {
-    db.assertOfflineLeaseValid(now);
-  }
-}
-
-export async function runSyncPull(
-  opts: { hubUrl: string; apiKey: string; projectId: string; db: EdgeDatabase },
-  fetchFn: typeof fetch = fetch
-) {
-  enforceOfflineLeaseIfStored(opts.db);
-  const cursor = opts.db.getSyncCursor();
-  const knownPolicies = opts.db.listKnownPolicies();
-  type SyncPage = {
-    syncMode?: "snapshot" | "delta";
-    syncSeq: number;
-    policyEpoch?: number;
-    revokedPolicies: string[];
-    tombstones?: string[];
-    snapshotSeq?: number;
-    snapshotCursor?: string | null;
-    snapshotDone?: boolean;
-    snapshotRestarted?: boolean;
-    items: Array<{ id: string; projectId: string; title: string; content: string; accessPolicyId: string; contentHash: string }>;
-  };
-  const fetchPage = async (snapshot?: { cursor: string | null; seq: number; epoch: number }): Promise<SyncPage> => {
-    const res = await fetchFn(`${opts.hubUrl}/v1/sync/pull`, {
-      method: "POST",
-      headers: {
-        "content-type": "application/json",
-        authorization: `Bearer ${opts.apiKey}`
-      },
-      body: JSON.stringify({
-        projectId: opts.projectId,
-        sinceSeq: cursor.syncSeq,
-        policyEpoch: snapshot?.epoch ?? cursor.policyEpoch,
-        knownPolicies,
-        ...(snapshot ? { snapshotSeq: snapshot.seq, snapshotCursor: snapshot.cursor } : {})
-      })
-    });
-    if (!res.ok) throw new Error(`Sync pull falhou: HTTP ${res.status}`);
-    return (await res.json()) as SyncPage;
-  };
-
-  let data = await fetchPage();
-  let syncMode = data.syncMode ?? "snapshot";
-  let upserted = 0;
-  const revokedPolicies = new Set(data.revokedPolicies ?? []);
-  const tombstones = new Set(data.tombstones ?? []);
-  let snapshotOpen = syncMode === "snapshot";
-  try {
-    if (snapshotOpen) {
-      opts.db.beginAtomicSnapshotRebuild();
-      opts.db.appendAtomicSnapshotPage(data.items ?? []);
-      upserted += data.items?.length ?? 0;
-    }
-    while (syncMode === "snapshot" && data.snapshotDone === false) {
-      if (!data.snapshotCursor || data.snapshotSeq === undefined) {
-        throw new Error("Snapshot de sync retornou página incompleta sem cursor de continuação.");
-      }
-      data = await fetchPage({
-        cursor: data.snapshotCursor,
-        seq: data.snapshotSeq,
-        epoch: data.policyEpoch ?? cursor.policyEpoch
-      });
-      if (data.snapshotRestarted) {
-        opts.db.beginAtomicSnapshotRebuild();
-        upserted = 0;
-        revokedPolicies.clear();
-        tombstones.clear();
-      }
-      syncMode = data.syncMode ?? "snapshot";
-      if (syncMode !== "snapshot") throw new Error("O Hub mudou o modo de sync antes do snapshot terminar.");
-      opts.db.appendAtomicSnapshotPage(data.items ?? []);
-      upserted += data.items?.length ?? 0;
-      for (const policy of data.revokedPolicies ?? []) revokedPolicies.add(policy);
-      for (const id of data.tombstones ?? []) tombstones.add(id);
-    }
-
-    if (snapshotOpen) {
-      opts.db.commitAtomicSnapshotRebuild(data.snapshotSeq ?? data.syncSeq, data.policyEpoch ?? cursor.policyEpoch);
-      snapshotOpen = false;
-    }
-  } catch (error) {
-    if (snapshotOpen) opts.db.abortAtomicSnapshotRebuild();
-    throw error;
-  }
-
-  const incomingEpoch = data.policyEpoch ?? cursor.policyEpoch;
-  const revokedCount = opts.db.revokePolicies([...revokedPolicies]);
-  let tombstonesRemoved = 0;
-  if (syncMode === "delta") {
-    tombstonesRemoved = opts.db.applyTombstones([...tombstones]);
-    for (const item of data.items ?? []) {
-      opts.db.upsertItem(item);
-    }
-    opts.db.setSyncCursor(data.syncSeq, incomingEpoch);
-    upserted = data.items?.length ?? 0;
-  }
-  return {
-    syncMode,
-    syncSeq: data.syncSeq,
-    policyEpoch: incomingEpoch,
-    upserted,
-    revokedCount,
-    tombstonesRemoved
-  };
-}
-
-export async function runSyncPush(
-  opts: { hubUrl: string; apiKey: string; projectId: string; db: EdgeDatabase },
-  fetchFn: typeof fetch = fetch
-) {
-  enforceOfflineLeaseIfStored(opts.db);
-  const drafts = opts.db.listStaged();
-  if (drafts.length === 0) return { pushed: 0 };
-  for (const draft of drafts) {
-    const textToScan = `${draft.title}\n${draft.content}`;
-    const scan = scanForSecrets(textToScan, { useGitleaks: process.env.NOEMA_DISABLE_GITLEAKS !== "1" });
-    if (!scan.clean) {
-      throw new Error(`Sync push bloqueado por Gitleaks/secret-scan local no draft '${draft.id}': ${scan.findings.join(", ")}`);
-    }
-  }
-  const res = await fetchFn(`${opts.hubUrl}/v1/sync/push`, {
-    method: "POST",
-    headers: {
-      "content-type": "application/json",
-      authorization: `Bearer ${opts.apiKey}`
-    },
-    body: JSON.stringify({ projectId: opts.projectId, drafts })
-  });
-  if (!res.ok) throw new Error(`Sync push falhou: HTTP ${res.status}`);
-  const body = (await res.json()) as { acceptedCount: number; acceptedIds?: string[] };
-  for (const id of body.acceptedIds ?? drafts.map((d) => d.id)) {
-    opts.db.markStagedPromoted(id);
-  }
-  const cleanedPromoted = opts.db.cleanupPromotedStaging(30);
-  return { pushed: body.acceptedCount, cleanedPromoted };
 }
 
 export interface ScaffoldAppliedAdr {

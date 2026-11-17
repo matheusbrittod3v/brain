@@ -18,7 +18,16 @@ Para funcionar em qualquer ferramenta ou plataforma de IA (Antigravity, Codex, K
 
 ## 1. Catálogo Documentado e Extensível de Ferramentas MCP
 
-O catálogo MCP é **extensível**; não existe um limite rígido de ferramentas. `protocols/mcp-tools/catalog.json` lista as ferramentas ativas, e esta seção documenta o contrato público de cada uma. O catálogo local atual tem 14 ferramentas em `snake_case` (Streamable HTTP no Hub via `apps/api`; `stdio` local via `apps/mcp-server`). O plugin Noema conectado nesta sessão anuncia 13 wrappers e ainda não expõe `brain_change_decide`; atualizar/republicar o registro desse conector é necessário para a paridade completa do plugin. Toda ferramenta nova ou alterada deve documentar objetivo, argumentos, retorno, escopo, autorização, efeitos persistidos, erros e paginação, além de atualizar testes de catálogo/paridade e testes de autorização para HTTP e stdio. Operações de listagem usam paginação *cursor-based* (`limit`, `cursor`); leituras de item único, criações e ações não são paginadas. Todas as tools e endpoints usam erros padrão (`BRAIN_ERR_UNAUTHORIZED`, `BRAIN_ERR_NOT_FOUND`, `BRAIN_ERR_CONFLICT`, `BRAIN_ERR_POLICY_DENIED`, `BRAIN_ERR_RATE_LIMITED`).
+O catálogo MCP é **extensível**; não existe um limite rígido de ferramentas. `protocols/mcp-tools/catalog.json` lista as ferramentas ativas, e esta seção documenta o contrato público de cada uma. O catálogo canônico atual tem 35 ferramentas em `snake_case` e é servido por `apps/api` (Streamable HTTP) e `apps/mcp-server` (`stdio`). Cada servidor inclui o perfil da conexão nas instruções MCP e no prefixo de toda descrição de ferramenta. Wrappers que copiam `tools/list` devem ser republicados/reconectados para refletir esses metadados. Toda ferramenta nova ou alterada deve documentar objetivo, argumentos, retorno, escopo, autorização, efeitos persistidos, erros e paginação, além de atualizar testes de catálogo/paridade e testes de autorização para HTTP e stdio. Operações de listagem usam paginação *cursor-based* (`limit`, `cursor`); leituras de item único, criações e ações não são paginadas. Todas as tools e endpoints usam erros padrão (`BRAIN_ERR_UNAUTHORIZED`, `BRAIN_ERR_NOT_FOUND`, `BRAIN_ERR_CONFLICT`, `BRAIN_ERR_POLICY_DENIED`, `BRAIN_ERR_RATE_LIMITED`).
+
+### 1.1 Perfis de conexão Noema
+
+| Conexão | Transporte e execução | Quando usar | O que o nome não garante |
+| :--- | :--- | :--- | :--- |
+| **Noema principal** (`noema`) | MCP HTTP conectado; usa identidade, escopos e backend do serviço configurado | Operar pela instância principal configurada no conector | Não garante que o banco, tenant ou estado sejam diferentes do perfil local |
+| **Noema local** (`noema_local`) | MCP stdio executado na máquina do agente; herda `.env` local e acessa os caminhos de workspace locais | Tarefas que dependem do checkout ou de arquivos nessa máquina | `DATABASE_URL` pode apontar para o banco usado pelo serviço HTTP; “local” não garante isolamento nem sincronização |
+
+As descrições MCP identificam o perfil antes do propósito específico de cada ferramenta. O agente deve escolher a conexão pelo endpoint e pelo acesso a arquivos de que a tarefa precisa, validar `projectId`/tenant/escopos e **não criar um segundo registro de projeto** só porque o primeiro bootstrap ocorreu pela outra conexão. A configuração atual observada retornou o mesmo registro do projeto `noema` (mesmo tenant e `createdAt`) e o mesmo item episódico pelos dois perfis. Isso demonstra que há dados sobrepostos, mas não revela se compartilham o mesmo banco físico, réplica ou mecanismo de sincronização.
 
 ### Matriz Oficial de Operações: MCP × CLI × REST
 - **Contexto, Busca, Impacto, Validação, Handoff, Proposta, Decisão Humana e Delegação:** disponíveis via **MCP, CLI e/ou REST**, conforme a autorização do ator. A tool `brain_change_decide` executa a decisão humana pelo Approval Engine; agentes não podem aprovar nem decidir propostas.
@@ -67,6 +76,32 @@ Todos os campos listados como inputs são propriedades de nível superior no obj
 | **12** | `brain_change_propose` | Escrita | Submete proposta formal (abre PR/rascunho para aprovação humana) para criar ou alterar regra, ADR ou doc |
 | **13** | `brain_change_decide` | Escrita (Humano) | Aprova, rejeita ou solicita alterações (`approve` / `reject` / `request_changes`) em proposta pendente. Usa o Approval Engine; exige ator humano e permissão de aprovação para o domínio, e agentes são sempre negados. |
 | **14** | `brain_delegate_task` | Escrita | Enfileira uma tarefa rotineira ou agendada em background para o **Brain Runner** (`apps/agent-runner`) sem travar a IDE |
+
+### 1.2 Ferramentas Estendidas por Toolset (`15–35`)
+
+| # | Tool | Toolset | Propósito |
+| :--- | :--- | :--- | :--- |
+| **15** | `brain_ingest_knowledge` | Conhecimento | Ingere arquivo/snippet (Markdown/YAML) com scan de segredos e persistência SQL/retrieval |
+| **16** | `brain_ingest_document` | Conhecimento | Extrai texto de PDF/DOCX/TXT (via AI Worker `/parse-document`) com scan de segredos |
+| **17** | `brain_knowledge_diff` | Temporalidade | Compara duas versões (`fromVersion` vs `toVersion`) de um item de conhecimento |
+| **18** | `brain_temporal_query` | Temporalidade | Consulta snapshot válido em uma data ISO-8601 UTC (*Project Time Machine*) |
+| **19** | `brain_knowledge_health` | Governança | Retorna saúde do projeto (regras críticas sem `VERIFIED_BY`, itens `>90d`, conflitos) |
+| **20** | `brain_living_docs_suggest` | Conhecimento | Sugere ADRs, contratos ou docs vivos a revisar a partir de `changedFiles` |
+| **21** | `brain_plan_tasks` | Planejamento | Quebra épico/feature em histórias e tarefas ordenadas por prioridade e dependências |
+| **22** | `brain_check_file_leases` | Continuidade | Verifica leases ativos e conflitos sobre `targetFiles` entre agentes |
+| **23** | `brain_acquire_lease` | Continuidade | Adquire ou renova lease de tarefa/branch com lista de `targetFiles` |
+| **24** | `brain_runner_status` | Runner | Consulta status, resultado e `modelUsage` de tarefa delegada ao Brain Runner |
+| **25** | `brain_runner_cancel` | Runner | Cancela uma tarefa enfileirada ou em execução no Brain Runner |
+| **26** | `brain_ask_human` | Runner | Registra pergunta bloqueante vinculada a `taskId` e pausa em `awaiting_human` |
+| **27** | `brain_get_question_answer` | Runner | Consulta perguntas pendentes e respostas humanas de uma tarefa do Runner |
+| **28** | `brain_cross_service_blast_radius` | Arquitetura | Calcula raio de explosão distribuído para alteração em contrato cross-service |
+| **29** | `brain_scaffold_recommendations` | Arquitetura | Retorna ADRs aprovados de referência e preferências do `developer_profile` |
+| **30** | `brain_pre_deploy_readiness` | Governança | Avalia prontidão pré-deploy (cobertura de regras, saúde, SBOM/CVE e incidentes) |
+| **31** | `brain_incident_to_code` | Governança | Correlaciona incidente de produção com símbolos de código, serviços e regras |
+| **32** | `brain_list_proposals` | Revisão | Lista propostas `pending` ou `changes_requested` na fila de aprovações |
+| **33** | `brain_revise_proposal` | Revisão | Reenvia revisão de proposta após `changes_requested`, incrementando a versão |
+| **34** | `brain_memory_recall` | Memória | Consulta diretamente as 5 camadas de memória (`working`..`organizational`) |
+| **35** | `brain_context_feedback` | Memória | Registra feedback explícito de utilidade de itens do `Context Pack` (*Context Hit Rate*) |
 
 ---
 
@@ -228,4 +263,4 @@ No Hub, endpoints chamados por usuários exigem token **OIDC (Bearer JWT)**; no 
 
 1. **Leitura:** valida `tenantId`, `projectId` e `accessPolicyId` do ator antes da consulta.
 2. **Escrita (`remember`, `consolidate`, `create_handoff`, `change.propose`):** exige identidade autenticada e grava evento obrigatório em `audit_logs`.
-3. **Promoção de Conhecimento Oficial:** a tool `brain_change_decide` permite que um revisor humano autenticado e autorizado aprove, rejeite ou solicite alterações via MCP; a mesma operação pode ser feita pelo Command Center ou API. A tool aplica as mesmas validações de identidade, projeto, política, papel, versão e idempotência do Approval Engine, persiste a decisão e audita o ator. Agentes e runners não podem decidir propostas. Callback por canal valida HMAC, identidade mapeada e idempotência. O Approval Engine valida autorização, registra a decisão, permite ao autor reenviar uma revisão com versão nova após `request_changes` e bloqueia decisões repetidas na mesma versão. Se Git é a fonte autoritativa, aprovação no painel/canal não substitui o merge do PR. O catálogo MCP é documentado e extensível; atualmente contém **14 tools canônicas** (`protocols/mcp-tools/catalog.json`).
+3. **Promoção de Conhecimento Oficial:** a tool `brain_change_decide` permite que um revisor humano autenticado e autorizado aprove, rejeite ou solicite alterações via MCP; a mesma operação pode ser feita pelo Command Center ou API. A tool aplica as mesmas validações de identidade, projeto, política, papel, versão e idempotência do Approval Engine, persiste a decisão e audita o ator. Agentes e runners não podem decidir propostas. Callback por canal valida HMAC, identidade mapeada e idempotência. O Approval Engine valida autorização, registra a decisão, permite ao autor reenviar uma revisão com versão nova após `request_changes` e bloqueia decisões repetidas na mesma versão. Se Git é a fonte autoritativa, aprovação no painel/canal não substitui o merge do PR. O catálogo MCP é documentado e extensível; atualmente contém **35 tools canônicas** (`protocols/mcp-tools/catalog.json`).

@@ -3,6 +3,159 @@ import { createRemoteJWKSet, customFetch, importSPKI, jwtVerify } from "jose";
 
 export type ActorType = "human" | "agent" | "system";
 
+export type FineGrainedAction =
+  | "read"
+  | "write"
+  | "create"
+  | "update"
+  | "approve"
+  | "manage_policies";
+
+export interface UserFineGrainedPolicy {
+  userId: string;
+  linkedAgentIds: string[];
+  inheritUserPermissions: boolean;
+  roles: string[];
+  allowedActions: FineGrainedAction[];
+  allowedPolicies: string[];
+  allowedDomains: number[];
+  allowedPathPrefixes: string[];
+  updatedAt?: string;
+  updatedBy?: string;
+}
+
+export const PERMISSION_CATALOG = [
+  // Menus / Guias
+  { id: "menu:inbox", group: "Menu & Guias", label: "Ver Caixa de Entrada" },
+  { id: "menu:projects", group: "Menu & Guias", label: "Ver Projetos" },
+  { id: "menu:knowledge", group: "Menu & Guias", label: "Ver Conhecimento" },
+  { id: "menu:search", group: "Menu & Guias", label: "Ver Busca & Grafo" },
+  { id: "menu:agents", group: "Menu & Guias", label: "Ver Agentes & Runner" },
+  { id: "menu:impact", group: "Menu & Guias", label: "Ver Impacto" },
+  { id: "menu:integrations", group: "Menu & Guias", label: "Ver Integrações" },
+  { id: "menu:operations", group: "Menu & Guias", label: "Ver Operação & FinOps" },
+  { id: "menu:access", group: "Menu & Guias", label: "Ver Acesso & Cargos" },
+  { id: "menu:templates", group: "Menu & Guias", label: "Ver Templates" },
+  { id: "menu:enterprise", group: "Menu & Guias", label: "Ver Visões Corporativas" },
+  // Conhecimento
+  { id: "knowledge:view", group: "Conhecimento", label: "Ver itens na listagem" },
+  { id: "knowledge:read", group: "Conhecimento", label: "Ler conteúdo completo dos itens" },
+  { id: "knowledge:search", group: "Conhecimento", label: "Consultar busca semântica & grafo" },
+  { id: "knowledge:write", group: "Conhecimento", label: "Criar, ingerir e editar rascunhos" },
+  { id: "knowledge:approve", group: "Conhecimento", label: "Aprovar e alterar status oficial" },
+  { id: "knowledge:delete", group: "Conhecimento", label: "Deprecar ou remover itens" },
+  // Propostas
+  { id: "proposals:view", group: "Propostas", label: "Ver propostas na caixa de entrada" },
+  { id: "proposals:create", group: "Propostas", label: "Propor alterações de conhecimento" },
+  { id: "proposals:decide", group: "Propostas", label: "Aprovar, revisar ou rejeitar propostas" },
+  // Projetos & Agentes
+  { id: "projects:create", group: "Projetos & Runner", label: "Criar e atualizar projetos" },
+  { id: "runner:view", group: "Projetos & Runner", label: "Ver execuções do Brain Runner" },
+  { id: "runner:execute", group: "Projetos & Runner", label: "Executar e delegar tarefas ao Runner" },
+  { id: "runner:cancel", group: "Projetos & Runner", label: "Cancelar tarefas do Runner" },
+  // Impacto, Integrações, FinOps & Auditoria
+  { id: "impact:analyze", group: "Operação & Governança", label: "Executar análise de impacto" },
+  { id: "integrations:view", group: "Operação & Governança", label: "Ver status de integrações" },
+  { id: "integrations:manage", group: "Operação & Governança", label: "Ingerir GitHub e configurar integrações" },
+  { id: "finops:view", group: "Operação & Governança", label: "Ver métricas de FinOps" },
+  { id: "finops:manage", group: "Operação & Governança", label: "Configurar cotas FinOps" },
+  { id: "audit:view", group: "Operação & Governança", label: "Consultar logs de auditoria" },
+  { id: "templates:view", group: "Operação & Governança", label: "Ver recomendações de templates" },
+  { id: "enterprise:view", group: "Operação & Governança", label: "Ver visões corporativas e Tech Radar" },
+  // Cargos & Permissões
+  { id: "roles:view", group: "Cargos & Permissões", label: "Ver cargos, permissões e atribuições" },
+  { id: "roles:manage", group: "Cargos & Permissões", label: "Criar, editar e excluir cargos e permissões" },
+  { id: "users:assign_roles", group: "Cargos & Permissões", label: "Atribuir cargos e agentes vinculados a usuários" }
+] as const;
+
+export type SystemPermission = (typeof PERMISSION_CATALOG)[number]["id"];
+export const ALL_SYSTEM_PERMISSIONS: SystemPermission[] = PERMISSION_CATALOG.map((p) => p.id);
+
+export interface RoleDefinition {
+  roleId: string;
+  name: string;
+  description: string;
+  permissions: SystemPermission[];
+  allowedPolicies: string[];
+  isSystem?: boolean;
+  updatedAt?: string;
+  updatedBy?: string;
+}
+
+export interface UserRoleAssignment {
+  userId: string;
+  roleIds: string[];
+  linkedAgentIds: string[];
+  inheritUserPermissions: boolean;
+  extraPermissions: SystemPermission[];
+  deniedPermissions: SystemPermission[];
+  allowedDomains: number[];
+  updatedAt?: string;
+  updatedBy?: string;
+}
+
+export const DEFAULT_ROLES: RoleDefinition[] = [
+  {
+    roleId: "admin",
+    name: "Administrador",
+    description: "Acesso total a todos os módulos, aprovações, cargos e permissões.",
+    permissions: [...ALL_SYSTEM_PERMISSIONS],
+    allowedPolicies: ["public-org", "internal-project", "confidential-business", "restricted-security"],
+    isSystem: true
+  },
+  {
+    roleId: "tech-lead",
+    name: "Tech Lead",
+    description: "Aprova conhecimento e propostas, analisa impacto, executa runner e visualiza operação.",
+    permissions: ALL_SYSTEM_PERMISSIONS.filter((p) => p !== "roles:manage"),
+    allowedPolicies: ["public-org", "internal-project", "confidential-business"],
+    isSystem: true
+  },
+  {
+    roleId: "developer",
+    name: "Desenvolvedor",
+    description: "Consulta, cria e edita rascunhos, busca no grafo e executa tarefas no Runner.",
+    permissions: [
+      "menu:inbox",
+      "menu:projects",
+      "menu:knowledge",
+      "menu:search",
+      "menu:agents",
+      "menu:impact",
+      "menu:templates",
+      "knowledge:view",
+      "knowledge:read",
+      "knowledge:search",
+      "knowledge:write",
+      "proposals:view",
+      "proposals:create",
+      "runner:view",
+      "runner:execute",
+      "impact:analyze",
+      "templates:view"
+    ],
+    allowedPolicies: ["public-org", "internal-project"],
+    isSystem: true
+  },
+  {
+    roleId: "viewer",
+    name: "Leitor",
+    description: "Acesso somente leitura a projetos, conhecimento, busca e templates.",
+    permissions: [
+      "menu:projects",
+      "menu:knowledge",
+      "menu:search",
+      "menu:templates",
+      "knowledge:view",
+      "knowledge:read",
+      "knowledge:search",
+      "templates:view"
+    ],
+    allowedPolicies: ["public-org", "internal-project"],
+    isSystem: true
+  }
+];
+
 export interface AuthContext {
   tenantId: string;
   actorId: string;
@@ -11,6 +164,13 @@ export interface AuthContext {
   allowedProjects: string[];
   allowedPolicies: string[];
   agentId?: string;
+  linkedUserId?: string;
+  inheritUserPermissions?: boolean;
+  allowedActions?: FineGrainedAction[];
+  allowedDomains?: number[];
+  allowedPathPrefixes?: string[];
+  permissions?: SystemPermission[];
+  assignedRoleIds?: string[];
 }
 
 const CRITICAL_DOMAINS = new Set([1, 2, 3, 7, 11]);
@@ -71,10 +231,135 @@ export function assertPolicyAccess(ctx: AuthContext, accessPolicyId: string): vo
   }
 }
 
+export function resolveDefaultPermissionsForRoles(
+  roles: readonly string[],
+  rolesCatalog: readonly RoleDefinition[] = DEFAULT_ROLES
+): SystemPermission[] {
+  const byId = new Map(rolesCatalog.map((r) => [r.roleId, r]));
+  const perms = new Set<SystemPermission>();
+  for (const roleId of roles) {
+    const def = byId.get(roleId);
+    if (def) {
+      for (const p of def.permissions) perms.add(p);
+    }
+  }
+  return [...perms];
+}
+
+export function hasPermission(ctx: AuthContext, permission: SystemPermission): boolean {
+  if (ctx.permissions) {
+    return ctx.permissions.includes(permission);
+  }
+  if (ctx.roles.includes("admin")) {
+    return true;
+  }
+  return resolveDefaultPermissionsForRoles(ctx.roles).includes(permission);
+}
+
+export function assertPermission(ctx: AuthContext, permission: SystemPermission): void {
+  if (!hasPermission(ctx, permission)) {
+    throw new BrainError(
+      "BRAIN_ERR_POLICY_DENIED",
+      `Permissão '${permission}' necessária para esta operação.`,
+      403
+    );
+  }
+}
+
+export function applyUserRoleAssignment(
+  ctx: AuthContext,
+  assignment: UserRoleAssignment,
+  rolesCatalog: readonly RoleDefinition[]
+): AuthContext {
+  const isUserMatch = ctx.actorId === assignment.userId;
+  const isLinkedAgentMatch =
+    ctx.actorType === "agent" &&
+    assignment.inheritUserPermissions &&
+    (assignment.linkedAgentIds.includes("*") ||
+      assignment.linkedAgentIds.includes(ctx.actorId) ||
+      (ctx.agentId !== undefined && assignment.linkedAgentIds.includes(ctx.agentId)));
+
+  if (!isUserMatch && !isLinkedAgentMatch) {
+    return ctx;
+  }
+
+  const byId = new Map(rolesCatalog.map((r) => [r.roleId, r]));
+  const perms = new Set<SystemPermission>();
+  const policies = new Set<string>(ctx.allowedPolicies);
+
+  for (const roleId of assignment.roleIds) {
+    const role = byId.get(roleId);
+    if (!role) continue;
+    for (const p of role.permissions) perms.add(p);
+    for (const pol of role.allowedPolicies) policies.add(pol);
+  }
+  for (const extra of assignment.extraPermissions) perms.add(extra);
+  for (const denied of assignment.deniedPermissions) perms.delete(denied);
+
+  const effectiveActions: FineGrainedAction[] = [];
+  if (perms.has("knowledge:read") || perms.has("knowledge:view") || perms.has("knowledge:search")) effectiveActions.push("read");
+  if (perms.has("knowledge:write") || perms.has("proposals:create")) effectiveActions.push("write", "create", "update");
+  if (perms.has("knowledge:approve") || perms.has("proposals:decide")) effectiveActions.push("approve");
+  if (perms.has("roles:manage") || perms.has("users:assign_roles")) effectiveActions.push("manage_policies");
+
+  return {
+    ...ctx,
+    roles: assignment.roleIds.length > 0 ? [...new Set(assignment.roleIds)] : ctx.roles,
+    assignedRoleIds: [...assignment.roleIds],
+    permissions: [...perms],
+    allowedPolicies: [...policies],
+    allowedActions: effectiveActions,
+    allowedDomains: assignment.allowedDomains.length > 0 ? [...assignment.allowedDomains] : ctx.allowedDomains,
+    linkedUserId: assignment.userId,
+    inheritUserPermissions: isLinkedAgentMatch ? true : assignment.inheritUserPermissions
+  };
+}
+
 export function canApproveDomain(ctx: AuthContext, domainId: number): boolean {
-  if (ctx.actorType === "agent") return false; // Agentes nunca aprovam conhecimento oficial
+  if (ctx.allowedDomains && ctx.allowedDomains.length > 0 && !ctx.allowedDomains.includes(domainId)) {
+    return false;
+  }
+  if (ctx.allowedActions && ctx.allowedActions.length > 0 && !ctx.allowedActions.includes("approve")) {
+    return false;
+  }
+  const actsAsLinkedUser = ctx.actorType === "human" || Boolean(ctx.inheritUserPermissions);
+  if (!actsAsLinkedUser && !ctx.allowedActions?.includes("approve")) {
+    return false;
+  }
   if (!CRITICAL_DOMAINS.has(domainId)) return true;
   return ctx.roles.some((r) => ["admin", "tech-lead", "product-owner", "appsec"].includes(r));
+}
+
+export function applyUserFineGrainedPolicy(
+  ctx: AuthContext,
+  policy: UserFineGrainedPolicy
+): AuthContext {
+  const isUserMatch = ctx.actorId === policy.userId;
+  const isLinkedAgentMatch =
+    ctx.actorType === "agent" &&
+    policy.inheritUserPermissions &&
+    (policy.linkedAgentIds.includes("*") ||
+      policy.linkedAgentIds.includes(ctx.actorId) ||
+      (ctx.agentId !== undefined && policy.linkedAgentIds.includes(ctx.agentId)));
+
+  if (!isUserMatch && !isLinkedAgentMatch) {
+    return ctx;
+  }
+
+  return {
+    ...ctx,
+    roles: policy.roles.length > 0 ? [...new Set([...ctx.roles, ...policy.roles])] : ctx.roles,
+    allowedPolicies:
+      policy.allowedPolicies.length > 0
+        ? [...new Set([...ctx.allowedPolicies, ...policy.allowedPolicies])]
+        : ctx.allowedPolicies,
+    linkedUserId: policy.userId,
+    inheritUserPermissions: isLinkedAgentMatch ? true : ctx.inheritUserPermissions,
+    allowedActions: policy.allowedActions.length > 0 ? [...policy.allowedActions] : ctx.allowedActions,
+    allowedDomains: policy.allowedDomains.length > 0 ? [...policy.allowedDomains] : ctx.allowedDomains,
+    allowedPathPrefixes:
+      policy.allowedPathPrefixes.length > 0 ? [...policy.allowedPathPrefixes] : ctx.allowedPathPrefixes
+  };
 }
 
 export interface OidcClaims {
@@ -127,6 +412,14 @@ function evaluateLocalOpaFallback(ctx: AuthContext, input: OpaPolicyInput): bool
   if (!input.accessPolicyId || !ctx.allowedPolicies.includes(input.accessPolicyId)) {
     return false;
   }
+  if (input.domainId !== undefined && ctx.allowedDomains && ctx.allowedDomains.length > 0) {
+    if (!ctx.allowedDomains.includes(input.domainId)) {
+      return false;
+    }
+  }
+  if (ctx.allowedActions && ctx.allowedActions.length > 0 && !ctx.allowedActions.includes(input.action)) {
+    return false;
+  }
   if (input.action === "read") {
     return true;
   }
@@ -134,7 +427,7 @@ function evaluateLocalOpaFallback(ctx: AuthContext, input: OpaPolicyInput): bool
     return ctx.roles.some((role) => WRITE_ROLES.has(role));
   }
   if (input.action === "approve") {
-    if (ctx.actorType !== "human") {
+    if (ctx.actorType !== "human" && !ctx.inheritUserPermissions && !ctx.allowedActions?.includes("approve")) {
       return false;
     }
     const allowedRoles =

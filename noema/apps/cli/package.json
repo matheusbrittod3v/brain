@@ -20,7 +20,6 @@
     "@noema/business-rule-guardian": "*",
     "@noema/code-intelligence": "^0.1.0",
     "@noema/core": "*",
-    "@noema/database-edge": "*",
     "@noema/ingestion": "*",
     "@noema/knowledge": "*",
     "@noema/project-discovery": "^0.1.0",

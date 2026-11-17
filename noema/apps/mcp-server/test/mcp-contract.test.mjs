@@ -12,23 +12,47 @@ const context = {
   allowedProjects: ["allowed-project"], allowedPolicies: ["public-org", "internal-project"]
 };
 
-async function openMcp(runtime, customCtx = context) {
-  const server = createNoemaMcpServer(runtime, customCtx, "internal-project");
+async function openMcp(runtime, customCtx = context, profile = "service") {
+  const server = createNoemaMcpServer(runtime, customCtx, "internal-project", profile);
   const client = new Client({ name: "mcp-contract-test", version: "1.0.0" }, { capabilities: {} });
   const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
   await Promise.all([client.connect(clientTransport), server.connect(serverTransport)]);
   return { client, server };
 }
 
-test("stdio MCP catalog exposes the 14 currently documented tools", async () => {
+test("stdio MCP catalog exposes the canonical 43 tools", async () => {
   const catalog = JSON.parse(readFileSync(fileURLToPath(new URL("../../../protocols/mcp-tools/catalog.json", import.meta.url)), "utf8"));
   const { client, server } = await openMcp(createNoemaRuntime(new InMemoryAuditLogger()));
   try {
     const listed = await client.listTools();
     assert.deepEqual(listed.tools.map((tool) => tool.name), catalog);
-    assert.equal(listed.tools.length, 14);
+    assert.equal(listed.tools.length, 43);
   } finally {
     await Promise.all([client.close(), server.close()]);
+  }
+});
+
+test("service and local MCP tool descriptions explain their connection and data boundaries", async () => {
+  const runtime = createNoemaRuntime(new InMemoryAuditLogger());
+  const service = await openMcp(runtime, context, "service");
+  const local = await openMcp(runtime, context, "local");
+  try {
+    const serviceTools = await service.client.listTools();
+    const localTools = await local.client.listTools();
+    assert.equal(service.client.getServerVersion().name, "noema-brain-service");
+    assert.equal(local.client.getServerVersion().name, "noema-brain-local");
+    assert.equal(serviceTools.tools.every((tool) => tool.description.startsWith("[Noema principal · MCP HTTP conectado:")), true);
+    assert.equal(localTools.tools.every((tool) => tool.description.startsWith("[Noema local · MCP stdio:")), true);
+    const serviceDescription = serviceTools.tools.find((tool) => tool.name === "brain_bootstrap_project").description;
+    const localDescription = localTools.tools.find((tool) => tool.name === "brain_bootstrap_project").description;
+    assert.match(serviceDescription, /Noema principal.*MCP HTTP conectado/i);
+    assert.match(serviceDescription, /não presuma.*banco/i);
+    assert.match(localDescription, /Noema local.*stdio/i);
+    assert.match(localDescription, /DATABASE_URL/i);
+    assert.match(localDescription, /pode apontar para o mesmo banco/i);
+    assert.notEqual(serviceDescription, localDescription);
+  } finally {
+    await Promise.all([service.client.close(), service.server.close(), local.client.close(), local.server.close()]);
   }
 });
 
@@ -297,5 +321,100 @@ test("brain_change_decide blocks agent self-approval and lets authorized human a
     assert.equal(stored.item?.status, "approved");
   } finally {
     await Promise.all([agentMcp.client.close(), agentMcp.server.close(), humanMcp.client.close(), humanMcp.server.close()]);
+  }
+});
+
+test("brain_bootstrap_project registers a new project when createIfMissing or name is provided", async () => {
+  const runtime = createNoemaRuntime(new InMemoryAuditLogger());
+  const { client, server } = await openMcp(runtime);
+  try {
+    const createRes = await client.callTool({
+      name: "brain_bootstrap_project",
+      arguments: {
+        projectId: "allowed-project",
+        createIfMissing: true,
+        name: "Allowed Billing API",
+        description: "Core billing service",
+        knowledgeRoot: ".brain/"
+      }
+    });
+    assert.notEqual(createRes.isError, true);
+    const created = JSON.parse(createRes.content[0].text);
+    assert.equal(created.created, true);
+    assert.equal(created.project?.name, "Allowed Billing API");
+    assert.equal(created.project?.description, "Core billing service");
+
+    const secondRes = await client.callTool({
+      name: "brain_bootstrap_project",
+      arguments: { projectId: "allowed-project" }
+    });
+    assert.notEqual(secondRes.isError, true);
+    const second = JSON.parse(secondRes.content[0].text);
+    assert.equal(second.created, false);
+    assert.equal(second.project?.name, "Allowed Billing API");
+  } finally {
+    await Promise.all([client.close(), server.close()]);
+  }
+});
+
+test("extended MCP tools support ingestion, task planning, health, file leases, proposals, and incident mapping", async () => {
+  const runtime = createNoemaRuntime(new InMemoryAuditLogger());
+  const { client, server } = await openMcp(runtime);
+  try {
+    const ingestRes = await client.callTool({
+      name: "brain_ingest_knowledge",
+      arguments: {
+        projectId: "allowed-project",
+        filePath: ".brain/01-business/business-rules/BR-RETRY.md",
+        content: "---\nid: BR-RETRY\ntitle: Retry Limit\ntype: business_rule\ndomainId: 2\nstatus: approved\n---\nMax 3 retries."
+      }
+    });
+    assert.notEqual(ingestRes.isError, true);
+
+    const planRes = await client.callTool({
+      name: "brain_plan_tasks",
+      arguments: { projectId: "allowed-project", epicDescription: "Implement bounded retries" }
+    });
+    assert.notEqual(planRes.isError, true);
+    const plan = JSON.parse(planRes.content[0].text);
+    assert.ok(plan.count >= 1);
+
+    const healthRes = await client.callTool({
+      name: "brain_knowledge_health",
+      arguments: { projectId: "allowed-project" }
+    });
+    assert.notEqual(healthRes.isError, true);
+
+    const leaseRes = await client.callTool({
+      name: "brain_acquire_lease",
+      arguments: { projectId: "allowed-project", taskId: "T-1", branch: "feat/retry", targetFiles: ["src/retry.ts"] }
+    });
+    assert.notEqual(leaseRes.isError, true);
+
+    const checkLeaseRes = await client.callTool({
+      name: "brain_check_file_leases",
+      arguments: { projectId: "allowed-project", targetFiles: ["src/retry.ts"] }
+    });
+    assert.notEqual(checkLeaseRes.isError, true);
+
+    const listPropRes = await client.callTool({
+      name: "brain_list_proposals",
+      arguments: { projectId: "allowed-project" }
+    });
+    assert.notEqual(listPropRes.isError, true);
+
+    const incidentRes = await client.callTool({
+      name: "brain_incident_to_code",
+      arguments: { projectId: "allowed-project", incidentId: "INC-1", title: "Retry timeout", service: "allowed-project" }
+    });
+    assert.notEqual(incidentRes.isError, true);
+
+    const fbRes = await client.callTool({
+      name: "brain_context_feedback",
+      arguments: { projectId: "allowed-project", sessionId: "sess-1", usefulItemIds: ["BR-RETRY"] }
+    });
+    assert.notEqual(fbRes.isError, true);
+  } finally {
+    await Promise.all([client.close(), server.close()]);
   }
 });

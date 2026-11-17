@@ -24,6 +24,17 @@ O **Noema** conecta código, arquitetura, regras de negócio, decisões históri
 - [Segurança e governança](../docs/03-security-and-governance/security-architecture.md)
 - [Roadmap e desenvolvimento local](../docs/04-roadmap/)
 
+## Modos de Execução (Solo Local vs. Time em Nuvem)
+
+O Noema usa **um único motor completo** (PostgreSQL + `pgvector` + RLS + `pg-boss` + 35 tools MCP + Guardians + `.brain/`), sem banco SQLite/Edge separado. A única diferença entre rodar solo na sua máquina ou compartilhado pelo time na nuvem está no `.env` (`NOEMA_DEPLOYMENT_MODE` e `DATABASE_URL`):
+
+1. **Modo Solo / Local (`NOEMA_DEPLOYMENT_MODE=local`, `npm run start:local` + `noema-local` stdio):**
+   - Roda na sua máquina ou rede local usando o PostgreSQL local e os arquivos `.brain/` do repositório.
+2. **Modo Time / Nuvem Compartilhada (`NOEMA_DEPLOYMENT_MODE=cloud`, `npm run start:cloud` + `noema` HTTP):**
+   - Roda como servidor compartilhado pelo time (`http://<host>:3333/mcp` e REST API).
+3. **Fluxo entre ambientes (Local ↔ Remoto):**
+   - Versione regras/ADRs em `.brain/` via Git ou conecte no MCP remoto (`noema`) quando quiser publicar no servidor do time.
+
 ## Início Rápido (Estágio 0)
 
 ```bash

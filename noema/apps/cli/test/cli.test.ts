@@ -3,11 +3,7 @@ import assert from "node:assert/strict";
 import { mkdtempSync, rmSync, existsSync, writeFileSync, mkdirSync, readFileSync, readdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { EventEmitter } from "node:events";
-import { EdgeDatabase, decryptEdgeSecret, encryptEdgeSecret } from "../src/edge-db.js";
-import { startEdgeRunner, waitForRunnerShutdown } from "../src/local-runner.js";
 import {
-  enforceOfflineLeaseIfStored,
   resolveCliAuthToken,
   runDoctor,
   runHandoffCreate,
@@ -15,12 +11,8 @@ import {
   runHookInstall,
   runInit,
   runInitWithScip,
-  runLocalTaskEnqueue,
-  runLocalTaskList,
   runRunnerUp,
   runScaffold,
-  runSyncPull,
-  runSyncPush,
   runValidate,
   selectRunnerProfile
 } from "../src/commands.js";
@@ -184,30 +176,6 @@ test("noema scaffold creates Python starter files and rejects an empty project n
   }
 });
 
-test("EdgeDatabase indexes FTS5 and revokes policies locally", () => {
-  const dir = mkdtempSync(join(tmpdir(), "noema-edge-"));
-  try {
-    const db = new EdgeDatabase(join(dir, "edge.db"));
-    db.upsertItem({
-      id: "BR-1",
-      projectId: "sub",
-      title: "Cancelamento",
-      content: "Regra de cancelamento de assinatura",
-      accessPolicyId: "confidential-business",
-      contentHash: "h1"
-    });
-    db.upsertItem({ id: "BR-2", projectId: "sub", title: "Outro", content: "Conteúdo restante", accessPolicyId: "public-org", contentHash: "h2" });
-    db.upsertEdge("BR-1", "BR-2", "RELATED_TO");
-    assert.equal(db.searchFts("cancelamento").length, 1);
-    const removed = db.revokePolicies(["confidential-business"]);
-    assert.equal(removed, 1);
-    assert.equal(db.searchFts("cancelamento").length, 0);
-    assert.equal(db.getRelatedItems("BR-1").length, 0, "policy revocation must remove graph relations touching revoked content");
-    db.close();
-  } finally {
-    rmSync(dir, { recursive: true, force: true });
-  }
-});
 
 test("runner up auto-selects hardware profile and only pulls Ollama model when pull=true", async () => {
   assert.equal(selectRunnerProfile(8 * 1024 ** 3).profile, "lite");
@@ -231,122 +199,8 @@ test("runner up auto-selects hardware profile and only pulls Ollama model when p
   assert.ok(pulledModel.length > 0);
 });
 
-test("EdgeDatabase encrypts secrets with AES-256-GCM and syncs via HTTP", async () => {
-  const enc = encryptEdgeSecret("tok_123", "master-pass");
-  assert.equal(decryptEdgeSecret(enc, "master-pass"), "tok_123");
 
-  const dir = mkdtempSync(join(tmpdir(), "noema-sync-"));
-  try {
-    const db = new EdgeDatabase(join(dir, "edge.db"));
-    db.stageDraft("D-1", "Rascunho", "Texto");
-    db.upsertItem({ id: "OLD-1", projectId: "sub", title: "Revogado", content: "Segredo", accessPolicyId: "confidential-business", contentHash: "h-old" });
-    db.upsertItem({ id: "OLD-2", projectId: "sub", title: "Removido", content: "Obsoleto", accessPolicyId: "internal-project", contentHash: "h-old-2" });
-    db.setSyncCursor(4, 1);
-    let pullBody: Record<string, unknown> = {};
 
-    const pullRes = await runSyncPull(
-      { hubUrl: "http://localhost:3333", apiKey: "k", projectId: "sub", db },
-      async (_url, init) => {
-        pullBody = JSON.parse(String(init?.body)) as Record<string, unknown>;
-        return new Response(
-          JSON.stringify({
-            syncMode: "delta",
-            syncSeq: 5,
-            policyEpoch: 1,
-            revokedPolicies: ["confidential-business"],
-            tombstones: ["OLD-2"],
-            items: [{ id: "BR-9", projectId: "sub", title: "Regra", content: "Ok", accessPolicyId: "internal-project", contentHash: "h9" }]
-          }),
-          { status: 200 }
-        );
-      }
-    );
-    assert.equal(pullRes.upserted, 1);
-    assert.equal(pullRes.syncMode, "delta");
-    assert.equal(pullBody.sinceSeq, 4);
-    assert.equal(pullBody.policyEpoch, 1);
-    assert.deepEqual(pullBody.knownPolicies, ["confidential-business", "internal-project"]);
-    assert.equal(pullRes.revokedCount, 1);
-    assert.deepEqual(db.searchFts("segredo"), []);
-    assert.deepEqual(db.searchFts("obsoleto"), [], "delta tombstone removes a previously synced item");
-    assert.equal(db.searchFts("regra")[0]?.id, "BR-9", "delta upserts the latest authorized item version");
-
-    const pushRes = await runSyncPush(
-      { hubUrl: "http://localhost:3333", apiKey: "k", projectId: "sub", db },
-      async () => new Response(JSON.stringify({ acceptedCount: 1 }), { status: 200 })
-    );
-    assert.equal(pushRes.pushed, 1);
-    db.close();
-  } finally {
-    rmSync(dir, { recursive: true, force: true });
-  }
-});
-
-test("sync pull follows every snapshot page and atomically replaces the local snapshot", async () => {
-  const dir = mkdtempSync(join(tmpdir(), "noema-sync-pages-"));
-  try {
-    const db = new EdgeDatabase(join(dir, "edge.db"));
-    db.upsertItem({ id: "STALE-1", projectId: "sub", title: "Stale", content: "Must be removed", accessPolicyId: "internal-project", contentHash: "old" });
-    db.setSyncCursor(12, 1);
-    const requests: Array<Record<string, unknown>> = [];
-    let call = 0;
-    const result = await runSyncPull(
-      { hubUrl: "http://localhost:3333", apiKey: "k", projectId: "sub", db },
-      async (_url, init) => {
-        requests.push(JSON.parse(String(init?.body)) as Record<string, unknown>);
-        if (call > 0) assert.equal(db.searchFts("must")[0]?.id, "STALE-1", "the live Edge stays intact until every snapshot page is received");
-        call += 1;
-        const page = call === 1
-          ? { id: "A-1", title: "Discarded page", content: "discarded page" }
-          : call === 2
-            ? { id: "C-1", title: "Restart page one", content: "restart first page" }
-            : { id: "B-1", title: "Restart page two", content: "restart second page" };
-        return new Response(JSON.stringify({
-          syncMode: "snapshot",
-          syncSeq: call === 2 || call === 3 ? 21 : 20,
-          snapshotSeq: call === 2 || call === 3 ? 21 : 20,
-          snapshotCursor: call === 1 ? "A-1" : call === 2 ? "C-1" : null,
-          snapshotDone: call === 3,
-          snapshotRestarted: call === 2,
-          policyEpoch: call === 1 ? 2 : 3,
-          revokedPolicies: [],
-          tombstones: [],
-          items: [{ ...page, projectId: "sub", accessPolicyId: "internal-project", contentHash: `hash-${call}` }]
-        }), { status: 200 });
-      }
-    );
-    assert.equal(call, 3);
-    assert.equal(requests[1]?.snapshotCursor, "A-1");
-    assert.equal(requests[2]?.snapshotCursor, "C-1");
-    assert.equal(requests[2]?.policyEpoch, 3);
-    assert.equal(result.upserted, 2);
-    assert.deepEqual(db.getSyncCursor(), { syncSeq: 21, policyEpoch: 3 });
-    assert.deepEqual(db.searchFts("must"), [], "atomic snapshot replacement discards rows absent from the Hub snapshot");
-    assert.deepEqual(db.searchFts("discarded"), [], "a prior epoch page is discarded when the Hub restarts the snapshot");
-    assert.equal(db.searchFts("restart")[0]?.id, "C-1");
-    assert.equal(db.searchFts("second")[0]?.id, "B-1");
-    assert.equal(readdirSync(dir).some((name) => name.includes(".rebuild.")), false, "completed snapshot removes temporary databases");
-    db.close();
-  } finally {
-    rmSync(dir, { recursive: true, force: true });
-  }
-});
-
-test("enforceOfflineLeaseIfStored rejects expired offline lease in sync operations", async () => {
-  const dir = mkdtempSync(join(tmpdir(), "noema-lease-"));
-  try {
-    const db = new EdgeDatabase(join(dir, "edge.db"));
-    enforceOfflineLeaseIfStored(db); // no lease stored yet -> allowed
-
-    db.issueOfflineLease("actor-1", "tenant-1", 1000);
-    const future = new Date(Date.now() + 60_000);
-    assert.throws(() => enforceOfflineLeaseIfStored(db, future), /Offline lease expirado/);
-
-    db.close();
-  } finally {
-    rmSync(dir, { recursive: true, force: true });
-  }
-});
 
 test("runValidate evaluates local architecture and business rule compliance", () => {
   const dir = mkdtempSync(join(tmpdir(), "noema-validate-"));
@@ -430,130 +284,10 @@ test("runRunnerUp supports --provider (ollama, fm, openai, anthropic) and --hybr
   }
 });
 
-test("local task commands validate input and list persisted tasks", () => {
-  const dir = mkdtempSync(join(tmpdir(), "noema-local-task-cli-"));
-  const db = new EdgeDatabase(join(dir, "edge.db"));
-  try {
-    assert.throws(() => runLocalTaskEnqueue(db, "sub", "  "), /instrução/i);
-    const queued = runLocalTaskEnqueue(db, "sub", "  Summarize local changes  ");
-    assert.equal(queued.instruction, "Summarize local changes");
-    assert.deepEqual(runLocalTaskList(db, "sub").map(({ taskId, status }) => ({ taskId, status })), [
-      { taskId: queued.taskId, status: "queued" }
-    ]);
-    assert.deepEqual(runLocalTaskList(db, "another-project"), []);
-  } finally {
-    db.close();
-    rmSync(dir, { recursive: true, force: true });
-  }
-});
 
-test("local Edge Runner claims a task and persists its draft result and model usage", { timeout: 3000 }, async () => {
-  const dir = mkdtempSync(join(tmpdir(), "noema-local-runner-"));
-  const db = new EdgeDatabase(join(dir, "edge.db"));
-  try {
-    const task = db.enqueueRunnerTask("sub", "Summarize the synthetic project");
-    const unrelated = db.enqueueRunnerTask("other-project", "Do not run in this workspace");
-    let resolveCompleted!: () => void;
-    const completed = new Promise<void>((resolve) => { resolveCompleted = resolve; });
-    const runner = startEdgeRunner(db, {
-      projectId: "sub",
-      pollIntervalMs: 10,
-      executeTask: async (claimed) => ({
-        ...claimed,
-        status: "completed",
-        resultSummary: "[bot-draft] Three modules and one open risk.",
-        modelUsage: {
-          provider: "test", model: "fixed-fixture", inputTokens: 15, outputTokens: 9,
-          totalTokens: 24, durationMs: 4, providerCostUsd: 0, costBasis: "self_hosted_no_api_fee"
-        }
-      }),
-      onTaskComplete: () => resolveCompleted()
-    });
-    await completed;
-    await runner.stop();
 
-    const stored = db.listRunnerTasks("sub").find((row) => row.taskId === task.taskId);
-    assert.equal(stored?.status, "completed");
-    assert.equal(stored?.resultSummary, "[bot-draft] Three modules and one open risk.");
-    assert.deepEqual(stored?.modelUsage, {
-      provider: "test", model: "fixed-fixture", inputTokens: 15, outputTokens: 9,
-      totalTokens: 24, durationMs: 4, providerCostUsd: 0, costBasis: "self_hosted_no_api_fee"
-    });
-    assert.equal(db.listRunnerTasks("other-project").find((row) => row.taskId === unrelated.taskId)?.status, "queued");
-  } finally {
-    db.close();
-    rmSync(dir, { recursive: true, force: true });
-  }
-});
 
-test("local Edge Runner marks a rejected task failed and continues with the next queued task", { timeout: 3000 }, async () => {
-  const dir = mkdtempSync(join(tmpdir(), "noema-local-runner-failure-"));
-  const db = new EdgeDatabase(join(dir, "edge.db"));
-  try {
-    const failedTask = db.enqueueRunnerTask("sub", "Synthetic task that fails");
-    const nextTask = db.enqueueRunnerTask("sub", "Synthetic task that succeeds");
-    let resolveCompleted!: () => void;
-    const completed = new Promise<void>((resolve) => { resolveCompleted = resolve; });
-    const runner = startEdgeRunner(db, {
-      pollIntervalMs: 10,
-      executeTask: async (claimed) => {
-        if (claimed.taskId === failedTask.taskId) throw new Error("synthetic model error");
-        return { ...claimed, status: "completed", resultSummary: "[bot-draft] Recovery worked." };
-      },
-      onTaskComplete: (task) => { if (task.taskId === nextTask.taskId) resolveCompleted(); }
-    });
-    await completed;
-    await runner.stop();
 
-    const stored = db.listRunnerTasks("sub");
-    assert.equal(stored.find((row) => row.taskId === failedTask.taskId)?.status, "failed");
-    assert.match(stored.find((row) => row.taskId === failedTask.taskId)?.resultSummary ?? "", /synthetic model error/);
-    assert.equal(stored.find((row) => row.taskId === nextTask.taskId)?.status, "completed");
-  } finally {
-    db.close();
-    rmSync(dir, { recursive: true, force: true });
-  }
-});
-
-test("local Edge Runner persists destructive instructions as escalated without invoking the executor", { timeout: 3000 }, async () => {
-  const dir = mkdtempSync(join(tmpdir(), "noema-local-runner-escalation-"));
-  const db = new EdgeDatabase(join(dir, "edge.db"));
-  try {
-    const task = db.enqueueRunnerTask("sub", "Execute rm -rf /");
-    let resolveCompleted!: () => void;
-    const completed = new Promise<void>((resolve) => { resolveCompleted = resolve; });
-    const runner = startEdgeRunner(db, {
-      projectId: "sub",
-      pollIntervalMs: 10,
-      executeTask: async () => { throw new Error("destructive task reached model executor"); },
-      onTaskComplete: () => resolveCompleted()
-    });
-    await completed;
-    await runner.stop();
-    const stored = db.listRunnerTasks("sub").find((row) => row.taskId === task.taskId);
-    assert.equal(stored?.status, "escalated");
-    assert.match(stored?.resultSummary ?? "", /comando destrutivo/i);
-  } finally {
-    db.close();
-    rmSync(dir, { recursive: true, force: true });
-  }
-});
-
-test("local Runner shutdown stops polling on SIGTERM", async () => {
-  const dir = mkdtempSync(join(tmpdir(), "noema-local-runner-stop-"));
-  const db = new EdgeDatabase(join(dir, "edge.db"));
-  const signals = new EventEmitter();
-  try {
-    const runner = startEdgeRunner(db, { pollIntervalMs: 50, executeTask: async (task) => task });
-    const stopped = waitForRunnerShutdown(runner, signals);
-    signals.emit("SIGTERM");
-    await stopped;
-    assert.equal(runner.isRunning(), false);
-  } finally {
-    db.close();
-    rmSync(dir, { recursive: true, force: true });
-  }
-});
 
 test("resolveCliAuthToken prefers OIDC client credentials before falling back to NOEMA_LOCAL_API_KEY", async () => {
   const oidcToken = await resolveCliAuthToken(
@@ -660,33 +394,4 @@ test("runHookInstall and runHookEmit install lifecycle scripts and emit events",
   }
 });
 
-test("runSyncPush blocks staged drafts containing secrets locally before upload", async () => {
-  const dir = mkdtempSync(join(tmpdir(), "noema-sync-push-secret-"));
-  const prevDisable = process.env.NOEMA_DISABLE_GITLEAKS;
-  process.env.NOEMA_DISABLE_GITLEAKS = "1";
-  try {
-    const db = new EdgeDatabase(join(dir, "edge.db"));
-    db.stageDraft(
-      "DRAFT-SEC-1",
-      "Config note",
-      "Use token ghp_abcdefghijklmnopqrstuvwxyz0123456789 for access"
-    );
-    let fetchCalled = false;
-    await assert.rejects(
-      () => runSyncPush(
-        { hubUrl: "http://localhost:3333", apiKey: "k", projectId: "billing", db },
-        async () => {
-          fetchCalled = true;
-          return new Response(JSON.stringify({ acceptedCount: 1 }), { status: 200 });
-        }
-      ),
-      /secret-scan|Gitleaks/i
-    );
-    assert.equal(fetchCalled, false);
-    db.close();
-  } finally {
-    if (prevDisable === undefined) delete process.env.NOEMA_DISABLE_GITLEAKS;
-    else process.env.NOEMA_DISABLE_GITLEAKS = prevDisable;
-    rmSync(dir, { recursive: true, force: true });
-  }
-});
+

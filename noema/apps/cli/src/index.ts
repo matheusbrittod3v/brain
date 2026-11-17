@@ -3,16 +3,13 @@
  * Noema / Brain CLI — Ponto de entrada multiplataforma (Windows, Linux, macOS).
  */
 import { execFileSync, spawn } from "node:child_process";
-import { createHash, randomBytes } from "node:crypto";
+import { createHash } from "node:crypto";
 import { readFileSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { createInterface } from "node:readline";
 import { installIdeAdapter, type SupportedIde } from "@noema/agent-adapters";
 import { detectWorkspaceContext } from "@noema/workspace-detection";
-import { EdgeDatabase, loadKeychainSecret, storeKeychainSecret } from "./edge-db.js";
-import { startEdgeRunner, waitForRunnerShutdown } from "./local-runner.js";
 import {
-  enforceOfflineLeaseIfStored,
   resolveCliAuthToken,
   runDoctor,
   runHandoffCreate,
@@ -20,28 +17,12 @@ import {
   runHookInstall,
   runInit,
   runInitWithScip,
-  runLocalTaskEnqueue,
-  runLocalTaskList,
   runRunnerUp,
   runScaffold,
-  runSyncPull,
-  runSyncPush,
   runValidate
 } from "./commands.js";
 
 const [, , command = "help", sub = "", ...rest] = process.argv;
-
-function openEdgeDatabase(): EdgeDatabase {
-  const account = createHash("sha256").update(resolve(process.cwd())).digest("hex");
-  let key = loadKeychainSecret("noema-edge-db", account);
-  if (!key) {
-    key = randomBytes(32).toString("hex");
-    if (!storeKeychainSecret("noema-edge-db", account, key)) {
-      throw new Error("Não foi possível salvar a chave do Edge no keychain do sistema. Configure o keychain antes de usar comandos locais de sync ou Runner.");
-    }
-  }
-  return new EdgeDatabase(".noema/edge.db", { encryptionKey: key, requireSqlCipher: true });
-}
 
 function requireApiKey(): string {
   const key = process.env.NOEMA_LOCAL_API_KEY;
@@ -136,83 +117,9 @@ async function main() {
         const readyForDaemon = res.status === "ready" || res.status === "cloud_fallback_ready";
         if (!readyForDaemon) {
           process.exitCode = 1;
-          break;
-        }
-        const db = openEdgeDatabase();
-        try {
-          const projectId = process.env.NOEMA_PROJECT_ID ?? detectWorkspaceContext(process.cwd()).projectId;
-          const resolvedModel = "model" in res ? res.model : ("localModel" in res ? res.localModel : undefined);
-          const resolvedProvider =
-            "provider" in res
-              ? res.provider
-              : ("localProvider" in res ? res.localProvider : "ollama");
-          const runner = startEdgeRunner(db, {
-            projectId,
-            model: resolvedModel,
-            provider: resolvedProvider,
-            hybrid: res.mode === "hybrid",
-            onTaskComplete: (task) => console.log(JSON.stringify({
-              taskId: task.taskId, status: task.status, resultSummary: task.resultSummary,
-              modelUsage: task.modelUsage
-            })),
-            onError: (error) => console.error(`Runner local: ${error instanceof Error ? error.message : String(error)}`)
-          });
-          console.log(JSON.stringify({
-            runner: "running",
-            mode: res.mode,
-            projectId,
-            model: resolvedModel
-          }));
-          await waitForRunnerShutdown(runner);
-        } finally {
-          db.close();
-        }
-      } else if (sub === "cron") {
-        const db = openEdgeDatabase();
-        try {
-          const cronSub = rest[0];
-          const projectId = process.env.NOEMA_PROJECT_ID ?? detectWorkspaceContext(process.cwd()).projectId;
-          if (cronSub === "add") {
-            const cronExpr = rest[1] ?? "";
-            const instruction = rest.slice(2).join(" ").trim();
-            if (!cronExpr || !instruction) {
-              throw new Error("Uso: brain runner cron add \"<cron>\" \"<instrucao>\"");
-            }
-            console.log(JSON.stringify(db.upsertCronJob({ projectId, cron: cronExpr, instruction }), null, 2));
-          } else if (cronSub === "list") {
-            console.log(JSON.stringify(db.listCronJobs(projectId), null, 2));
-          } else if (cronSub === "remove" && rest[1]) {
-            console.log(JSON.stringify({ deleted: db.deleteCronJob(rest[1]) }, null, 2));
-          } else {
-            console.log("Uso: brain runner cron <add|list|remove>");
-          }
-        } finally {
-          db.close();
         }
       } else {
-        console.log("Uso: brain runner up --local [--pull] | --hybrid | --provider <ollama|fm|openai|anthropic> [--pull] | brain runner cron <add|list|remove>");
-      }
-      break;
-    }
-    case "sync": {
-      const db = openEdgeDatabase();
-      try {
-        if (sub === "status") {
-          enforceOfflineLeaseIfStored(db);
-          console.log(JSON.stringify({ stagedDrafts: db.listStaged().length, cursor: db.getSyncCursor(), warnings: db.getWarnings() }));
-        } else if (sub === "pull") {
-          const { hubUrl, apiKey, projectId } = getHubConfig(rest[0]);
-          const res = await runSyncPull({ hubUrl, apiKey, projectId, db });
-          console.log(JSON.stringify(res, null, 2));
-        } else if (sub === "push") {
-          const { hubUrl, apiKey, projectId } = getHubConfig(rest[0]);
-          const res = await runSyncPush({ hubUrl, apiKey, projectId, db });
-          console.log(JSON.stringify(res, null, 2));
-        } else {
-          console.log("Uso: brain sync <pull|push|status> [projectId]");
-        }
-      } finally {
-        db.close();
+        console.log("Uso: brain runner up --local [--pull] | --hybrid | --provider <ollama|fm|openai|anthropic> [--pull]");
       }
       break;
     }
@@ -361,28 +268,6 @@ async function main() {
       break;
     }
     case "task": {
-      const local = rest.includes("--local");
-      const taskArgs = rest.filter((arg) => arg !== "--local");
-      if (local && sub === "enqueue") {
-        const projectId = process.env.NOEMA_PROJECT_ID ?? detectWorkspaceContext(process.cwd()).projectId;
-        const db = openEdgeDatabase();
-        try {
-          console.log(JSON.stringify(runLocalTaskEnqueue(db, projectId, taskArgs.join(" ")), null, 2));
-        } finally {
-          db.close();
-        }
-        break;
-      }
-      if (local && sub === "list") {
-        const projectId = process.env.NOEMA_PROJECT_ID ?? detectWorkspaceContext(process.cwd()).projectId;
-        const db = openEdgeDatabase();
-        try {
-          console.log(JSON.stringify(runLocalTaskList(db, projectId), null, 2));
-        } finally {
-          db.close();
-        }
-        break;
-      }
       if (sub === "enqueue") {
         const { hubUrl, apiKey, projectId } = getHubConfig();
         const instruction = rest.join(" ");
@@ -392,8 +277,14 @@ async function main() {
           body: JSON.stringify({ instruction })
         });
         console.log(await res.text());
+      } else if (sub === "list") {
+        const { hubUrl, apiKey, projectId } = getHubConfig();
+        const res = await fetch(`${hubUrl}/v1/projects/${projectId}/runner/tasks`, {
+          headers: { authorization: `Bearer ${apiKey}` }
+        });
+        console.log(await res.text());
       } else {
-        console.log("Uso: brain task enqueue [--local] <instruction> | brain task list --local");
+        console.log("Uso: brain task <enqueue <instruction>|list>");
       }
       break;
     }

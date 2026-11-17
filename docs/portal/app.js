@@ -13,7 +13,7 @@ const ARCH_DETAILS = {
   },
   sources: {
     title: "4. Fontes, Conectores & Segurança",
-    text: "Git é a fonte da verdade para conhecimento oficial conforme ownerRepo e precedência do manifesto. Referências usam sourceOrigin/sourceKind; Nango é opcional a partir de 2 conectores SaaS OAuth. Gitleaks é obrigatório; redaction PII via AI Worker depende de AI_WORKER_URL e o fallback cobre email/CPF. O Hub usa RLS; o perfil corporativo ativa Keycloak + OPA. Edge offline usa SQLite + SQLCipher e offline lease de até 7 dias."
+    text: "Git é a fonte da verdade para conhecimento oficial conforme ownerRepo e precedência do manifesto. Referências usam sourceOrigin/sourceKind; Nango é opcional a partir de 2 conectores SaaS OAuth. Gitleaks é obrigatório; redaction PII via AI Worker depende de AI_WORKER_URL e o fallback cobre email/CPF. O sistema opera de forma unificada sobre PostgreSQL + RLS nos modos local e cloud (NOEMA_DEPLOYMENT_MODE)."
   }
 };
 
@@ -122,7 +122,7 @@ const STAGES = [
   ["1", "Segurança & Camada Git", "API Key local, RLS, trilha de auditoria, OpenTelemetry e parser Git; OIDC/OPA no perfil corporativo."],
   ["2", "Ingestão & Code Intelligence", "Gitleaks, partial clone, web-tree-sitter e âncoras @brain-rule; redaction PII configurável, Docling sob demanda e SCIP depois."],
   ["3", "Busca Híbrida, Grafo & Memória", "PostgreSQL FTS + busca vetorial exata autorizada, grafo seguro, RRF e memória em 5 camadas."],
-  ["4", "Gateway, Edge Offline & Brain Runner", "14 tools MCP atualmente (catálogo extensível), CLI, Local Edge Brain (SQLite + sqlite-vec), brain runner up e Agent Handoff cross-IDE."],
+  ["4", "Gateway, Modos Local/Cloud & Brain Runner", "35 tools MCP canônicas (perfis service/local), CLI unificada, NOEMA_DEPLOYMENT_MODE=local|cloud, brain runner up e Agent Handoff cross-IDE."],
   ["5", "Guardians, Command Center & Escala", "Semgrep/PR Checks, Dashboard (Dev/CTO/DevOps/QA/AppSec), Cross-Service Registry e brain scaffold."]
 ];
 

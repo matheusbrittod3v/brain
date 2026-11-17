@@ -1,5 +1,7 @@
 # Arquitetura Híbrida — Local Edge (Offline) ↔ Enterprise Hub (Online)
 
+> **Nota de Alinhamento (2026-11-17):** O pacote SQLite/SQLCipher separado (`@noema/database-edge`) foi aposentado. O Noema agora opera com **um único motor unificado** sobre PostgreSQL + `pgvector` + RLS + `.brain/`, onde a diferença entre instância solo/local e servidor compartilhado do time está apenas em `.env` (`NOEMA_DEPLOYMENT_MODE=local|cloud` e `DATABASE_URL`). Os conceitos de sync e revogação abaixo permanecem apenas como referência histórica/de protocolo (`/v1/sync/pull` e `/v1/sync/push`).
+
 Para atender empresas com **vários funcionários, cargos e setores diferentes** (Devs, POs, QA, DevOps, AppSec, Comercial, Gestores), o **Project Brain OS 2.0** opera em uma arquitetura híbrida de **dois níveis** — inspirada no modelo distribuído do Git, mas com governança de permissões e IA:
 
 ```mermaid

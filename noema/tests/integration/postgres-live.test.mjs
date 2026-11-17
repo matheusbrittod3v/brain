@@ -13,8 +13,6 @@ import { createPostgresAuditLogger } from "../../packages/audit-engine/dist/src/
 import { PgOperationalRepository } from "../../packages/database/dist/src/operational-repos.js";
 import { PgKnowledgeRepository } from "../../packages/database/dist/src/repositories.js";
 import { parseKnowledgeFile } from "../../packages/knowledge/dist/src/index.js";
-import { EdgeDatabase } from "../../packages/database-edge/dist/src/index.js";
-import { runSyncPull } from "../../apps/cli/dist/src/commands.js";
 import { buildApp } from "../../apps/api/dist/src/server.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -315,8 +313,6 @@ test("live PostgreSQL + pgvector + RLS integration", { skip: !dbUrl }, async () 
           filePath: `.brain/01-business/${itemId}.md`,
           content: `---\nid: ${itemId}\ntitle: Live sync item\nstatus: approved\naccess_policy: internal-project\n---\n\n${content}`
         });
-        const edgeDir = mkdtempSync(join(__dirname, "../../", `edge-live-${randomUUID()}-`));
-        const edge = new EdgeDatabase(join(edgeDir, "edge.db"));
         try {
           const snapshotSeeder = new PgKnowledgeRepository(appClient.db);
           const snapshotContext = {
@@ -338,41 +334,17 @@ test("live PostgreSQL + pgvector + RLS integration", { skip: !dbUrl }, async () 
             WHERE tenant_id='default-org' AND project_id=${projectId} AND item_id=${itemId}
           `;
           assert.equal(initialJournalCount, 1, "identical upsert creates no duplicate sync event");
-          const requestPages = [];
-          const edgePull = await runSyncPull(
-            { hubUrl: "http://live.test", apiKey: "live-sync-test-key", projectId, db: edge },
-            async (_url, init) => {
-              const payload = JSON.parse(String(init?.body));
-              requestPages.push(payload);
-              const response = await api.inject({ method: "POST", url: "/v1/sync/pull", headers, payload });
-              return new Response(response.body, { status: response.statusCode });
-            }
-          );
-          assert.equal(edgePull.syncMode, "snapshot");
-          assert.equal(edgePull.upserted, 206, "snapshot imports all 205 seeded items plus the ingested item");
-          assert.equal(requestPages.length, 3, "snapshot uses deterministic pages of 100 items");
-          assert.equal(new Set(edge.searchFts("fixture", 300).map((item) => item.id)).size, 205);
-          const snapshot = edge.getSyncCursor();
-          await ingest("after delta");
-          const deltaPull = await runSyncPull(
-            { hubUrl: "http://live.test", apiKey: "live-sync-test-key", projectId, db: edge },
-            async (_url, init) => {
-              const payload = JSON.parse(String(init?.body));
-              const response = await api.inject({ method: "POST", url: "/v1/sync/pull", headers, payload });
-              return new Response(response.body, { status: response.statusCode });
-            }
-          );
-          assert.equal(deltaPull.syncMode, "delta");
-          assert.equal(deltaPull.upserted, 1);
-          assert.equal(edge.searchFts("after", 10)[0]?.id, itemId);
+          const firstPage = await request("POST", "/v1/sync/pull", { projectId, sinceSeq: 0, policyEpoch: 1, knownPolicies: ["internal-project"] });
+          assert.equal(firstPage.syncMode, "snapshot");
+          assert.equal(firstPage.items.length, 100);
+          const delta = await ingest("after delta");
+          assert.ok(delta);
           const [{ count: updatedJournalCount }] = await sql`
             SELECT count(*)::int AS count FROM sync_changes
             WHERE tenant_id='default-org' AND project_id=${projectId} AND item_id=${itemId}
           `;
           assert.equal(updatedJournalCount, 2, "content update creates exactly one new sync event");
         } finally {
-          edge.close();
-          rmSync(edgeDir, { recursive: true, force: true });
           await api.close();
           process.env.DATABASE_URL = previousEnv.DATABASE_URL;
           process.env.NOEMA_PG_STORES = previousEnv.NOEMA_PG_STORES;

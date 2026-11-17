@@ -1,5 +1,16 @@
 import { and, asc, desc, eq, gt, inArray, isNotNull, isNull, lt, or, sql } from "drizzle-orm";
-import type { AuthContext } from "@noema/auth";
+import {
+  applyUserFineGrainedPolicy,
+  applyUserRoleAssignment,
+  DEFAULT_ROLES,
+  resolveDefaultPermissionsForRoles,
+  type AuthContext,
+  type FineGrainedAction,
+  type RoleDefinition,
+  type SystemPermission,
+  type UserFineGrainedPolicy,
+  type UserRoleAssignment
+} from "@noema/auth";
 import {
   BrainError,
   validateContextSessionId,
@@ -25,7 +36,9 @@ import {
   knowledgeItems,
   notificationPreferences,
   notificationOutbox,
+  organizations,
   projectAccessMembers,
+  projects,
   testExecutionResults,
   syncChanges,
   syncProjectLocks,
@@ -326,6 +339,263 @@ export class PgOperationalRepository {
       if (!row) throw new BrainError("BRAIN_ERR_STORAGE_UNAVAILABLE", "Custom access policy was not persisted.", 503);
       return row;
     });
+  }
+
+  async listUserFineGrainedPolicies(ctx: AuthContext, projectId: string): Promise<UserFineGrainedPolicy[]> {
+    this.assertAccessAdminScope(ctx, projectId);
+    const rows = await withTenantRls(this.db, ctx, async (tx) => tx.select({
+      policyId: customAccessPolicies.policyId,
+      label: customAccessPolicies.label,
+      description: customAccessPolicies.description,
+      allowedRoles: customAccessPolicies.allowedRoles,
+      updatedAt: customAccessPolicies.updatedAt
+    }).from(customAccessPolicies).where(and(
+      eq(customAccessPolicies.tenantId, ctx.tenantId),
+      eq(customAccessPolicies.projectId, projectId),
+      eq(customAccessPolicies.accessPolicyId, "internal-project")
+    )).orderBy(asc(customAccessPolicies.policyId)));
+
+    const result: UserFineGrainedPolicy[] = [];
+    for (const row of rows) {
+      if (!row.policyId.startsWith("user-policy:")) continue;
+      const userId = row.policyId.slice("user-policy:".length);
+      try {
+        const parsed = JSON.parse(row.description) as Partial<UserFineGrainedPolicy>;
+        result.push({
+          userId,
+          linkedAgentIds: Array.isArray(parsed.linkedAgentIds) ? parsed.linkedAgentIds : [],
+          inheritUserPermissions: Boolean(parsed.inheritUserPermissions),
+          roles: Array.isArray(row.allowedRoles) ? row.allowedRoles : [],
+          allowedActions: Array.isArray(parsed.allowedActions) ? (parsed.allowedActions as FineGrainedAction[]) : ["read", "write", "create", "update"],
+          allowedPolicies: Array.isArray(parsed.allowedPolicies) ? parsed.allowedPolicies : ["public-org", "internal-project"],
+          allowedDomains: Array.isArray(parsed.allowedDomains) ? parsed.allowedDomains : [],
+          allowedPathPrefixes: Array.isArray(parsed.allowedPathPrefixes) ? parsed.allowedPathPrefixes : [],
+          updatedAt: row.updatedAt.toISOString(),
+          updatedBy: parsed.updatedBy
+        });
+      } catch {
+        // Ignore malformed legacy entry
+      }
+    }
+    return result;
+  }
+
+  async upsertUserFineGrainedPolicy(
+    ctx: AuthContext,
+    projectId: string,
+    input: Omit<UserFineGrainedPolicy, "updatedAt" | "updatedBy">
+  ): Promise<UserFineGrainedPolicy> {
+    this.assertAccessAdminScope(ctx, projectId);
+    const normalized: UserFineGrainedPolicy = {
+      userId: input.userId.trim(),
+      linkedAgentIds: [...new Set(input.linkedAgentIds.map((s) => s.trim()).filter(Boolean))],
+      inheritUserPermissions: Boolean(input.inheritUserPermissions),
+      roles: [...new Set(input.roles.map((s) => s.trim()).filter(Boolean))],
+      allowedActions: [...new Set(input.allowedActions)],
+      allowedPolicies: [...new Set(input.allowedPolicies.map((s) => s.trim()).filter(Boolean))],
+      allowedDomains: [...new Set(input.allowedDomains.filter((d) => Number.isInteger(d) && d > 0))],
+      allowedPathPrefixes: [...new Set(input.allowedPathPrefixes.map((s) => s.trim()).filter(Boolean))],
+      updatedBy: ctx.actorId
+    };
+    const row = await this.upsertCustomAccessPolicy(ctx, projectId, {
+      policyId: `user-policy:${normalized.userId}`,
+      label: `User Policy: ${normalized.userId}`,
+      description: JSON.stringify(normalized),
+      allowedRoles: normalized.roles
+    });
+    return { ...normalized, updatedAt: row.updatedAt.toISOString() };
+  }
+
+  async deleteUserFineGrainedPolicy(ctx: AuthContext, projectId: string, userId: string): Promise<boolean> {
+    this.assertAccessAdminScope(ctx, projectId);
+    return withTenantRls(this.db, ctx, async (tx) => {
+      const deleted = await tx.delete(customAccessPolicies).where(and(
+        eq(customAccessPolicies.tenantId, ctx.tenantId),
+        eq(customAccessPolicies.projectId, projectId),
+        eq(customAccessPolicies.policyId, `user-policy:${userId.trim()}`),
+        eq(customAccessPolicies.accessPolicyId, "internal-project")
+      )).returning({ policyId: customAccessPolicies.policyId });
+      return deleted.length > 0;
+    });
+  }
+
+  async listRoles(ctx: AuthContext, projectId: string): Promise<RoleDefinition[]> {
+    this.assertAccessAdminScope(ctx, projectId);
+    const rows = await withTenantRls(this.db, ctx, async (tx) => tx.select({
+      policyId: customAccessPolicies.policyId,
+      label: customAccessPolicies.label,
+      description: customAccessPolicies.description,
+      allowedRoles: customAccessPolicies.allowedRoles,
+      updatedAt: customAccessPolicies.updatedAt
+    }).from(customAccessPolicies).where(and(
+      eq(customAccessPolicies.tenantId, ctx.tenantId),
+      eq(customAccessPolicies.projectId, projectId),
+      eq(customAccessPolicies.accessPolicyId, "internal-project")
+    )).orderBy(asc(customAccessPolicies.policyId)));
+
+    const byId = new Map<string, RoleDefinition>(DEFAULT_ROLES.map((r) => [r.roleId, { ...r }]));
+    for (const row of rows) {
+      if (!row.policyId.startsWith("role:")) continue;
+      const roleId = row.policyId.slice("role:".length);
+      try {
+        const parsed = JSON.parse(row.description) as Partial<RoleDefinition>;
+        byId.set(roleId, {
+          roleId,
+          name: parsed.name || row.label || roleId,
+          description: parsed.description ?? "",
+          permissions: Array.isArray(parsed.permissions) ? (parsed.permissions as SystemPermission[]) : [],
+          allowedPolicies: Array.isArray(row.allowedRoles) ? row.allowedRoles : ["public-org", "internal-project"],
+          isSystem: DEFAULT_ROLES.some((d) => d.roleId === roleId),
+          updatedAt: row.updatedAt.toISOString(),
+          updatedBy: parsed.updatedBy
+        });
+      } catch {
+        // Ignore malformed role row
+      }
+    }
+    return [...byId.values()];
+  }
+
+  async upsertRole(
+    ctx: AuthContext,
+    projectId: string,
+    input: Omit<RoleDefinition, "isSystem" | "updatedAt" | "updatedBy">
+  ): Promise<RoleDefinition> {
+    this.assertAccessAdminScope(ctx, projectId);
+    const roleId = input.roleId.trim().toLowerCase();
+    const payload = {
+      roleId,
+      name: input.name.trim() || roleId,
+      description: input.description.trim(),
+      permissions: [...new Set(input.permissions)],
+      allowedPolicies: [...new Set(input.allowedPolicies.map((s) => s.trim()).filter(Boolean))],
+      updatedBy: ctx.actorId
+    };
+    const row = await this.upsertCustomAccessPolicy(ctx, projectId, {
+      policyId: `role:${roleId}`,
+      label: payload.name,
+      description: JSON.stringify(payload),
+      allowedRoles: payload.allowedPolicies
+    });
+    return {
+      ...payload,
+      isSystem: DEFAULT_ROLES.some((d) => d.roleId === roleId),
+      updatedAt: row.updatedAt.toISOString()
+    };
+  }
+
+  async deleteRole(ctx: AuthContext, projectId: string, roleId: string): Promise<boolean> {
+    this.assertAccessAdminScope(ctx, projectId);
+    const normalized = roleId.trim().toLowerCase();
+    if (DEFAULT_ROLES.some((d) => d.roleId === normalized)) {
+      throw new BrainError("BRAIN_ERR_CONFLICT", `Cargo padrão '${normalized}' não pode ser excluído (apenas editado).`, 409);
+    }
+    return withTenantRls(this.db, ctx, async (tx) => {
+      const deleted = await tx.delete(customAccessPolicies).where(and(
+        eq(customAccessPolicies.tenantId, ctx.tenantId),
+        eq(customAccessPolicies.projectId, projectId),
+        eq(customAccessPolicies.policyId, `role:${normalized}`),
+        eq(customAccessPolicies.accessPolicyId, "internal-project")
+      )).returning({ policyId: customAccessPolicies.policyId });
+      return deleted.length > 0;
+    });
+  }
+
+  async listUserRoleAssignments(ctx: AuthContext, projectId: string): Promise<UserRoleAssignment[]> {
+    this.assertAccessAdminScope(ctx, projectId);
+    const rows = await withTenantRls(this.db, ctx, async (tx) => tx.select({
+      policyId: customAccessPolicies.policyId,
+      description: customAccessPolicies.description,
+      allowedRoles: customAccessPolicies.allowedRoles,
+      updatedAt: customAccessPolicies.updatedAt
+    }).from(customAccessPolicies).where(and(
+      eq(customAccessPolicies.tenantId, ctx.tenantId),
+      eq(customAccessPolicies.projectId, projectId),
+      eq(customAccessPolicies.accessPolicyId, "internal-project")
+    )).orderBy(asc(customAccessPolicies.policyId)));
+
+    const result: UserRoleAssignment[] = [];
+    for (const row of rows) {
+      if (!row.policyId.startsWith("user-assignment:")) continue;
+      const userId = row.policyId.slice("user-assignment:".length);
+      try {
+        const parsed = JSON.parse(row.description) as Partial<UserRoleAssignment>;
+        result.push({
+          userId,
+          roleIds: Array.isArray(row.allowedRoles) ? row.allowedRoles : [],
+          linkedAgentIds: Array.isArray(parsed.linkedAgentIds) ? parsed.linkedAgentIds : [],
+          inheritUserPermissions: Boolean(parsed.inheritUserPermissions),
+          extraPermissions: Array.isArray(parsed.extraPermissions) ? (parsed.extraPermissions as SystemPermission[]) : [],
+          deniedPermissions: Array.isArray(parsed.deniedPermissions) ? (parsed.deniedPermissions as SystemPermission[]) : [],
+          allowedDomains: Array.isArray(parsed.allowedDomains) ? parsed.allowedDomains : [],
+          updatedAt: row.updatedAt.toISOString(),
+          updatedBy: parsed.updatedBy
+        });
+      } catch {
+        // Ignore malformed assignment
+      }
+    }
+    return result;
+  }
+
+  async upsertUserRoleAssignment(
+    ctx: AuthContext,
+    projectId: string,
+    input: Omit<UserRoleAssignment, "updatedAt" | "updatedBy">
+  ): Promise<UserRoleAssignment> {
+    this.assertAccessAdminScope(ctx, projectId);
+    const normalized: UserRoleAssignment = {
+      userId: input.userId.trim(),
+      roleIds: [...new Set(input.roleIds.map((s) => s.trim().toLowerCase()).filter(Boolean))],
+      linkedAgentIds: [...new Set(input.linkedAgentIds.map((s) => s.trim()).filter(Boolean))],
+      inheritUserPermissions: Boolean(input.inheritUserPermissions),
+      extraPermissions: [...new Set(input.extraPermissions)],
+      deniedPermissions: [...new Set(input.deniedPermissions)],
+      allowedDomains: [...new Set(input.allowedDomains.filter((d) => Number.isInteger(d) && d > 0))],
+      updatedBy: ctx.actorId
+    };
+    const row = await this.upsertCustomAccessPolicy(ctx, projectId, {
+      policyId: `user-assignment:${normalized.userId}`,
+      label: `User Roles: ${normalized.userId}`,
+      description: JSON.stringify(normalized),
+      allowedRoles: normalized.roleIds
+    });
+    return { ...normalized, updatedAt: row.updatedAt.toISOString() };
+  }
+
+  async deleteUserRoleAssignment(ctx: AuthContext, projectId: string, userId: string): Promise<boolean> {
+    this.assertAccessAdminScope(ctx, projectId);
+    return withTenantRls(this.db, ctx, async (tx) => {
+      const deleted = await tx.delete(customAccessPolicies).where(and(
+        eq(customAccessPolicies.tenantId, ctx.tenantId),
+        eq(customAccessPolicies.projectId, projectId),
+        eq(customAccessPolicies.policyId, `user-assignment:${userId.trim()}`),
+        eq(customAccessPolicies.accessPolicyId, "internal-project")
+      )).returning({ policyId: customAccessPolicies.policyId });
+      return deleted.length > 0;
+    });
+  }
+
+  async resolveEffectiveAuthContext(ctx: AuthContext, projectId: string): Promise<AuthContext> {
+    if (!ctx.allowedProjects.includes(projectId) || !ctx.allowedPolicies.includes("internal-project")) {
+      return ctx;
+    }
+    const [rolesCatalog, assignments, legacyPolicies] = await Promise.all([
+      this.listRoles(ctx, projectId).catch(() => DEFAULT_ROLES),
+      this.listUserRoleAssignments(ctx, projectId).catch(() => [] as UserRoleAssignment[]),
+      this.listUserFineGrainedPolicies(ctx, projectId).catch(() => [] as UserFineGrainedPolicy[])
+    ]);
+    let effective: AuthContext = {
+      ...ctx,
+      permissions: ctx.permissions ?? resolveDefaultPermissionsForRoles(ctx.roles, rolesCatalog)
+    };
+    for (const assignment of assignments) {
+      effective = applyUserRoleAssignment(effective, assignment, rolesCatalog);
+    }
+    for (const policy of legacyPolicies) {
+      effective = applyUserFineGrainedPolicy(effective, policy);
+    }
+    return effective;
   }
 
   async recordContextDelivery(
@@ -1887,6 +2157,88 @@ export class PgOperationalRepository {
         ))
         .limit(1);
       return rows.length > 0;
+    });
+  }
+
+  async listProjects(ctx: AuthContext) {
+    return withTenantRls(this.db, ctx, async (tx) => {
+      const rows = await tx
+        .select()
+        .from(projects)
+        .where(eq(projects.tenantId, ctx.tenantId))
+        .orderBy(asc(projects.id));
+      return rows.map((row) => ({
+        projectId: row.id,
+        tenantId: row.tenantId,
+        name: row.name,
+        description: row.description ?? undefined,
+        knowledgeRoot: row.knowledgeRoot,
+        createdAt: row.createdAt.toISOString()
+      }));
+    });
+  }
+
+  async registerProject(
+    ctx: AuthContext,
+    input: { projectId: string; name: string; description?: string; knowledgeRoot?: string }
+  ) {
+    return withTenantRls(this.db, ctx, async (tx) => {
+      await tx
+        .insert(organizations)
+        .values({ id: ctx.tenantId, name: ctx.tenantId })
+        .onConflictDoNothing();
+
+      const existing = await tx
+        .select()
+        .from(projects)
+        .where(and(eq(projects.tenantId, ctx.tenantId), eq(projects.id, input.projectId)))
+        .limit(1);
+
+      if (existing[0]) {
+        const [updated] = await tx
+          .update(projects)
+          .set({
+            name: input.name,
+            description: input.description ?? existing[0].description,
+            knowledgeRoot: input.knowledgeRoot ?? existing[0].knowledgeRoot
+          })
+          .where(and(eq(projects.tenantId, ctx.tenantId), eq(projects.id, input.projectId)))
+          .returning();
+        return {
+          created: false,
+          project: {
+            projectId: updated!.id,
+            tenantId: updated!.tenantId,
+            name: updated!.name,
+            description: updated!.description ?? undefined,
+            knowledgeRoot: updated!.knowledgeRoot,
+            createdAt: updated!.createdAt.toISOString()
+          }
+        };
+      }
+
+      const [inserted] = await tx
+        .insert(projects)
+        .values({
+          id: input.projectId,
+          tenantId: ctx.tenantId,
+          name: input.name,
+          description: input.description ?? null,
+          knowledgeRoot: input.knowledgeRoot ?? ".brain/"
+        })
+        .returning();
+
+      return {
+        created: true,
+        project: {
+          projectId: inserted!.id,
+          tenantId: inserted!.tenantId,
+          name: inserted!.name,
+          description: inserted!.description ?? undefined,
+          knowledgeRoot: inserted!.knowledgeRoot,
+          createdAt: inserted!.createdAt.toISOString()
+        }
+      };
     });
   }
 }
