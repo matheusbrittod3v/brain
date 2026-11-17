@@ -25,7 +25,7 @@ test("Streamable HTTP exposes the same canonical 35 MCP tools as stdio", async (
     assert.ok(dataLine, "MCP response should contain a JSON-RPC event");
     const payload = JSON.parse(dataLine.slice("data: ".length));
     assert.deepEqual(payload.result.tools.map((tool) => tool.name), catalog);
-    assert.equal(payload.result.tools.length, 35);
+    assert.equal(payload.result.tools.length, 58);
     assert.match(payload.result.tools[0].description, /^\[Noema principal · MCP HTTP conectado:/);
   } finally {
     await app.close();

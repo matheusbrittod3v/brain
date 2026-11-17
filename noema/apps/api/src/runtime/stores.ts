@@ -8,7 +8,6 @@ import {
   type RlsSessionContext
 } from "@noema/audit-engine";
 import { assertProjectAccess, authenticateRequest, evaluateOpaPolicy, type AuthContext } from "@noema/auth";
-import type { HumanOpsChannel } from "@noema/connector-saas";
 import { ContextEngine } from "@noema/context-engine";
 import { BrainError, type KnowledgeItem } from "@noema/core";
 import { CrossServiceContractRegistry, PostgresCrossServiceRegistry } from "@noema/cross-service";
@@ -25,15 +24,6 @@ import {
 } from "@noema/retrieval";
 import { TemporalKnowledgeEngine, PgTemporalKnowledgeRepository } from "@noema/temporal-knowledge";
 import type { OllamaEmbeddingProviderStatus } from "@noema/worker";
-import {
-  defaultNotificationPreferences,
-  nextNotificationWindow,
-  normalizeNotificationPreferences,
-  notificationDigestGroupKey,
-  type NotificationCategory,
-  type NotificationPreferences
-} from "../notification-preferences.js";
-import { enqueueNotificationDigest, type NotificationDigestPayload } from "../services/jobs.js";
 
 export function createApiRuntimeStores(deps: {
   configuredApiKey: string;
@@ -147,9 +137,6 @@ export function createApiRuntimeStores(deps: {
     }
   };
 
-  const memoryNotificationPreferences = new Map<string, NotificationPreferences>();
-  const integrationFallbackOwners = new Map<string, { fallbackOwner: string; updatedAt: string; updatedBy: string }>();
-  const integrationReconnectHistory = new Map<string, { lastReconnectAt: string; status: string; actorId: string }>();
   const departmentQuotas = new Map<string, { department: string; monthlyTokenLimit: number; monthlyUsdLimit: number; updatedAt: string }>();
   const accessMembers = new Map<string, { actorId: string; roles: string[]; allowedPolicies: string[]; updatedAt: string; syncedWithKeycloak: boolean }>();
   const temporaryGrants = new Map<string, { grantId: string; tenantId: string; projectId: string; actorId: string; roles: string[]; policyIds: string[]; expiresAt: string; grantedBy: string; createdAt: string }>();
@@ -160,42 +147,8 @@ export function createApiRuntimeStores(deps: {
   const testExecutionMemory = new Map<string, { testItemId: string; accessPolicyId: string; commitSha: string; repository?: string; status: "passed" | "failed" | "skipped"; durationMs: number | null; executedAt: string; receivedBy: string }>();
   const githubMainHeadMemory = new Map<string, { repository: string; commitSha: string; accessPolicyId: string }>();
 
-  const notificationPreferenceKey = (ctx: AuthContext, projectId: string, policyId: string) => `${ctx.tenantId}:${projectId}:${ctx.actorId}:${policyId}`;
   const accessMemberKey = (ctx: AuthContext, projectId: string, actorId: string) => `${ctx.tenantId}:${projectId}:${actorId}`;
   const customPolicyKey = (ctx: AuthContext, projectId: string, policyId: string) => `${ctx.tenantId}:${projectId}:${policyId}`;
-
-  const getNotificationPreferences = async (ctx: AuthContext, projectId: string, policyId: string) => {
-    const saved = opRepo ? await opRepo.getNotificationPreferences(ctx, projectId, policyId) : memoryNotificationPreferences.get(notificationPreferenceKey(ctx, projectId, policyId));
-    if (!saved) return defaultNotificationPreferences();
-    return normalizeNotificationPreferences(saved);
-  };
-
-  const queueNotificationDigest = async (ctx: AuthContext, input: {
-    projectId: string; channel: HumanOpsChannel; category: NotificationCategory; targetId: string;
-    title: string; frequency: "daily" | "weekly";
-  }) => {
-    if (!opRepo) throw new BrainError("BRAIN_ERR_CONFLICT", "Digest de notificação requer persistência PostgreSQL.", 503);
-    const utcHour = Number(process.env.NOEMA_DIGEST_UTC_HOUR ?? 9);
-    const scheduledAt = nextNotificationWindow(input.frequency, new Date(), utcHour);
-    const accessPolicyId = "internal-project";
-    const groupKey = notificationDigestGroupKey({
-      tenantId: ctx.tenantId, projectId: input.projectId, actorId: ctx.actorId,
-      accessPolicyId, channel: input.channel, category: input.category, scheduledAt
-    });
-    const eventKey = `${input.channel}:${input.category}:${input.targetId}:${scheduledAt.toISOString()}`;
-    await opRepo.enqueueNotificationDigest(ctx, {
-      projectId: input.projectId, accessPolicyId, channel: input.channel,
-      category: input.category, eventKey, scheduledAt,
-      payload: { targetId: input.targetId, title: input.title }
-    });
-    const payload: NotificationDigestPayload = {
-      tenantId: ctx.tenantId, projectId: input.projectId, actorId: ctx.actorId,
-      accessPolicyId, channel: input.channel, category: input.category,
-      scheduledAt: scheduledAt.toISOString(), groupKey
-    };
-    await enqueueNotificationDigest(payload);
-    return { delivered: false, queued: true, channel: input.channel, frequency: input.frequency, scheduledAt: scheduledAt.toISOString() };
-  };
 
   async function enforceOpa(
     ctx: AuthContext,
@@ -255,9 +208,6 @@ export function createApiRuntimeStores(deps: {
     pgTemporal,
     pgCrossService,
     upsertKnowledgeItem,
-    memoryNotificationPreferences,
-    integrationFallbackOwners,
-    integrationReconnectHistory,
     departmentQuotas,
     accessMembers,
     temporaryGrants,
@@ -267,11 +217,8 @@ export function createApiRuntimeStores(deps: {
     integrationEventMemory,
     testExecutionMemory,
     githubMainHeadMemory,
-    notificationPreferenceKey,
     accessMemberKey,
     customPolicyKey,
-    getNotificationPreferences,
-    queueNotificationDigest,
     enforceOpa,
     recordAudit,
     authenticateProjectRequest,

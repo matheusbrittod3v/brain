@@ -4,11 +4,9 @@ import type { FastifyInstance } from "fastify";
 import type { BrainRunnerQueue } from "@noema/agent-runner";
 import type { AuditLogger } from "@noema/audit-engine";
 import type { AuthContext } from "@noema/auth";
-import { dispatchChannelNotification, type HumanOpsChannel } from "@noema/connector-saas";
 import { BrainError } from "@noema/core";
 import type { PgOperationalRepository } from "@noema/database";
 import { cancelRunnerSchedule, listRunnerSchedules } from "@noema/mcp-server";
-import { notificationPreferenceAllows, type NotificationCategory, type NotificationPreferences } from "../notification-preferences.js";
 
 export function registerRunnerRoutes(
   app: FastifyInstance,
@@ -19,19 +17,6 @@ export function registerRunnerRoutes(
       resource: { projectId: string; accessPolicyId: string; action: "read" | "write" | "create" | "update" | "approve"; domainId?: number }
     ) => Promise<void>;
     recordAudit: (ctx: AuthContext, event: Parameters<AuditLogger["record"]>[0]) => Promise<unknown>;
-    getNotificationPreferences: (ctx: AuthContext, projectId: string, accessPolicyId: string) => Promise<NotificationPreferences>;
-    queueNotificationDigest: (
-      ctx: AuthContext,
-      input: {
-        projectId: string;
-        channel: HumanOpsChannel;
-        category: NotificationCategory;
-        targetId: string;
-        title: string;
-        frequency: "daily" | "weekly";
-        accessPolicyId?: string;
-      }
-    ) => Promise<{ delivered: boolean; queued: boolean; channel: HumanOpsChannel; scheduledAt: string }>;
     runner: BrainRunnerQueue;
     opRepo?: PgOperationalRepository;
   }
@@ -40,8 +25,6 @@ export function registerRunnerRoutes(
     authenticateProjectRequest,
     enforceOpa,
     recordAudit,
-    getNotificationPreferences,
-    queueNotificationDigest,
     runner,
     opRepo
   } = deps;
@@ -186,81 +169,4 @@ export function registerRunnerRoutes(
       return { questions };
     }
   );
-
-  app.post<{
-    Params: { projectId: string; taskId: string; questionId: string };
-    Body: { channel: HumanOpsChannel; webhookUrl?: string; reviewUrl?: string };
-  }>("/v1/projects/:projectId/runner/tasks/:taskId/questions/:questionId/notify", async (req) => {
-    const ctx = await authenticateProjectRequest(req.headers.authorization, req.params.projectId);
-    await enforceOpa(ctx, { projectId: req.params.projectId, accessPolicyId: "internal-project", action: "write" });
-    const questions = opRepo
-      ? await opRepo.listRunnerTaskQuestions(ctx, req.params.projectId, req.params.taskId)
-      : runner.listQuestions(ctx, req.params.taskId);
-    const question = questions.find((entry) => entry.questionId === req.params.questionId);
-    if (!question) throw new BrainError("BRAIN_ERR_NOT_FOUND", `Pergunta '${req.params.questionId}' não encontrada para a tarefa.`, 404);
-    if (question.status !== "pending") throw new BrainError("BRAIN_ERR_CONFLICT", "Somente perguntas pendentes podem ser notificadas.", 409);
-    const preferences = await getNotificationPreferences(ctx, req.params.projectId, "internal-project");
-    if (!notificationPreferenceAllows(preferences, req.body.channel, "runner_question")) {
-      return { delivered: false, suppressed: true, channel: req.body.channel, reason: "Canal ou categoria desativada nas preferências pessoais." };
-    }
-    const envWebhookMap: Record<HumanOpsChannel, string | undefined> = {
-      slack: process.env.NOEMA_SLACK_WEBHOOK_URL,
-      teams: process.env.NOEMA_TEAMS_WEBHOOK_URL,
-      jira: process.env.NOEMA_JIRA_WEBHOOK_URL,
-      clickup: process.env.NOEMA_CLICKUP_WEBHOOK_URL,
-      email: process.env.NOEMA_EMAIL_WEBHOOK_URL
-    };
-    const webhookUrl = req.body.webhookUrl ?? envWebhookMap[req.body.channel];
-    if (!webhookUrl) return { delivered: false, channel: req.body.channel, reason: `Webhook para canal '${req.body.channel}' não configurado.` };
-    const panelUrl = new URL(req.body.reviewUrl ?? `${process.env.NOEMA_CORS_ORIGIN ?? "http://localhost:3000"}`);
-    panelUrl.searchParams.set("workspace", "agents");
-    panelUrl.searchParams.set("projectId", req.params.projectId);
-    if (preferences.frequency !== "immediate") {
-      if (!envWebhookMap[req.body.channel]) return { delivered: false, channel: req.body.channel, reason: "Digest exige o webhook do canal configurado no servidor." };
-      const queued = await queueNotificationDigest(ctx, {
-        projectId: req.params.projectId,
-        channel: req.body.channel,
-        category: "runner_question",
-        targetId: question.questionId,
-        title: `Pergunta do Runner: ${question.question}`,
-        frequency: preferences.frequency
-      });
-      await recordAudit(ctx, {
-        tenantId: ctx.tenantId,
-        projectId: req.params.projectId,
-        accessPolicyId: "internal-project",
-        actorId: ctx.actorId,
-        actorType: ctx.actorType,
-        action: "create",
-        targetType: "channel_notification",
-        targetId: question.questionId,
-        metadata: { channel: req.body.channel, queued: true, scheduledAt: queued.scheduledAt }
-      });
-      return queued;
-    }
-    const result = await dispatchChannelNotification({
-      channel: req.body.channel,
-      webhookUrl,
-      projectId: req.params.projectId,
-      proposalId: req.params.taskId,
-      taskId: req.params.taskId,
-      questionId: question.questionId,
-      question: question.question,
-      title: "Pergunta do Brain Runner",
-      reviewUrl: panelUrl.toString(),
-      idempotencyKey: `${req.params.projectId}:${req.params.taskId}:${question.questionId}:${req.body.channel}`
-    });
-    await recordAudit(ctx, {
-      tenantId: ctx.tenantId,
-      projectId: req.params.projectId,
-      accessPolicyId: "internal-project",
-      actorId: ctx.actorId,
-      actorType: ctx.actorType,
-      action: "create",
-      targetType: "channel_notification",
-      targetId: question.questionId,
-      metadata: { channel: req.body.channel, delivered: result.delivered, statusCode: result.statusCode }
-    });
-    return result;
-  });
 }

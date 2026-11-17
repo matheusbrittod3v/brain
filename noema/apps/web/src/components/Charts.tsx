@@ -61,43 +61,190 @@ export function HealthDonutChart({
   );
 }
 
+export function getProviderColor(modelOrProvider: string): string {
+  const s = modelOrProvider.toLowerCase();
+  if (s.includes("anthropic") || s.includes("claude")) return "#a855f7"; // violet
+  if (s.includes("openai") || s.includes("gpt") || s.includes("o1") || s.includes("o3")) return "#10b981"; // emerald
+  if (s.includes("google") || s.includes("gemini")) return "#f59e0b"; // amber
+  if (s.includes("ollama") || s.includes("llama") || s.includes("qwen") || s.includes("deepseek") || s.includes("local")) return "#38bdf8"; // sky
+  return "#6366f1"; // indigo
+}
+
 export function FinOpsBarChart({
-  models
+  models,
+  metric = "tokens"
 }: {
-  models: Array<{ model: string; totalTokens: number | null; providerCostUsd: number | null }>;
+  models: Array<{
+    model: string;
+    totalTokens: number | null;
+    providerCostUsd: number | null;
+    calls?: number;
+    provider?: string;
+    inputTokens?: number | null;
+    outputTokens?: number | null;
+    promptTokens?: number | null;
+    completionTokens?: number | null;
+  }>;
+  metric?: "tokens" | "usd" | "calls" | "stacked_tokens";
 }) {
-  const data = models.map((m) => ({
-    name: m.model.slice(0, 18),
-    tokens: m.totalTokens ?? 0,
-    usd: Number((m.providerCostUsd ?? 0).toFixed(4))
-  }));
+  const data = models.map((m) => {
+    const prompt = m.promptTokens ?? m.inputTokens ?? 0;
+    const completion = m.completionTokens ?? m.outputTokens ?? 0;
+    const total = m.totalTokens ?? prompt + completion;
+    const calls = m.calls ?? 1;
+    const usd = Number((m.providerCostUsd ?? 0).toFixed(4));
+    const provider = m.provider ?? (m.model.startsWith("ollama:") ? "Ollama (Local)" : m.model.startsWith("claude") ? "Anthropic" : m.model.startsWith("gpt") ? "OpenAI" : "LLM Provedor");
+    return {
+      name: m.model.length > 20 ? `${m.model.slice(0, 18)}…` : m.model,
+      fullName: m.model,
+      provider,
+      tokens: total,
+      promptTokens: prompt,
+      completionTokens: completion,
+      usd,
+      calls,
+      color: getProviderColor(m.provider || m.model)
+    };
+  });
 
   if (data.length === 0) {
     return (
-      <div style={{ height: 180, display: "flex", alignItems: "center", justifyContent: "center", color: "var(--text-muted)", fontSize: 12 }}>
-        Sem execuções registradas ainda
+      <div style={{ height: 210, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", color: "var(--text-muted)", fontSize: 12.5, gap: 6 }}>
+        <span>Sem execuções ou telemetria registradas para os filtros atuais</span>
+      </div>
+    );
+  }
+
+  const formatYAxis = (val: number) => {
+    if (metric === "usd") return `$${val < 1 ? val.toFixed(3) : val.toFixed(1)}`;
+    if (val >= 1_000_000) return `${(val / 1_000_000).toFixed(1)}M`;
+    if (val >= 1_000) return `${(val / 1_000).toFixed(0)}k`;
+    return String(val);
+  };
+
+  return (
+    <div style={{ width: "100%", height: 240 }}>
+      <ResponsiveContainer>
+        <BarChart data={data} margin={{ top: 12, right: 12, left: -4, bottom: 6 }}>
+          <CartesianGrid stroke="rgba(148,163,184,0.08)" vertical={false} />
+          <XAxis dataKey="name" stroke="#64748b" fontSize={11} tickLine={false} />
+          <YAxis stroke="#64748b" fontSize={11} tickFormatter={formatYAxis} tickLine={false} axisLine={false} />
+          <Tooltip
+            contentStyle={{
+              background: "rgba(15, 23, 42, 0.95)",
+              border: "1px solid rgba(148,163,184,0.22)",
+              borderRadius: 10,
+              fontSize: 12,
+              boxShadow: "0 12px 28px rgba(0,0,0,0.45)",
+              padding: "10px 12px"
+            }}
+            formatter={(value: unknown, name?: string | number) => {
+              const num = Number(value ?? 0);
+              const label = String(name ?? "");
+              if (label === "usd" || metric === "usd") return [`$${num.toFixed(4)} USD`, "Custo Provedor"];
+              if (label === "calls" || metric === "calls") return [num.toLocaleString("pt-BR"), "Chamadas"];
+              if (label === "promptTokens") return [num.toLocaleString("pt-BR"), "Prompt (Entrada)"];
+              if (label === "completionTokens") return [num.toLocaleString("pt-BR"), "Completion (Saída)"];
+              return [num.toLocaleString("pt-BR"), "Tokens Totais"];
+            }}
+            labelFormatter={(label: unknown, payload?: readonly { payload?: { fullName?: string; provider?: string } }[]) => {
+              const item = payload?.[0]?.payload;
+              return `${item?.fullName ?? label} (${item?.provider ?? "Provedor"})`;
+            }}
+          />
+          {metric === "stacked_tokens" ? (
+            <>
+              <Bar dataKey="promptTokens" name="promptTokens" fill="#6366f1" stackId="tokens" radius={[0, 0, 0, 0]} />
+              <Bar dataKey="completionTokens" name="completionTokens" fill="#38bdf8" stackId="tokens" radius={[6, 6, 0, 0]} />
+            </>
+          ) : (
+            <Bar
+              dataKey={metric === "usd" ? "usd" : metric === "calls" ? "calls" : "tokens"}
+              radius={[6, 6, 0, 0]}
+            >
+              {data.map((entry, idx) => (
+                <Cell key={`bar-${idx}`} fill={entry.color} />
+              ))}
+            </Bar>
+          )}
+        </BarChart>
+      </ResponsiveContainer>
+    </div>
+  );
+}
+
+export function FinOpsCostCompositionChart({
+  providerCostUsd,
+  computeCostUsd,
+  energyCostUsd
+}: {
+  providerCostUsd: number;
+  computeCostUsd: number;
+  energyCostUsd: number;
+}) {
+  const total = providerCostUsd + computeCostUsd + energyCostUsd;
+  const data = [
+    { name: "Inferência / Provedores LLM", value: Number(providerCostUsd.toFixed(4)), color: "#6366f1" },
+    { name: "Infraestrutura & Computação", value: Number(computeCostUsd.toFixed(4)), color: "#38bdf8" },
+    { name: "Energia Elétrica & ESG", value: Number(energyCostUsd.toFixed(4)), color: "#10b981" }
+  ].filter((d) => d.value > 0);
+
+  if (total <= 0 || data.length === 0) {
+    return (
+      <div style={{ height: 210, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", color: "var(--text-muted)", fontSize: 12 }}>
+        Sem dados suficientes de custos para compor o gráfico
       </div>
     );
   }
 
   return (
-    <div style={{ width: "100%", height: 210 }}>
+    <div style={{ width: "100%", height: 220, position: "relative" }}>
       <ResponsiveContainer>
-        <BarChart data={data}>
-          <CartesianGrid stroke="rgba(148,163,184,0.1)" vertical={false} />
-          <XAxis dataKey="name" stroke="#64748b" fontSize={11} />
-          <YAxis stroke="#64748b" fontSize={11} />
+        <PieChart>
+          <Pie
+            data={data}
+            dataKey="value"
+            nameKey="name"
+            innerRadius={56}
+            outerRadius={84}
+            paddingAngle={4}
+            stroke="transparent"
+          >
+            {data.map((entry) => (
+              <Cell key={entry.name} fill={entry.color} />
+            ))}
+          </Pie>
           <Tooltip
             contentStyle={{
-              background: "#0f172a",
-              border: "1px solid rgba(148,163,184,0.25)",
-              borderRadius: 8,
-              fontSize: 12
+              background: "rgba(15, 23, 42, 0.95)",
+              border: "1px solid rgba(148,163,184,0.22)",
+              borderRadius: 10,
+              fontSize: 12,
+              boxShadow: "0 12px 28px rgba(0,0,0,0.45)"
+            }}
+            formatter={(value: unknown) => {
+              const num = Number(value ?? 0);
+              const pct = total > 0 ? ((num / total) * 100).toFixed(1) : "0";
+              return [`$${num.toFixed(4)} USD (${pct}%)`, "Fatia"];
             }}
           />
-          <Bar dataKey="tokens" fill="#6366f1" radius={[6, 6, 0, 0]} />
-        </BarChart>
+        </PieChart>
       </ResponsiveContainer>
+      <div
+        style={{
+          position: "absolute",
+          top: "50%",
+          left: "50%",
+          transform: "translate(-50%, -50%)",
+          textAlign: "center",
+          pointerEvents: "none"
+        }}
+      >
+        <div style={{ fontSize: 11, color: "var(--text-muted)", fontWeight: 500, letterSpacing: "0.02em" }}>TOTAL</div>
+        <div style={{ fontSize: 16, fontWeight: 700, color: "var(--text-primary)", fontVariantNumeric: "tabular-nums" }}>
+          ${total < 0.01 ? total.toFixed(4) : total.toFixed(3)}
+        </div>
+      </div>
     </div>
   );
 }
@@ -173,16 +320,28 @@ export function InteractiveGraphCanvas({
         const p1 = coords.get(e.from);
         const p2 = coords.get(e.to);
         if (!p1 || !p2) return null;
+        const stroke =
+          e.relation === "VERIFIED_BY"
+            ? "rgba(16, 185, 129, 0.72)"
+            : e.relation === "IMPACTS"
+              ? "rgba(245, 158, 11, 0.65)"
+              : "rgba(99, 102, 241, 0.48)";
+        const mx = (p1.x + p2.x) / 2;
+        const my = (p1.y + p2.y) / 2;
         return (
-          <line
-            key={`${e.from}-${e.to}-${i}`}
-            x1={p1.x}
-            y1={p1.y}
-            x2={p2.x}
-            y2={p2.y}
-            stroke="rgba(99, 102, 241, 0.38)"
-            strokeWidth={1.4}
-          />
+          <g key={`${e.from}-${e.to}-${i}`}>
+            <line x1={p1.x} y1={p1.y} x2={p2.x} y2={p2.y} stroke={stroke} strokeWidth={1.6} />
+            <text
+              x={mx}
+              y={my - 3}
+              textAnchor="middle"
+              fill={e.relation === "VERIFIED_BY" ? "#6ee7b7" : "#94a3b8"}
+              fontSize={7.5}
+              fontFamily="ui-monospace, SFMono-Regular, monospace"
+            >
+              {e.relation}
+            </text>
+          </g>
         );
       })}
       {visibleNodes.map((n) => {

@@ -34,8 +34,6 @@ import {
   contextSessionItems,
   customAccessPolicies,
   knowledgeItems,
-  notificationPreferences,
-  notificationOutbox,
   organizations,
   projectAccessMembers,
   projects,
@@ -48,8 +46,6 @@ import {
   taskLeases,
   temporaryAccessGrants,
   departmentFinopsQuotas,
-  integrationFallbackOwners,
-  integrationReconnectHistory,
   lgpdShreddedSubjects
 } from "./schema.js";
 
@@ -831,83 +827,6 @@ export class PgOperationalRepository {
     return { allowed: used <= dailyLimit, used, limit: dailyLimit };
   }
 
-  async getNotificationPreferences(ctx: AuthContext, projectId: string, accessPolicyId: string) {
-    return withTenantRls(this.db, ctx, async (tx) => {
-      await tx.execute(sql`SELECT set_config('app.current_actor_id', ${ctx.actorId}, true)`);
-      const rows = await tx.select().from(notificationPreferences).where(and(
-        eq(notificationPreferences.tenantId, ctx.tenantId), eq(notificationPreferences.projectId, projectId),
-        eq(notificationPreferences.actorId, ctx.actorId), eq(notificationPreferences.accessPolicyId, accessPolicyId)
-      )).limit(1);
-      return rows[0];
-    });
-  }
-
-  async saveNotificationPreferences(ctx: AuthContext, input: {
-    projectId: string; accessPolicyId: string; channels: string[]; categories: string[]; frequency: string;
-  }) {
-    return withTenantRls(this.db, ctx, async (tx) => {
-      await tx.execute(sql`SELECT set_config('app.current_actor_id', ${ctx.actorId}, true)`);
-      const rows = await tx.insert(notificationPreferences).values({
-        tenantId: ctx.tenantId, projectId: input.projectId, actorId: ctx.actorId,
-        accessPolicyId: input.accessPolicyId, channels: input.channels,
-        categories: input.categories, frequency: input.frequency, updatedAt: new Date()
-      }).onConflictDoUpdate({
-        target: [notificationPreferences.tenantId, notificationPreferences.projectId, notificationPreferences.actorId, notificationPreferences.accessPolicyId],
-        set: { channels: input.channels, categories: input.categories, frequency: input.frequency, updatedAt: new Date() }
-      }).returning();
-      return rows[0];
-    });
-  }
-
-  async clearNotificationPreferences(ctx: AuthContext, projectId: string, accessPolicyId: string) {
-    return withTenantRls(this.db, ctx, async (tx) => {
-      await tx.execute(sql`SELECT set_config('app.current_actor_id', ${ctx.actorId}, true)`);
-      const rows = await tx.delete(notificationPreferences).where(and(
-        eq(notificationPreferences.tenantId, ctx.tenantId), eq(notificationPreferences.projectId, projectId),
-        eq(notificationPreferences.actorId, ctx.actorId), eq(notificationPreferences.accessPolicyId, accessPolicyId)
-      )).returning({ id: notificationPreferences.id });
-      return rows.length > 0;
-    });
-  }
-
-  async enqueueNotificationDigest(ctx: AuthContext, input: {
-    projectId: string; accessPolicyId: string; channel: string; category: string;
-    eventKey: string; payload: Record<string, unknown>; scheduledAt: Date;
-  }) {
-    return withTenantRls(this.db, ctx, async (tx) => {
-      await tx.execute(sql`SELECT set_config('app.current_actor_id', ${ctx.actorId}, true)`);
-      const rows = await tx.insert(notificationOutbox).values({
-        tenantId: ctx.tenantId, projectId: input.projectId, actorId: ctx.actorId,
-        accessPolicyId: input.accessPolicyId, channel: input.channel, category: input.category,
-        eventKey: input.eventKey, payload: input.payload, scheduledAt: input.scheduledAt
-      }).onConflictDoNothing().returning({ id: notificationOutbox.id });
-      return rows.length > 0;
-    });
-  }
-
-  async listNotificationDigest(ctx: AuthContext, input: { projectId: string; accessPolicyId: string; channel: string; category: string; scheduledAt: Date }) {
-    return withTenantRls(this.db, ctx, async (tx) => {
-      await tx.execute(sql`SELECT set_config('app.current_actor_id', ${ctx.actorId}, true)`);
-      return tx.select().from(notificationOutbox).where(and(
-        eq(notificationOutbox.tenantId, ctx.tenantId), eq(notificationOutbox.projectId, input.projectId),
-        eq(notificationOutbox.actorId, ctx.actorId), eq(notificationOutbox.accessPolicyId, input.accessPolicyId),
-        eq(notificationOutbox.channel, input.channel), eq(notificationOutbox.category, input.category),
-        eq(notificationOutbox.scheduledAt, input.scheduledAt), sql`${notificationOutbox.deliveredAt} IS NULL`
-      ));
-    });
-  }
-
-  async markNotificationDigestDelivered(ctx: AuthContext, ids: string[]) {
-    if (ids.length === 0) return 0;
-    return withTenantRls(this.db, ctx, async (tx) => {
-      await tx.execute(sql`SELECT set_config('app.current_actor_id', ${ctx.actorId}, true)`);
-      const rows = await tx.update(notificationOutbox).set({ deliveredAt: new Date() }).where(and(
-        eq(notificationOutbox.tenantId, ctx.tenantId), inArray(notificationOutbox.id, ids), sql`${notificationOutbox.deliveredAt} IS NULL`
-      )).returning({ id: notificationOutbox.id });
-      return rows.length;
-    });
-  }
-
   async recordApprovalReminder(ctx: AuthContext, input: { projectId: string; proposalId: string; accessPolicyId: string; dueAt: Date; eventType: "reminder" | "escalation" }) {
     return withTenantRls(this.db, ctx, async (tx) => {
       const stillPending = await tx.select({ proposalId: approvalRequests.proposalId }).from(approvalRequests).where(and(
@@ -1495,6 +1414,20 @@ export class PgOperationalRepository {
     });
   }
 
+  async releaseLease(ctx: AuthContext, projectId: string, taskId: string): Promise<boolean> {
+    return withTenantRls(this.db, ctx, async (tx) => {
+      const deleted = await tx
+        .delete(taskLeases)
+        .where(and(
+          eq(taskLeases.tenantId, ctx.tenantId),
+          eq(taskLeases.projectId, projectId),
+          eq(taskLeases.taskId, taskId)
+        ))
+        .returning({ taskId: taskLeases.taskId });
+      return deleted.length > 0;
+    });
+  }
+
   async findOverlappingFileLeases(
     ctx: AuthContext,
     projectId: string,
@@ -2038,92 +1971,6 @@ export class PgOperationalRepository {
         downgradeModel: row!.downgradeModel ?? undefined,
         updatedAt: row!.updatedAt.toISOString()
       };
-    });
-  }
-
-  async upsertIntegrationFallbackOwner(ctx: AuthContext, projectId: string, provider: string, fallbackOwner: string) {
-    return withTenantRls(this.db, ctx, async (tx) => {
-      const now = new Date();
-      const [row] = await tx
-        .insert(integrationFallbackOwners)
-        .values({
-          tenantId: ctx.tenantId,
-          projectId,
-          provider,
-          fallbackOwner,
-          accessPolicyId: "internal-project",
-          updatedBy: ctx.actorId,
-          updatedAt: now
-        })
-        .onConflictDoUpdate({
-          target: [integrationFallbackOwners.tenantId, integrationFallbackOwners.projectId, integrationFallbackOwners.provider],
-          set: {
-            fallbackOwner,
-            updatedBy: ctx.actorId,
-            updatedAt: now
-          }
-        })
-        .returning();
-      return {
-        provider: row!.provider,
-        fallbackOwner: row!.fallbackOwner,
-        updatedBy: row!.updatedBy,
-        updatedAt: row!.updatedAt.toISOString()
-      };
-    });
-  }
-
-  async listIntegrationFallbackOwners(ctx: AuthContext, projectId: string) {
-    return withTenantRls(this.db, ctx, async (tx) => {
-      const rows = await tx
-        .select()
-        .from(integrationFallbackOwners)
-        .where(and(eq(integrationFallbackOwners.tenantId, ctx.tenantId), eq(integrationFallbackOwners.projectId, projectId)));
-      return rows.map((row) => ({
-        provider: row.provider,
-        fallbackOwner: row.fallbackOwner,
-        updatedBy: row.updatedBy,
-        updatedAt: row.updatedAt.toISOString()
-      }));
-    });
-  }
-
-  async recordIntegrationReconnect(ctx: AuthContext, projectId: string, provider: string, status: string) {
-    return withTenantRls(this.db, ctx, async (tx) => {
-      const [row] = await tx
-        .insert(integrationReconnectHistory)
-        .values({
-          tenantId: ctx.tenantId,
-          projectId,
-          provider,
-          status,
-          actorId: ctx.actorId,
-          accessPolicyId: "internal-project"
-        })
-        .returning();
-      return {
-        provider: row!.provider,
-        status: row!.status,
-        actorId: row!.actorId,
-        lastReconnectAt: row!.lastReconnectAt.toISOString()
-      };
-    });
-  }
-
-  async listIntegrationReconnectHistory(ctx: AuthContext, projectId: string) {
-    return withTenantRls(this.db, ctx, async (tx) => {
-      const rows = await tx
-        .select()
-        .from(integrationReconnectHistory)
-        .where(and(eq(integrationReconnectHistory.tenantId, ctx.tenantId), eq(integrationReconnectHistory.projectId, projectId)))
-        .orderBy(desc(integrationReconnectHistory.lastReconnectAt))
-        .limit(50);
-      return rows.map((row) => ({
-        provider: row.provider,
-        status: row.status,
-        actorId: row.actorId,
-        lastReconnectAt: row.lastReconnectAt.toISOString()
-      }));
     });
   }
 

@@ -41,5 +41,20 @@
   "brain_list_roles",
   "brain_upsert_role",
   "brain_delete_role",
-  "brain_assign_user_roles"
+  "brain_assign_user_roles",
+  "brain_subagent_send_message",
+  "brain_answer_question",
+  "brain_subagent_logs",
+  "brain_local_models_list",
+  "brain_subagent_ask_local",
+  "brain_subagent_triage_inbox",
+  "brain_runner_schedule_create",
+  "brain_runner_schedule_list",
+  "brain_runner_schedule_cancel",
+  "brain_runner_retry",
+  "brain_release_lease",
+  "brain_subagent_artifacts",
+  "brain_subagent_verify",
+  "brain_subagent_usage",
+  "brain_graph_relate"
 ]

@@ -847,8 +847,6 @@ test("privacyEraseSubject deletes owned/tagged items and their versions, embeddi
         if (sql.includes("DELETE FROM memory_entries")) return [];
         if (sql.includes("DELETE FROM handoffs")) return [];
         if (sql.includes("DELETE FROM runner_tasks")) return [];
-        if (sql.includes("DELETE FROM notification_outbox")) return [{ id: "notice-1" }] as unknown as readonly TRow[];
-        if (sql.includes("DELETE FROM notification_preferences")) return [{ id: "prefs-1" }] as unknown as readonly TRow[];
         assert.match(sql, /DELETE FROM knowledge_items/);
         const deleted: Array<{ id: string }> = [];
         for (let i = items.length - 1; i >= 0; i--) {
@@ -870,8 +868,6 @@ test("privacyEraseSubject deletes owned/tagged items and their versions, embeddi
   assert.equal(result.deletedEmbeddings, 2);
   assert.equal(result.deletedRelations, 2);
   assert.equal(result.createdSyncTombstones, 2);
-  assert.equal(result.deletedNotificationOutbox, 1);
-  assert.equal(result.deletedNotificationPreferences, 1);
   assert.deepEqual(result.deletedItemIds.sort(), ["K-OWNED", "K-TAGGED"]);
   assert.deepEqual(items.map((r) => r.id), ["K-OTHER-USER", "K-OTHER-TENANT"]);
   assert.equal(embeddings.has("K-OWNED"), false);

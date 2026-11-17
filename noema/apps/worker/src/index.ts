@@ -14,13 +14,11 @@ import { extractCodeAnchors, extractScipDocumentRelationships, extractScipSymbol
 import { deduplicateCanonicalItems, runWithExponentialBackoff } from "@noema/connector-framework";
 import { createGitHubAppJwt, exchangeInstallationToken, fetchRepoCommitChanges, fetchRepoTreeAndFiles } from "@noema/connector-github";
 import {
-  dispatchChannelNotification,
   fetchNangoRecords,
   mapSaasRecordToKnowledgeItem,
   type ExternalSaasRecord,
   type SaasProvider
 } from "@noema/connector-saas";
-import type { HumanOpsChannel } from "@noema/connector-saas";
 import type { KnowledgeItem } from "@noema/core";
 import {
   createAppPostgresClient,
@@ -46,11 +44,6 @@ export interface EmbedJobPayload {
 export interface ApprovalReminderJobPayload {
   tenantId: string; projectId: string; proposalId: string; accessPolicyId: string; dueAt: string;
   eventType: "reminder" | "escalation";
-}
-
-export interface NotificationDigestJobPayload {
-  tenantId: string; projectId: string; actorId: string; accessPolicyId: string;
-  channel: HumanOpsChannel; category: "approval" | "runner_question"; scheduledAt: string; groupKey: string;
 }
 
 export interface RunnerScheduleJobPayload {
@@ -1105,26 +1098,6 @@ export async function startWorker(
     }
   });
 
-  const saasIngestQueueName = process.env.NOEMA_SAAS_INGEST_QUEUE ?? "noema.ingest-saas";
-  await boss.createQueue(saasIngestQueueName);
-  await boss.work<SaasIngestJobPayload>(saasIngestQueueName, { batchSize: 1 }, async (jobs) => {
-    for (const job of jobs) {
-      const result = await processSaasIngestJob(job.data, repo, {
-        auditFn: (event, ctx) => persistWorkerAudit(appClient, event, ctx),
-        onItemError: (item, error) => console.error(JSON.stringify({
-          event: "saas_ingest_item_failed",
-          jobId: job.id,
-          itemId: item.id,
-          projectId: item.projectId,
-          accessPolicyId: item.accessPolicyId,
-          error: error instanceof Error ? error.message : String(error)
-        }))
-      });
-      console.log(JSON.stringify({ event: "saas_ingest_completed", jobId: job.id, projectId: job.data.projectId, provider: job.data.provider, connectionId: job.data.connectionId, ...result }));
-      return result;
-    }
-  });
-
   await boss.createQueue("noema.memory-decay");
   await boss.schedule("noema.memory-decay", "0 * * * *", {
     tenantId: process.env.NOEMA_TENANT_ID ?? "default-org",
@@ -1184,58 +1157,6 @@ export async function startWorker(
         metadata: { source: "approval_reminder", dueAt: payload.dueAt, inserted: recorded }
       }, ctx);
       return { recorded };
-    }
-  });
-
-  await boss.createQueue("noema.notification-digest");
-  await boss.work<NotificationDigestJobPayload>("noema.notification-digest", async (jobs) => {
-    for (const job of jobs) {
-      const payload = job.data;
-      const ctx: AuthContext = { tenantId: payload.tenantId, actorId: payload.actorId, actorType: "human", roles: ["developer"], allowedProjects: [payload.projectId], allowedPolicies: [payload.accessPolicyId] };
-      const entries = await opRepo.listNotificationDigest(ctx, {
-        projectId: payload.projectId, accessPolicyId: payload.accessPolicyId, channel: payload.channel,
-        category: payload.category, scheduledAt: new Date(payload.scheduledAt)
-      });
-      if (entries.length === 0) continue;
-      const webhookUrl = ({
-        slack: process.env.NOEMA_SLACK_WEBHOOK_URL, teams: process.env.NOEMA_TEAMS_WEBHOOK_URL,
-        jira: process.env.NOEMA_JIRA_WEBHOOK_URL, clickup: process.env.NOEMA_CLICKUP_WEBHOOK_URL,
-        email: process.env.NOEMA_EMAIL_WEBHOOK_URL
-      } as Record<HumanOpsChannel, string | undefined>)[payload.channel];
-      if (!webhookUrl) throw new Error(`Webhook '${payload.channel}' não está configurado para entregar o digest.`);
-      const summary = entries.map((entry) => {
-        const item = entry.payload as { title?: string; targetId?: string };
-        return `${item.title ?? "Notificação"} (${item.targetId ?? entry.eventKey})`;
-      }).join("; ").slice(0, 1200);
-      const reviewUrl = new URL(process.env.NOEMA_CORS_ORIGIN ?? "http://localhost:3000");
-      reviewUrl.searchParams.set("projectId", payload.projectId);
-      reviewUrl.searchParams.set("workspace", payload.category === "approval" ? "inbox" : "agents");
-      const result = await dispatchChannelNotification({
-        channel: payload.channel, webhookUrl, projectId: payload.projectId,
-        proposalId: `digest-${payload.category}`, title: `Resumo ${payload.category}: ${entries.length} item(ns)`,
-        reviewUrl: reviewUrl.toString(), idempotencyKey: `digest:${payload.groupKey}`,
-        message: `[Noema] Resumo ${payload.category} (${entries.length} item(ns)): ${summary}. Abra o Inbox: ${reviewUrl.toString()}`
-      });
-      if (!result.delivered) throw new Error(`Digest ${payload.groupKey} falhou com HTTP ${result.statusCode ?? "indisponível"}.`);
-      await persistWorkerAudit(appClient, {
-        tenantId: payload.tenantId,
-        projectId: payload.projectId,
-        accessPolicyId: payload.accessPolicyId,
-        actorId: payload.actorId,
-        actorType: "human",
-        action: "deliver",
-        targetType: "notification_digest",
-        targetId: payload.groupKey,
-        metadata: {
-          source: "notification_digest",
-          channel: payload.channel,
-          category: payload.category,
-          entryIds: entries.map((entry) => entry.id),
-          statusCode: result.statusCode
-        }
-      }, ctx);
-      const markedDelivered = await opRepo.markNotificationDigestDelivered(ctx, entries.map((entry) => entry.id));
-      return { delivered: entries.length, markedDelivered };
     }
   });
 

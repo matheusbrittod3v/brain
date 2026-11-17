@@ -20,13 +20,13 @@ async function openMcp(runtime, customCtx = context, profile = "service") {
   return { client, server };
 }
 
-test("stdio MCP catalog exposes the canonical 43 tools", async () => {
+test("stdio MCP catalog exposes the canonical 58 tools", async () => {
   const catalog = JSON.parse(readFileSync(fileURLToPath(new URL("../../../protocols/mcp-tools/catalog.json", import.meta.url)), "utf8"));
   const { client, server } = await openMcp(createNoemaRuntime(new InMemoryAuditLogger()));
   try {
     const listed = await client.listTools();
     assert.deepEqual(listed.tools.map((tool) => tool.name), catalog);
-    assert.equal(listed.tools.length, 43);
+    assert.equal(listed.tools.length, 58);
   } finally {
     await Promise.all([client.close(), server.close()]);
   }

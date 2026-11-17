@@ -31,7 +31,6 @@ import { buildBusinessRuleTestCoverageMatrix, buildTechRadar, computeProjectHeal
 import { analyzeDistributedImpact } from "@noema/impact-analysis";
 import { planAutonomousTasks } from "@noema/task-engine";
 import { orchestrateLivingDocDrafts } from "@noema/workflow-orchestrator";
-import { defaultNotificationPreferences, nextNotificationWindow, normalizeNotificationPreferences, notificationDigestGroupKey, notificationPreferenceAllows, type NotificationCategory, type NotificationPreferences } from "./notification-preferences.js";
 import { createRealtimeHub } from "./realtime.js";
 import { registerAccessProfileRoutes } from "./routes/access-profile.js";
 import { registerAccessRbacRoutes } from "./routes/access-rbac.js";
@@ -68,13 +67,10 @@ import {
   configuredProjectScope,
   configuredWorkspaceRoot,
   enqueueApprovalReminders,
-  enqueueNotificationDigest,
   enqueueRemoteGitIngestJob,
-  enqueueSaasIngestJob,
   mapExternalHumanActor,
   normalizeAuditLogRow,
-  resolveGitHubRepoMapping,
-  type NotificationDigestPayload
+  resolveGitHubRepoMapping
 } from "./services/jobs.js";
 export { redactPiiWithAiWorker };
 import {
@@ -99,15 +95,6 @@ import {
   parseGitHubPushEvent,
   verifyGitHubSignature
 } from "@noema/connector-github";
-import {
-  dispatchChannelNotification,
-  handleSaasWebhook,
-  parseChannelActionPayload,
-  verifyChannelWebhookSignature,
-  verifySlackRequestSignature,
-  type HumanOpsChannel,
-  type SaasProvider
-} from "@noema/connector-saas";
 
 export function buildApp(
   expectedApiKey: string | undefined = process.env.NOEMA_LOCAL_API_KEY,
@@ -239,9 +226,6 @@ export function buildApp(
     pgTemporal,
     pgCrossService,
     upsertKnowledgeItem,
-    memoryNotificationPreferences,
-    integrationFallbackOwners,
-    integrationReconnectHistory,
     departmentQuotas,
     accessMembers,
     temporaryGrants,
@@ -251,11 +235,8 @@ export function buildApp(
     integrationEventMemory,
     testExecutionMemory,
     githubMainHeadMemory,
-    notificationPreferenceKey,
     accessMemberKey,
     customPolicyKey,
-    getNotificationPreferences,
-    queueNotificationDigest,
     enforceOpa,
     recordAudit,
     authenticateProjectRequest,
@@ -362,8 +343,6 @@ export function buildApp(
     authenticateProjectRequest,
     enforceOpa,
     recordAudit,
-    getNotificationPreferences,
-    queueNotificationDigest,
     runner,
     opRepo
   });
@@ -403,10 +382,6 @@ export function buildApp(
     enforceOpa,
     recordAudit,
     upsertKnowledgeItem,
-    getNotificationPreferences,
-    notificationPreferenceKey,
-    queueNotificationDigest,
-    memoryNotificationPreferences,
     integrationEventMemory,
     opRepo,
     pgApprovals,
@@ -476,9 +451,7 @@ export function buildApp(
     opRepo,
     pgCrossService,
     crossService,
-    githubMainHeadMemory,
-    integrationFallbackOwners,
-    integrationReconnectHistory
+    githubMainHeadMemory
   });
 
   registerWebhookRoutes(app, {

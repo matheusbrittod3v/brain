@@ -420,36 +420,6 @@ export const approvalReminderEvents = pgTable("approval_reminder_events", {
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull()
 }, (t) => [unique("uq_approval_reminder_event").on(t.tenantId, t.projectId, t.proposalId, t.dueAt, t.eventType)]);
 
-export const notificationPreferences = pgTable("notification_preferences", {
-  id: uuid("id").defaultRandom().primaryKey(),
-  tenantId: text("tenant_id").notNull(),
-  projectId: text("project_id").notNull(),
-  actorId: text("actor_id").notNull(),
-  accessPolicyId: text("access_policy_id").notNull(),
-  channels: text("channels").array().notNull(),
-  categories: text("categories").array().notNull(),
-  frequency: text("frequency").default("immediate").notNull(),
-  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull()
-}, (t) => [unique("uq_notification_preferences_owner").on(t.tenantId, t.projectId, t.actorId, t.accessPolicyId)]);
-
-export const notificationOutbox = pgTable("notification_outbox", {
-  id: uuid("id").defaultRandom().primaryKey(),
-  tenantId: text("tenant_id").notNull(),
-  projectId: text("project_id").notNull(),
-  actorId: text("actor_id").notNull(),
-  accessPolicyId: text("access_policy_id").notNull(),
-  channel: text("channel").notNull(),
-  category: text("category").notNull(),
-  eventKey: text("event_key").notNull(),
-  payload: jsonb("payload").notNull(),
-  scheduledAt: timestamp("scheduled_at", { withTimezone: true }).notNull(),
-  deliveredAt: timestamp("delivered_at", { withTimezone: true }),
-  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull()
-}, (t) => [
-  unique("uq_notification_outbox_event").on(t.tenantId, t.projectId, t.actorId, t.eventKey),
-  index("idx_notification_outbox_pending").on(t.tenantId, t.projectId, t.actorId, t.scheduledAt)
-]);
-
 export const developerProfiles = pgTable("developer_profiles", {
   id: uuid("id").defaultRandom().primaryKey(),
   tenantId: text("tenant_id").notNull(),
@@ -518,27 +488,6 @@ export const departmentFinopsQuotas = pgTable("department_finops_quotas", {
   updatedBy: text("updated_by").notNull(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull()
 }, (t) => [primaryKey({ columns: [t.tenantId, t.projectId, t.department] })]);
-
-export const integrationFallbackOwners = pgTable("integration_fallback_owners", {
-  tenantId: text("tenant_id").notNull(),
-  projectId: text("project_id").notNull(),
-  provider: text("provider").notNull(),
-  fallbackOwner: text("fallback_owner").notNull(),
-  accessPolicyId: text("access_policy_id").default("internal-project").notNull(),
-  updatedBy: text("updated_by").notNull(),
-  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull()
-}, (t) => [primaryKey({ columns: [t.tenantId, t.projectId, t.provider] })]);
-
-export const integrationReconnectHistory = pgTable("integration_reconnect_history", {
-  id: uuid("id").defaultRandom().primaryKey(),
-  tenantId: text("tenant_id").notNull(),
-  projectId: text("project_id").notNull(),
-  provider: text("provider").notNull(),
-  status: text("status").notNull(),
-  actorId: text("actor_id").notNull(),
-  accessPolicyId: text("access_policy_id").default("internal-project").notNull(),
-  lastReconnectAt: timestamp("last_reconnect_at", { withTimezone: true }).defaultNow().notNull()
-}, (t) => [index("idx_integration_reconnect_history_scope").on(t.tenantId, t.projectId, t.provider, t.lastReconnectAt)]);
 
 export const lgpdShreddedSubjects = pgTable("lgpd_shredded_subjects", {
   tenantId: text("tenant_id").notNull(),

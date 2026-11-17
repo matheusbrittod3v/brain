@@ -14,7 +14,6 @@ import {
   KeyRound,
   Menu,
   Network,
-  Plug,
   Radar,
   Search,
   Shield,
@@ -30,12 +29,14 @@ import { AccessWorkspace, type AccessWorkspaceData } from "../components/workspa
 import { AgentsWorkspace, ImpactWorkspace } from "../components/workspaces/AgentsImpactWorkspaces";
 import { InboxWorkspace } from "../components/workspaces/InboxWorkspace";
 import { KnowledgeWorkspace, SearchGraphWorkspace } from "../components/workspaces/KnowledgeSearchWorkspaces";
-import { IntegrationsWorkspace, OperationsWorkspace } from "../components/workspaces/OperationsIntegrationsWorkspaces";
-import { ProjectsWorkspace } from "../components/workspaces/ProjectsWorkspace";
+import { OperationsWorkspace } from "../components/workspaces/OperationsIntegrationsWorkspaces";
+import { ProjectsWorkspace, type ProjectOverviewData } from "../components/workspaces/ProjectsWorkspace";
 import { EnterpriseWorkspace, TemplatesWorkspace } from "../components/workspaces/TemplatesEnterpriseWorkspaces";
 import { useNoemaRealtime } from "../hooks/useNoemaRealtime";
 import {
   normalizeSearchHits,
+  type AuditLogEntry,
+  type FinOpsData,
   type InspectedItemState,
   type KnowledgeHitItem,
   type KnowledgeStatus,
@@ -51,7 +52,6 @@ const WORKSPACES: ReadonlyArray<{ id: WorkspaceId; label: string; icon: ReactNod
   { id: "search", label: "Busca & Grafo", icon: <Network size={15} />, section: "Principal" },
   { id: "agents", label: "Agentes & Runner", icon: <Bot size={15} />, section: "Engenharia & IA" },
   { id: "impact", label: "Impacto", icon: <Zap size={15} />, section: "Engenharia & IA" },
-  { id: "integrations", label: "Integrações", icon: <Plug size={15} />, section: "Engenharia & IA" },
   { id: "templates", label: "Templates", icon: <Wand2 size={15} />, section: "Engenharia & IA" },
   { id: "operations", label: "Operação & FinOps", icon: <Activity size={15} />, section: "Governança" },
   { id: "access", label: "Acesso & Políticas", icon: <Shield size={15} />, section: "Governança" },
@@ -65,7 +65,6 @@ const WORKSPACE_DESCRIPTIONS: Record<WorkspaceId, string> = {
   search: "Busca híbrida (lexical + vetorial + grafo) e exploração visual de relações.",
   agents: "Delegue tarefas autônomas ao Brain Runner e acompanhe as execuções.",
   impact: "Descubra o que é afetado antes de alterar uma regra, ADR ou símbolo.",
-  integrations: "Canais conectados e responsáveis de fallback para aprovações.",
   operations: "Consumo de modelos, custos, cotas por departamento e trilha de auditoria.",
   access: "Cargos, permissões granulares e vínculos entre usuários e seus agentes.",
   templates: "Templates de scaffold derivados de padrões de arquitetura aprovados.",
@@ -180,14 +179,7 @@ export default function CommandCenterPage() {
   const overviewQuery = useQuery({
     queryKey: ["overview", apiUrl, apiKey, projectId],
     queryFn: () =>
-      apiFetch<{
-        projectId: string;
-        totalItems: number;
-        approvedCount: number;
-        draftCount: number;
-        health: { healthScore?: number; untestedRuleIds?: string[]; staleItemIds?: string[]; gitVsConnectorConflicts?: unknown[] };
-        alerts: string[];
-      }>(`/v1/projects/${encodeURIComponent(projectId)}/overview`),
+      apiFetch<ProjectOverviewData & { projectId: string }>(`/v1/projects/${encodeURIComponent(projectId)}/overview`),
     enabled: Boolean(apiKey && projectId),
     refetchInterval: 30_000
   });
@@ -222,14 +214,41 @@ export default function CommandCenterPage() {
     enabled: Boolean(apiKey && projectId && can("knowledge:search"))
   });
 
+  const inspectedRelationsQuery = useQuery({
+    queryKey: ["knowledge-relations", apiUrl, apiKey, projectId, inspectedItem?.itemId],
+    queryFn: () =>
+      apiFetch<{ relations?: Array<{ itemId: string; projectId: string; hops: number; via: string; isInferred?: boolean }> }>(
+        `/v1/projects/${encodeURIComponent(projectId)}/knowledge/${encodeURIComponent(inspectedItem!.itemId!)}`
+      ),
+    enabled: Boolean(apiKey && projectId && inspectedItem?.itemId)
+  });
+
   const runnerQuery = useQuery({
     queryKey: ["runner", apiUrl, apiKey, projectId],
     queryFn: () =>
-      apiFetch<{ tasks: Array<{ taskId: string; instruction: string; status: string; priority: string; resultSummary?: string; createdAt: string }> }>(
-        `/v1/projects/${encodeURIComponent(projectId)}/runner/tasks`
-      ),
+      apiFetch<{
+        tasks: Array<{
+          taskId: string;
+          instruction: string;
+          status: string;
+          priority: string;
+          resultSummary?: string;
+          createdAt: string;
+          pendingQuestion?: { questionId: string; question: string };
+        }>;
+      }>(`/v1/projects/${encodeURIComponent(projectId)}/runner/tasks`),
     enabled: Boolean(apiKey && projectId && can("runner:view")),
     refetchInterval: 20_000
+  });
+
+  const runnerSchedulesQuery = useQuery({
+    queryKey: ["runner-schedules", apiUrl, apiKey, projectId],
+    queryFn: () =>
+      apiFetch<{ schedules: Array<{ scheduleId: string; cron: string; instruction: string; priority: string }> }>(
+        `/v1/projects/${encodeURIComponent(projectId)}/runner/schedules`
+      ).catch(() => ({ schedules: [] })),
+    enabled: Boolean(apiKey && projectId && can("runner:view")),
+    refetchInterval: 30_000
   });
 
   const integrationsQuery = useQuery({
@@ -246,12 +265,7 @@ export default function CommandCenterPage() {
   const finopsQuery = useQuery({
     queryKey: ["finops", apiUrl, apiKey, projectId],
     queryFn: () =>
-      apiFetch<{
-        indexedItems: number;
-        estimatedLocalTokens: number;
-        modelUsage: { calls: number; byModel: Array<{ model: string; totalTokens: number | null; providerCostUsd: number | null }> };
-        infrastructureEstimate: { totalInfraAndEnergyUsd: number };
-      }>(`/v1/projects/${encodeURIComponent(projectId)}/finops`),
+      apiFetch<FinOpsData>(`/v1/projects/${encodeURIComponent(projectId)}/finops`),
     enabled: Boolean(apiKey && projectId && can("finops:view"))
   });
 
@@ -259,9 +273,9 @@ export default function CommandCenterPage() {
     queryKey: ["audit", apiUrl, apiKey, projectId],
     queryFn: () =>
       apiFetch<{
-        logs?: Array<{ id?: string; timestamp?: string; createdAt?: string; actorId: string; action: string; targetType: string; targetId: string }>;
-        events?: Array<{ timestamp?: string; createdAt?: string; actorId: string; action: string; targetType: string; targetId: string }>;
-      }>(`/v1/audit-logs?projectId=${encodeURIComponent(projectId)}&limit=50`),
+        logs?: AuditLogEntry[];
+        events?: AuditLogEntry[];
+      }>(`/v1/audit-logs?projectId=${encodeURIComponent(projectId)}&limit=100`),
     enabled: Boolean(apiKey && projectId && can("audit:view"))
   });
 
@@ -589,10 +603,36 @@ export default function CommandCenterPage() {
           {workspace === "projects" && (
             <ProjectsWorkspace
               projectId={projectId}
+              projectMeta={projectsList.find((p) => p.projectId === projectId)}
               overview={overviewQuery.data}
               loading={overviewQuery.isLoading}
               domainDistribution={domainDistribution}
+              knowledgeItems={(searchQueryRes.data?.hits ?? []).map((h) => h.item)}
+              proposals={proposalsList}
+              draftItems={draftInboxItems}
               recentJobs={integrationsQuery.data?.github?.recentJobs ?? []}
+              pendingInboxCount={pendingCount}
+              graphNodesCount={graphQuery.data?.nodes?.length ?? overviewQuery.data?.totalItems ?? 0}
+              graphEdgesCount={graphQuery.data?.edges?.length ?? 0}
+              graphEdges={graphQuery.data?.edges ?? []}
+              runnerTasks={runnerQuery.data?.tasks ?? []}
+              runnerSchedules={runnerSchedulesQuery.data?.schedules ?? []}
+              finops={finopsQuery.data}
+              auditLogs={auditQuery.data?.logs ?? auditQuery.data?.events ?? []}
+              enterprise={enterpriseQuery.data}
+              scaffoldRecommendations={scaffoldQuery.data?.recommendations ?? []}
+              accessSummary={
+                accessQuery.data
+                  ? {
+                      roles: currentRoles,
+                      membersCount: accessQuery.data.members.length,
+                      rolesCount: accessQuery.data.rolesList.length,
+                      assignmentsCount: accessQuery.data.assignments.length
+                    }
+                  : undefined
+              }
+              onInspect={setInspectedItem}
+              onNavigate={setWorkspace}
               apiFetch={apiFetch}
               queryClient={queryClient}
               notify={notify}
@@ -633,14 +673,12 @@ export default function CommandCenterPage() {
             <AgentsWorkspace projectId={projectId} tasks={runnerQuery.data?.tasks ?? []} apiFetch={apiFetch} queryClient={queryClient} notify={notify} />
           )}
 
-          {workspace === "impact" && <ImpactWorkspace projectId={projectId} apiFetch={apiFetch} notify={notify} />}
-
-          {workspace === "integrations" && (
-            <IntegrationsWorkspace
+          {workspace === "impact" && (
+            <ImpactWorkspace
               projectId={projectId}
-              notificationChannels={integrationsQuery.data?.notificationChannels ?? []}
+              knowledgeItems={(searchQueryRes.data?.hits ?? []).map((h) => h.item)}
+              onInspect={setInspectedItem}
               apiFetch={apiFetch}
-              queryClient={queryClient}
               notify={notify}
             />
           )}
@@ -716,6 +754,35 @@ export default function CommandCenterPage() {
               />
             </div>
           )}
+          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+            <span style={{ fontSize: 11, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.06em", color: "var(--text-muted)" }}>
+              Arestas no Grafo ({inspectedRelationsQuery.data?.relations?.length ?? 0})
+            </span>
+            {inspectedRelationsQuery.data?.relations && inspectedRelationsQuery.data.relations.length > 0 ? (
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                {inspectedRelationsQuery.data.relations.map((rel, idx) => (
+                  <span
+                    key={`${rel.via}-${rel.itemId}-${idx}`}
+                    style={{
+                      display: "inline-flex",
+                      alignItems: "center",
+                      gap: 6,
+                      padding: "4px 9px",
+                      borderRadius: 8,
+                      border: "1px solid var(--border-subtle)",
+                      background: "var(--bg-inset)",
+                      fontSize: 11.5
+                    }}
+                  >
+                    <Badge tone={rel.via === "VERIFIED_BY" ? "success" : rel.via === "IMPACTS" ? "warning" : "accent"}>{rel.via}</Badge>
+                    <span className="noema-mono">{rel.itemId}</span>
+                  </span>
+                ))}
+              </div>
+            ) : (
+              <span style={{ fontSize: 12, color: "var(--text-muted)" }}>Nenhuma aresta registrada para este item.</span>
+            )}
+          </div>
           <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
             <span style={{ fontSize: 11, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.06em", color: "var(--text-muted)" }}>
               Conteúdo

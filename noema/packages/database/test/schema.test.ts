@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import type { AuthContext } from "@noema/auth";
-import { approvalRequests, customAccessPolicies, gitIngestionHeads, integrationEvents, knowledgeItems, knowledgeItemVersions, notificationOutbox, notificationPreferences, projectAccessMembers, projectRepositoryHeads, runnerTaskQuestions, temporaryAccessGrants, testExecutionResults } from "../src/schema.js";
+import { approvalRequests, customAccessPolicies, gitIngestionHeads, integrationEvents, knowledgeItems, knowledgeItemVersions, projectAccessMembers, projectRepositoryHeads, runnerTaskQuestions, temporaryAccessGrants, testExecutionResults } from "../src/schema.js";
 import { withTenantRls, type NoemaDb } from "../src/client.js";
 import { PgAuditLogger } from "../src/repositories.js";
 import { contextSessionItems } from "../src/schema.js";
@@ -23,11 +23,6 @@ test("exports schema tables with multi-tenant and versioning keys", () => {
   assert.ok(approvalRequests.accessPolicyId);
   assert.ok(approvalRequests.status);
   assert.ok(approvalRequests.assignedTo);
-  assert.ok(notificationPreferences.actorId);
-  assert.ok(notificationPreferences.channels);
-  assert.ok(notificationPreferences.categories);
-  assert.ok(notificationOutbox.eventKey);
-  assert.ok(notificationOutbox.scheduledAt);
   assert.ok(integrationEvents.externalEventId);
   assert.ok(integrationEvents.eventHash);
   assert.ok(integrationEvents.response);

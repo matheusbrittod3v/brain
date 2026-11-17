@@ -20,7 +20,8 @@ export function StatCard({
   icon,
   tone = "default",
   progress,
-  loading
+  loading,
+  onClick
 }: {
   label: string;
   value: string | number;
@@ -30,10 +31,27 @@ export function StatCard({
   /** 0–100, renders a thin progress bar */
   progress?: number;
   loading?: boolean;
+  onClick?: () => void;
 }) {
   const color = TONE_COLOR[tone];
   return (
-    <div className="noema-card" style={{ padding: 16, display: "flex", flexDirection: "column", gap: 10 }}>
+    <div
+      className={`noema-card${onClick ? " interactive" : ""}`}
+      onClick={onClick}
+      role={onClick ? "button" : undefined}
+      tabIndex={onClick ? 0 : undefined}
+      onKeyDown={
+        onClick
+          ? (e) => {
+              if (e.key === "Enter" || e.key === " ") {
+                e.preventDefault();
+                onClick();
+              }
+            }
+          : undefined
+      }
+      style={{ padding: 16, display: "flex", flexDirection: "column", gap: 10 }}
+    >
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
         <span style={{ fontSize: 12, color: "var(--text-secondary)", fontWeight: 500 }}>{label}</span>
         {icon && (

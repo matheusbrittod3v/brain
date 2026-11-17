@@ -28,7 +28,7 @@ export function registerProjectsKnowledgeRoutes(
     upsertKnowledgeItem: (ctx: AuthContext, item: KnowledgeItem) => Promise<void>;
     queryAwareRetrieval: { search: (ctx: AuthContext, q: { projectId: string; query: string; domains?: number[]; atDate?: string; limit: number }) => Promise<Array<{ item: KnowledgeItem; score: number }>> };
     projectVerifiedTests: (ctx: AuthContext, projectId: string, items: KnowledgeItem[]) => Promise<any>;
-    projectHealth: (items: KnowledgeItem[], verifiedTests: any) => any;
+    projectHealth: (items: KnowledgeItem[], verifiedTests: Map<string, string[]>, linkedTestsByRule?: Map<string, string[]>) => any;
     configuredApiKey: string;
     allowedProjects: readonly string[];
     allowedPolicies: readonly string[];
@@ -132,17 +132,48 @@ export function registerProjectsKnowledgeRoutes(
     const items = hits.map((h) => h.item);
     const evidence = await projectVerifiedTests(ctx, req.params.projectId, items);
     const health = projectHealth(items, evidence.verifiedTests);
+    const linkedMap = evidence.linkedTestsByRule as Map<string, string[]> | undefined;
+    const graphVerified = new Map<string, string[]>(evidence.verifiedTests);
+    if (linkedMap) {
+      for (const [ruleId, testIds] of linkedMap.entries()) {
+        if (testIds.length > 0 && !graphVerified.has(ruleId)) {
+          graphVerified.set(ruleId, testIds);
+        }
+      }
+    }
+    const graphHealth = projectHealth(items, graphVerified);
     const alerts: string[] = [];
     if (health.untestedRuleIds.length > 0) alerts.push(`${health.untestedRuleIds.length} regra(s) sem cobertura de testes: ${health.untestedRuleIds.join(", ")}`);
     if (health.staleItemIds.length > 0) alerts.push(`${health.staleItemIds.length} item(ns) desatualizado(s) (>90d): ${health.staleItemIds.join(", ")}`);
     if (health.gitVsConnectorConflicts.length > 0) alerts.push(`${health.gitVsConnectorConflicts.length} conflito(s) Git vs Connector detectado(s).`);
+    const byType: Record<string, number> = {};
+    const byStatus: Record<string, number> = {};
+    const byPolicy: Record<string, number> = {};
+    for (const item of items) {
+      byType[item.type] = (byType[item.type] ?? 0) + 1;
+      byStatus[item.status] = (byStatus[item.status] ?? 0) + 1;
+      byPolicy[item.accessPolicyId] = (byPolicy[item.accessPolicyId] ?? 0) + 1;
+    }
+    const activeRules = items.filter((i) => i.type === "business_rule" && i.status !== "deprecated");
+    const graphLinkedRulesCount = activeRules.filter((r) => (linkedMap?.get(r.id)?.length ?? 0) > 0).length;
+    const ciVerifiedRulesCount = activeRules.filter((r) => (evidence.verifiedTests.get(r.id)?.length ?? 0) > 0).length;
     return {
       projectId: req.params.projectId,
       totalItems: items.length,
       approvedCount: items.filter((i) => i.status === "approved").length,
       draftCount: items.filter((i) => i.status === "draft").length,
       health,
-      alerts
+      graphHealth,
+      alerts,
+      summary: {
+        byType,
+        byStatus,
+        byPolicy,
+        rulesCount: activeRules.length,
+        testsCount: items.filter((i) => i.type === "test").length,
+        graphLinkedRulesCount,
+        ciVerifiedRulesCount
+      }
     };
   });
 
@@ -419,5 +450,110 @@ export function registerProjectsKnowledgeRoutes(
       return { proposalId: id, status: "draft" };
     }
   );
+
+  const relationTypeSchema = Type.Union([
+    Type.Literal("IMPLEMENTS"),
+    Type.Literal("GOVERNED_BY"),
+    Type.Literal("DEPENDS_ON"),
+    Type.Literal("DECIDED_BY"),
+    Type.Literal("VERIFIED_BY"),
+    Type.Literal("BLOCKED_BY"),
+    Type.Literal("SUPERSEDES"),
+    Type.Literal("IMPACTS"),
+    Type.Literal("CONSUMES_API"),
+    Type.Literal("PUBLISHES_EVENT"),
+    Type.Literal("SUBSCRIBES_TO"),
+    Type.Literal("CO_ACCESSED_WITH")
+  ]);
+
+  app.post<{
+    Params: { projectId: string };
+    Body: {
+      fromItemId?: string;
+      toItemId?: string;
+      relationType?: "IMPLEMENTS" | "GOVERNED_BY" | "DEPENDS_ON" | "DECIDED_BY" | "VERIFIED_BY" | "BLOCKED_BY" | "SUPERSEDES" | "IMPACTS" | "CONSUMES_API" | "PUBLISHES_EVENT" | "SUBSCRIBES_TO" | "CO_ACCESSED_WITH";
+      confidence?: number;
+      evidenceUri?: string;
+      relations?: Array<{
+        fromItemId: string;
+        toItemId: string;
+        relationType: "IMPLEMENTS" | "GOVERNED_BY" | "DEPENDS_ON" | "DECIDED_BY" | "VERIFIED_BY" | "BLOCKED_BY" | "SUPERSEDES" | "IMPACTS" | "CONSUMES_API" | "PUBLISHES_EVENT" | "SUBSCRIBES_TO" | "CO_ACCESSED_WITH";
+        confidence?: number;
+        evidenceUri?: string;
+      }>;
+    };
+  }>("/v1/projects/:projectId/graph/relations", {
+    schema: {
+      params: Type.Object({ projectId: Type.String() }),
+      body: Type.Object({
+        fromItemId: Type.Optional(Type.String({ minLength: 1 })),
+        toItemId: Type.Optional(Type.String({ minLength: 1 })),
+        relationType: Type.Optional(relationTypeSchema),
+        confidence: Type.Optional(Type.Number({ minimum: 0, maximum: 1 })),
+        evidenceUri: Type.Optional(Type.String()),
+        relations: Type.Optional(Type.Array(Type.Object({
+          fromItemId: Type.String({ minLength: 1 }),
+          toItemId: Type.String({ minLength: 1 }),
+          relationType: relationTypeSchema,
+          confidence: Type.Optional(Type.Number({ minimum: 0, maximum: 1 })),
+          evidenceUri: Type.Optional(Type.String())
+        })))
+      })
+    }
+  }, async (req) => {
+    const ctx = await authenticateProjectRequest(req.headers.authorization, req.params.projectId);
+    await enforceOpa(ctx, { projectId: req.params.projectId, accessPolicyId: "internal-project", action: "write" });
+    const inputs = req.body.relations && req.body.relations.length > 0
+      ? req.body.relations
+      : req.body.fromItemId && req.body.toItemId && req.body.relationType
+        ? [{
+            fromItemId: req.body.fromItemId,
+            toItemId: req.body.toItemId,
+            relationType: req.body.relationType,
+            confidence: req.body.confidence,
+            evidenceUri: req.body.evidenceUri
+          }]
+        : [];
+    if (inputs.length === 0) {
+      throw new BrainError("BRAIN_ERR_CONFLICT", "Informe fromItemId, toItemId e relationType (ou relations[]).", 400);
+    }
+    const created = [];
+    for (const rel of inputs) {
+      const fromItem = pgKnowledge ? await pgKnowledge.getItem(ctx, req.params.projectId, rel.fromItemId) : retrieval.getItem(ctx, req.params.projectId, rel.fromItemId);
+      const toItem = pgKnowledge ? await pgKnowledge.getItem(ctx, req.params.projectId, rel.toItemId) : retrieval.getItem(ctx, req.params.projectId, rel.toItemId);
+      const fromPolicyId = fromItem?.accessPolicyId ?? "internal-project";
+      const toPolicyId = toItem?.accessPolicyId ?? "internal-project";
+      assertPolicyAccess(ctx, fromPolicyId);
+      assertPolicyAccess(ctx, toPolicyId);
+      const edge = {
+        tenantId: ctx.tenantId,
+        fromProjectId: req.params.projectId,
+        toProjectId: req.params.projectId,
+        fromItemId: rel.fromItemId,
+        toItemId: rel.toItemId,
+        fromPolicyId,
+        toPolicyId,
+        relationType: rel.relationType,
+        isInferred: false as const,
+        confidence: rel.confidence ?? 1.0,
+        ...(rel.evidenceUri ? { evidenceUri: rel.evidenceUri } : {})
+      };
+      graph.addEdge(edge);
+      if (pgGraph) await pgGraph.addEdge(ctx, edge);
+      created.push(edge);
+    }
+    await recordAudit(ctx, {
+      tenantId: ctx.tenantId,
+      projectId: req.params.projectId,
+      accessPolicyId: "internal-project",
+      actorId: ctx.actorId,
+      actorType: ctx.actorType,
+      action: "create",
+      targetType: "graph_relations",
+      targetId: `${created[0]!.fromItemId}->${created[0]!.toItemId}`,
+      metadata: { count: created.length }
+    });
+    return { created: created.length, relations: created };
+  });
 }
 

@@ -6,19 +6,11 @@ import type { ApprovalDecision, ApprovalQueue, PostgresApprovalQueue } from "@no
 import type { AuditLogger } from "@noema/audit-engine";
 import { canApproveDomain, type AuthContext } from "@noema/auth";
 import { createBranchAndCommitFiles, createGitHubPullRequest } from "@noema/connector-github";
-import { dispatchChannelNotification, type HumanOpsChannel } from "@noema/connector-saas";
 import { BrainError, paginateCursor, type KnowledgeItem } from "@noema/core";
 import type { PgOperationalRepository } from "@noema/database";
 import type { KnowledgeGraphStore, PostgresGraphStore } from "@noema/graph";
 import type { PostgresKnowledgeRepository } from "@noema/knowledge";
 import type { HybridRetrievalEngine, PostgresRetrievalEngine } from "@noema/retrieval";
-import {
-  defaultNotificationPreferences,
-  normalizeNotificationPreferences,
-  notificationPreferenceAllows,
-  type NotificationCategory,
-  type NotificationPreferences
-} from "../notification-preferences.js";
 import { enqueueApprovalReminders, mapExternalHumanActor } from "../services/jobs.js";
 
 export function registerProposalsRoutes(
@@ -31,13 +23,6 @@ export function registerProposalsRoutes(
     ) => Promise<void>;
     recordAudit: (ctx: AuthContext, event: Parameters<AuditLogger["record"]>[0]) => Promise<unknown>;
     upsertKnowledgeItem: (ctx: AuthContext, item: KnowledgeItem) => Promise<void>;
-    getNotificationPreferences: (ctx: AuthContext, projectId: string, accessPolicyId: string) => Promise<NotificationPreferences>;
-    notificationPreferenceKey: (ctx: AuthContext, projectId: string, accessPolicyId: string) => string;
-    queueNotificationDigest: (
-      ctx: AuthContext,
-      input: { projectId: string; channel: HumanOpsChannel; category: NotificationCategory; targetId: string; title: string; frequency: "daily" | "weekly"; accessPolicyId?: string }
-    ) => Promise<{ delivered: boolean; queued: boolean; channel: HumanOpsChannel; scheduledAt: string }>;
-    memoryNotificationPreferences: Map<string, NotificationPreferences>;
     integrationEventMemory: Map<string, { eventHash: string; response?: Record<string, unknown> }>;
     opRepo?: PgOperationalRepository;
     pgApprovals?: PostgresApprovalQueue;
@@ -56,10 +41,6 @@ export function registerProposalsRoutes(
     enforceOpa,
     recordAudit,
     upsertKnowledgeItem,
-    getNotificationPreferences,
-    notificationPreferenceKey,
-    queueNotificationDigest,
-    memoryNotificationPreferences,
     integrationEventMemory,
     opRepo,
     pgApprovals,
@@ -72,71 +53,6 @@ export function registerProposalsRoutes(
     runner,
     auditLogger
   } = deps;
-
-  app.get<{ Params: { projectId: string } }>("/v1/projects/:projectId/notification-preferences", async (req) => {
-    const ctx = await authenticateProjectRequest(req.headers.authorization, req.params.projectId);
-    if (ctx.actorType !== "human") throw new BrainError("BRAIN_ERR_POLICY_DENIED", "Preferências de notificação são pessoais e só podem ser lidas por uma pessoa.", 403);
-    await enforceOpa(ctx, { projectId: req.params.projectId, accessPolicyId: "internal-project", action: "read" });
-    return { preferences: await getNotificationPreferences(ctx, req.params.projectId, "internal-project") };
-  });
-
-  app.put<{ Params: { projectId: string }; Body: { channels: string[]; categories: string[]; frequency: string } }>(
-    "/v1/projects/:projectId/notification-preferences",
-    {
-      schema: {
-        params: Type.Object({ projectId: Type.String() }),
-        body: Type.Object({ channels: Type.Array(Type.String()), categories: Type.Array(Type.String()), frequency: Type.String() })
-      }
-    },
-    async (req) => {
-      const ctx = await authenticateProjectRequest(req.headers.authorization, req.params.projectId);
-      if (ctx.actorType !== "human") throw new BrainError("BRAIN_ERR_POLICY_DENIED", "Preferências de notificação são pessoais e só podem ser alteradas por uma pessoa.", 403);
-      await enforceOpa(ctx, { projectId: req.params.projectId, accessPolicyId: "internal-project", action: "write" });
-      let preferences: NotificationPreferences;
-      try {
-        preferences = normalizeNotificationPreferences(req.body);
-      } catch (err) {
-        throw new BrainError("BRAIN_ERR_CONFLICT", err instanceof Error ? err.message : "Preferências inválidas.", 400);
-      }
-      const key = notificationPreferenceKey(ctx, req.params.projectId, "internal-project");
-      if (opRepo) await opRepo.saveNotificationPreferences(ctx, { projectId: req.params.projectId, accessPolicyId: "internal-project", ...preferences });
-      else memoryNotificationPreferences.set(key, preferences);
-      await recordAudit(ctx, {
-        tenantId: ctx.tenantId,
-        projectId: req.params.projectId,
-        accessPolicyId: "internal-project",
-        actorId: ctx.actorId,
-        actorType: ctx.actorType,
-        action: "update",
-        targetType: "notification_preferences",
-        targetId: ctx.actorId,
-        metadata: { channels: preferences.channels, categories: preferences.categories, frequency: preferences.frequency }
-      });
-      return { preferences };
-    }
-  );
-
-  app.delete<{ Params: { projectId: string } }>("/v1/projects/:projectId/notification-preferences", async (req) => {
-    const ctx = await authenticateProjectRequest(req.headers.authorization, req.params.projectId);
-    if (ctx.actorType !== "human") throw new BrainError("BRAIN_ERR_POLICY_DENIED", "Preferências de notificação são pessoais e só podem ser redefinidas por uma pessoa.", 403);
-    await enforceOpa(ctx, { projectId: req.params.projectId, accessPolicyId: "internal-project", action: "write" });
-    const key = notificationPreferenceKey(ctx, req.params.projectId, "internal-project");
-    if (opRepo) await opRepo.clearNotificationPreferences(ctx, req.params.projectId, "internal-project");
-    else memoryNotificationPreferences.delete(key);
-    const preferences = defaultNotificationPreferences();
-    await recordAudit(ctx, {
-      tenantId: ctx.tenantId,
-      projectId: req.params.projectId,
-      accessPolicyId: "internal-project",
-      actorId: ctx.actorId,
-      actorType: ctx.actorType,
-      action: "update",
-      targetType: "notification_preferences",
-      targetId: ctx.actorId,
-      metadata: { reset: true }
-    });
-    return { preferences };
-  });
 
   app.get<{ Params: { projectId: string }; Querystring: { limit?: string; cursor?: string } }>(
     "/v1/projects/:projectId/proposals",
@@ -207,11 +123,28 @@ export function registerProposalsRoutes(
   app.get<{ Params: { projectId: string }; Querystring: { rootId?: string; depth?: string } }>("/v1/projects/:projectId/graph", async (req) => {
     const ctx = await authenticateProjectRequest(req.headers.authorization, req.params.projectId);
     const rootId = req.query.rootId ?? "BR-1";
-    const depth = Number(req.query.depth ?? 2);
-    const edges = pgGraph
-      ? await pgGraph.traverseRelated(ctx, { projectId: req.params.projectId, itemId: rootId }, depth)
-      : graph.traverseRelated(ctx, { projectId: req.params.projectId, itemId: rootId }, depth);
-    return { projectId: req.params.projectId, rootId, edges };
+    const hits = await (pgRetrieval ?? retrieval).search(ctx, { projectId: req.params.projectId, query: "", limit: 80 });
+    const nodes = hits.map((h) => ({
+      id: h.item.id,
+      title: h.item.title,
+      type: h.item.type,
+      status: h.item.status
+    }));
+    const edges: Array<{ from: string; to: string; relation: string }> = [];
+    const seen = new Set<string>();
+    for (const n of nodes) {
+      const related = pgGraph
+        ? await pgGraph.traverseRelated(ctx, { projectId: req.params.projectId, itemId: n.id }, 1)
+        : graph.traverseRelated(ctx, { projectId: req.params.projectId, itemId: n.id }, 1);
+      for (const hit of related) {
+        if (hit.hops !== 1) continue;
+        const key = `${n.id}|${hit.via}|${hit.itemId}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        edges.push({ from: n.id, to: hit.itemId, relation: hit.via });
+      }
+    }
+    return { projectId: req.params.projectId, rootId, nodes, edges };
   });
 
   app.post<{ Params: { projectId: string; proposalId: string } }>("/v1/projects/:projectId/proposals/:proposalId/approve", async (req) => {
@@ -414,55 +347,6 @@ export function registerProposalsRoutes(
         metadata: { baseVersion: item.version, version: revisedItem.version, reopened: true }
       });
       return { proposalId: req.params.proposalId, status: "pending", version: revisedItem.version };
-    }
-  );
-
-  app.post<{ Params: { projectId: string; proposalId: string }; Body: { channel: HumanOpsChannel; webhookUrl?: string; reviewUrl?: string } }>(
-    "/v1/projects/:projectId/proposals/:proposalId/notify",
-    async (req) => {
-      const ctx = await authenticateProjectRequest(req.headers.authorization, req.params.projectId);
-      const item = pgKnowledge ? await pgKnowledge.getItem(ctx, req.params.projectId, req.params.proposalId) : retrieval.getItem(ctx, req.params.projectId, req.params.proposalId);
-      if (!item) throw new BrainError("BRAIN_ERR_NOT_FOUND", `Proposta '${req.params.proposalId}' não encontrada.`, 404);
-      const preferences = await getNotificationPreferences(ctx, req.params.projectId, "internal-project");
-      if (!notificationPreferenceAllows(preferences, req.body.channel, "approval")) {
-        return { delivered: false, suppressed: true, channel: req.body.channel, reason: "Canal ou categoria desativada nas preferências pessoais." };
-      }
-      const envWebhookMap: Record<HumanOpsChannel, string | undefined> = {
-        slack: process.env.NOEMA_SLACK_WEBHOOK_URL,
-        teams: process.env.NOEMA_TEAMS_WEBHOOK_URL,
-        jira: process.env.NOEMA_JIRA_WEBHOOK_URL,
-        clickup: process.env.NOEMA_CLICKUP_WEBHOOK_URL,
-        email: process.env.NOEMA_EMAIL_WEBHOOK_URL
-      };
-      const webhookUrl = req.body.webhookUrl ?? envWebhookMap[req.body.channel];
-      if (!webhookUrl) return { delivered: false, channel: req.body.channel, reason: `Webhook para canal '${req.body.channel}' não configurado.` };
-      if (preferences.frequency !== "immediate") {
-        if (!envWebhookMap[req.body.channel]) return { delivered: false, channel: req.body.channel, reason: "Digest exige o webhook do canal configurado no servidor." };
-        const queued = await queueNotificationDigest(ctx, { projectId: req.params.projectId, channel: req.body.channel, category: "approval", targetId: item.id, title: item.title, frequency: preferences.frequency });
-        await recordAudit(ctx, { tenantId: ctx.tenantId, projectId: req.params.projectId, accessPolicyId: item.accessPolicyId, actorId: ctx.actorId, actorType: ctx.actorType, action: "create", targetType: "channel_notification", targetId: item.id, metadata: { channel: req.body.channel, queued: true, scheduledAt: queued.scheduledAt } });
-        return queued;
-      }
-      const result = await dispatchChannelNotification({
-        channel: req.body.channel,
-        webhookUrl,
-        projectId: req.params.projectId,
-        proposalId: item.id,
-        proposalVersion: item.version,
-        title: item.title,
-        reviewUrl: req.body.reviewUrl ?? `${process.env.NOEMA_CORS_ORIGIN ?? "http://localhost:3000"}`
-      });
-      await recordAudit(ctx, {
-        tenantId: ctx.tenantId,
-        projectId: req.params.projectId,
-        accessPolicyId: item.accessPolicyId,
-        actorId: ctx.actorId,
-        actorType: ctx.actorType,
-        action: "create",
-        targetType: "channel_notification",
-        targetId: item.id,
-        metadata: { channel: req.body.channel, delivered: result.delivered, statusCode: result.statusCode }
-      });
-      return result;
     }
   );
 

@@ -108,7 +108,11 @@ export function createProjectMetricsService(deps: {
     };
   }
 
-  function projectHealth(items: KnowledgeItem[], verifiedTests: Map<string, string[]>) {
+  function projectHealth(
+    items: KnowledgeItem[],
+    verifiedTests: Map<string, string[]>,
+    _linkedTestsByRule?: Map<string, string[]>
+  ) {
     const health = computeProjectHealthReport(items, []);
     health.untestedRuleIds = health.untestedRuleIds.filter((id) => !verifiedTests.has(id));
     const penalty = health.untestedRuleIds.length * 10 + health.staleItemIds.length * 5 + health.gitVsConnectorConflicts.length * 15;

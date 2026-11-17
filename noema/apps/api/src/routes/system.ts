@@ -182,7 +182,7 @@ export function registerSystemRoutes(
     deploymentMode,
     transports: ["streamable-http", "stdio", "rest"],
     mcpEndpoint: "/mcp",
-    toolsCount: 35,
+    toolsCount: 58,
     pgStoresEnabled: Boolean(pgGraph && pgRetrieval)
   }));
 

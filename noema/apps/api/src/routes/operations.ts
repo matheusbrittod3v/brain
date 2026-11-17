@@ -25,7 +25,7 @@ export function registerOperationsRoutes(
     queryAwareRetrieval: { search: (ctx: AuthContext, q: { projectId: string; query: string; limit: number }) => Promise<Array<{ item: KnowledgeItem; score: number }>> };
     upsertKnowledgeItem: (ctx: AuthContext, item: KnowledgeItem) => Promise<void>;
     projectVerifiedTests: (ctx: AuthContext, projectId: string, items: KnowledgeItem[]) => Promise<any>;
-    projectHealth: (items: KnowledgeItem[], verifiedTests: any) => any;
+    projectHealth: (items: KnowledgeItem[], verifiedTests: any, linkedTestsByRule?: Map<string, string[]>) => any;
     projectModelUsage: (ctx: AuthContext, projectId: string) => Promise<any>;
     computeLatencyTelemetry: () => unknown;
     appPostgresClient?: AppPostgresClient;
@@ -223,7 +223,7 @@ export function registerOperationsRoutes(
     const hits = await queryAwareRetrieval.search(ctx, { projectId: req.params.projectId, query: "", limit: 200 });
     const items = hits.map((hit) => hit.item);
     const evidence = await projectVerifiedTests(ctx, req.params.projectId, items);
-    const health = projectHealth(items, evidence.verifiedTests);
+    const health = projectHealth(items, evidence.verifiedTests, evidence.linkedTestsByRule);
     const queueConfigured = Boolean(ownedSystemSqlClient && process.env.NOEMA_PG_BOSS === "1");
     let queueCounts: Array<{ queue: string; state: string; count: number; latestAt: string | null }> = [];
     let recentFailures: Array<{ jobId: string; queue: string; failedAt: string; retries: number; errorSummary: string | null }> = [];
@@ -368,7 +368,7 @@ export function registerOperationsRoutes(
     const rules = items.filter((item) => item.type === "business_rule");
     const requirements = items.filter((item) => item.type === "requirement");
     const evidence = await projectVerifiedTests(ctx, req.params.projectId, items);
-    const health = projectHealth(items, evidence.verifiedTests);
+    const health = projectHealth(items, evidence.verifiedTests, evidence.linkedTestsByRule);
     const tasks = planAutonomousTasks(req.body.epicDescription.trim(), rules, {
       requirements,
       impactedRuleIds: req.body.impactedRuleIds,

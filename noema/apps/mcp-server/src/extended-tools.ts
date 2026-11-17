@@ -23,6 +23,7 @@ import { TemporalKnowledgeEngine } from "@noema/temporal-knowledge";
 import { suggestLivingDocUpdates } from "@noema/workflow-orchestrator";
 import type { NoemaRuntime } from "./index.js";
 import { describeMcpTool, type McpConnectionProfileName } from "./connection-profile.js";
+import { registerSubagentMcpTools, collectVerifiedByEdges } from "./subagent-tools.js";
 
 function okJson(data: unknown) {
   return { content: [{ type: "text" as const, text: JSON.stringify(data, null, 2) }] };
@@ -66,6 +67,39 @@ export function registerExtendedMcpTools(
       if (runtime.retrieval.upsertItem) {
         await runtime.retrieval.upsertItem(item);
       }
+      const isTestItem = item.type === "test" || item.id.startsWith("TEST-") || /\.(?:spec|test)\.[cm]?[jt]sx?$|_test\.py$/i.test(item.sourceUri);
+      let relationsCreated = 0;
+      for (const targetId of item.relatedIds ?? []) {
+        if (!targetId || targetId === item.id) continue;
+        const targetIsTest = targetId.startsWith("TEST-");
+        const edge = isTestItem
+          ? {
+              tenantId: ctx.tenantId,
+              fromProjectId: projectId,
+              toProjectId: projectId,
+              fromItemId: targetId,
+              toItemId: item.id,
+              fromPolicyId: resolvedPolicy,
+              toPolicyId: resolvedPolicy,
+              relationType: "VERIFIED_BY" as const,
+              isInferred: false as const,
+              confidence: 1.0
+            }
+          : {
+              tenantId: ctx.tenantId,
+              fromProjectId: projectId,
+              toProjectId: projectId,
+              fromItemId: item.id,
+              toItemId: targetId,
+              fromPolicyId: resolvedPolicy,
+              toPolicyId: resolvedPolicy,
+              relationType: targetIsTest ? ("VERIFIED_BY" as const) : ("DEPENDS_ON" as const),
+              isInferred: false as const,
+              confidence: 1.0
+            };
+        await runtime.graph.addEdge(edge, ctx);
+        relationsCreated += 1;
+      }
       runtime.retrieval.invalidateCache?.(ctx.tenantId, projectId);
       await runtime.audit.record({
         tenantId: ctx.tenantId,
@@ -76,9 +110,9 @@ export function registerExtendedMcpTools(
         action: "create",
         targetType: "knowledge_item",
         targetId: item.id,
-        metadata: { filePath, type: item.type }
+        metadata: { filePath, type: item.type, relationsCreated }
       });
-      return okJson({ ingested: true, item: { id: item.id, title: item.title, type: item.type, status: item.status, accessPolicyId: resolvedPolicy } });
+      return okJson({ ingested: true, relationsCreated, item: { id: item.id, title: item.title, type: item.type, status: item.status, accessPolicyId: resolvedPolicy } });
     }
   );
 
@@ -244,14 +278,24 @@ export function registerExtendedMcpTools(
 
   server.tool(
     "brain_knowledge_health",
-    describeMcpTool(profile, "Retorna relatório de saúde do projeto (regras sem cobertura VERIFIED_BY, itens >90d, conflitos)."),
+    describeMcpTool(
+      profile,
+      "Retorna relatório estrutural de saúde do projeto (regras sem aresta VERIFIED_BY, itens >90d, conflitos). Nota: este healthScore mede vínculos no grafo; a Matriz Corporativa (Visões Corporativas) exige também execução de teste 'passed' (CI) além da aresta VERIFIED_BY."
+    ),
     { projectId: z.string().min(1) },
     async ({ projectId }) => {
       assertProjectAccess(ctx, projectId);
       const hits = await runtime.retrieval.search(ctx, { projectId, query: "", limit: 300 });
       const items = hits.map((h) => h.item);
-      const report = computeProjectHealthReport(items, []);
-      return okJson({ projectId, totalItems: items.length, report });
+      const verifiedEdges = await collectVerifiedByEdges(runtime.graph, ctx, projectId, items);
+      const report = computeProjectHealthReport(items, verifiedEdges);
+      return okJson({
+        projectId,
+        totalItems: items.length,
+        report,
+        coverageNote:
+          "healthScore reflete vínculos estruturais VERIFIED_BY no grafo. Para marcar como 'Coberta' na Matriz Corporativa (Visões Corporativas), é necessário também registrar execução de teste com status 'passed' no HEAD da main."
+      });
     }
   );
 
@@ -902,4 +946,6 @@ export function registerExtendedMcpTools(
       return okJson({ saved: true, projectId, assignment });
     }
   );
+
+  registerSubagentMcpTools(server, runtime, ctx, auditPolicyId, profile);
 }

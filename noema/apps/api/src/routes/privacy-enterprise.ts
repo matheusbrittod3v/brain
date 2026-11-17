@@ -17,7 +17,7 @@ export function registerPrivacyEnterpriseRoutes(
     recordAudit: (ctx: AuthContext, event: Parameters<AuditLogger["record"]>[0]) => Promise<unknown>;
     queryAwareRetrieval: { search: (ctx: AuthContext, q: { projectId: string; query: string; limit: number }) => Promise<Array<{ item: KnowledgeItem }>> };
     projectVerifiedTests: (ctx: AuthContext, projectId: string, items: KnowledgeItem[]) => Promise<any>;
-    projectHealth: (items: KnowledgeItem[], verifiedTests: any) => any;
+    projectHealth: (items: KnowledgeItem[], verifiedTests: any, linkedTestsByRule?: Map<string, string[]>) => any;
     configuredApiKey: string;
     allowedProjects: readonly string[];
     allowedPolicies: readonly string[];
@@ -141,8 +141,6 @@ export function registerPrivacyEnterpriseRoutes(
         deletedRunnerQuestions: erased.deletedRunnerQuestions,
         deletedRunnerTasks: erased.deletedRunnerTasks,
         deletedTaskLeases: erased.deletedTaskLeases,
-        deletedNotificationPreferences: erased.deletedNotificationPreferences,
-        deletedNotificationOutbox: erased.deletedNotificationOutbox,
         canonicalKnowledgeRecordsDeleted: true,
         cryptoShredded,
         auditLogsAnonymized,
@@ -163,8 +161,6 @@ export function registerPrivacyEnterpriseRoutes(
       deletedRunnerQuestions: erased.deletedRunnerQuestions,
       deletedRunnerTasks: erased.deletedRunnerTasks,
       deletedTaskLeases: erased.deletedTaskLeases,
-      deletedNotificationPreferences: erased.deletedNotificationPreferences,
-      deletedNotificationOutbox: erased.deletedNotificationOutbox,
       cryptoShredded,
       auditLogsAnonymized,
       objectStorageDeleted,
@@ -238,7 +234,7 @@ export function registerPrivacyEnterpriseRoutes(
       techRadar: buildTechRadar(items),
       qaCoverage,
       testExecutionResults: evidence.testExecutionResults,
-      health: projectHealth(items, verifiedTests)
+      health: projectHealth(items, verifiedTests, evidence.linkedTestsByRule)
     };
   });
 }

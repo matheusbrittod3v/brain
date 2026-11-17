@@ -24,7 +24,8 @@ export function requiredPermissionForRoute(method: string, routeUrl: string): Sy
   }
   if (sub.startsWith("approvals/")) return "proposals:decide";
   if (sub.startsWith("knowledge")) return m === "GET" ? "knowledge:read" : "knowledge:write";
-  if (sub.startsWith("search") || sub.startsWith("graph")) return "knowledge:search";
+  if (sub.startsWith("search")) return "knowledge:search";
+  if (sub.startsWith("graph")) return m === "GET" ? "knowledge:search" : "knowledge:write";
   if (sub.startsWith("ingest")) return "knowledge:write";
   if (sub.startsWith("runner")) {
     if (m === "GET") return "runner:view";

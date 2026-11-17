@@ -1,20 +1,7 @@
 import { isAbsolute, resolve } from "node:path";
 import PgBoss from "pg-boss";
 import type { AuthContext } from "@noema/auth";
-import type { HumanOpsChannel, SaasProvider } from "@noema/connector-saas";
 import { BrainError } from "@noema/core";
-import type { NotificationCategory } from "../notification-preferences.js";
-
-export interface NotificationDigestPayload {
-  tenantId: string;
-  projectId: string;
-  actorId: string;
-  accessPolicyId: string;
-  channel: HumanOpsChannel;
-  category: NotificationCategory;
-  scheduledAt: string;
-  groupKey: string;
-}
 
 export function mapExternalHumanActor(
   serviceContext: AuthContext,
@@ -82,24 +69,6 @@ export async function enqueueRemoteGitIngestJob(payload: {
   await boss.start();
   await boss.createQueue("noema.ingest-git");
   const jobId = await boss.send("noema.ingest-git", payload);
-  await boss.stop();
-  return jobId;
-}
-
-export async function enqueueSaasIngestJob(payload: {
-  tenantId: string;
-  projectId: string;
-  accessPolicyId: string;
-  provider: SaasProvider;
-  connectionId: string;
-  model?: string;
-}): Promise<string | null> {
-  const databaseUrl = process.env.DATABASE_SYSTEM_URL ?? process.env.DATABASE_URL;
-  if (!databaseUrl) return null;
-  const boss = new PgBoss(databaseUrl);
-  await boss.start();
-  await boss.createQueue("noema.ingest-saas");
-  const jobId = await boss.send("noema.ingest-saas", payload);
   await boss.stop();
   return jobId;
 }
@@ -177,21 +146,6 @@ export async function enqueueApprovalReminders(
     { ...payload, eventType: "escalation" },
     { startAfter: dueAt, singletonKey: `${request.tenantId}:${request.projectId}:${request.proposalId}:escalation:${request.dueAt}` }
   );
-  await boss.stop();
-}
-
-export async function enqueueNotificationDigest(
-  payload: NotificationDigestPayload,
-  databaseUrl = process.env.DATABASE_SYSTEM_URL ?? process.env.DATABASE_URL
-): Promise<void> {
-  if (!databaseUrl) throw new Error("DATABASE_SYSTEM_URL or DATABASE_URL is required for notification digests.");
-  const boss = new PgBoss(databaseUrl);
-  await boss.start();
-  await boss.createQueue("noema.notification-digest");
-  await boss.send("noema.notification-digest", payload, {
-    startAfter: new Date(payload.scheduledAt),
-    singletonKey: payload.groupKey
-  });
   await boss.stop();
 }
 

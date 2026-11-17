@@ -1224,8 +1224,6 @@ export interface PrivacyEraseSubjectResult {
   deletedRunnerQuestions: number;
   deletedRunnerTasks: number;
   deletedTaskLeases: number;
-  deletedNotificationPreferences: number;
-  deletedNotificationOutbox: number;
 }
 
 /**
@@ -1364,17 +1362,6 @@ export async function privacyEraseSubject<
     ` : [];
     deletedTaskLeases += orphanHandoffLeases.length;
 
-    const notificationOutbox = await tx<{ id: string }>`
-      DELETE FROM notification_outbox WHERE tenant_id = ${normalizedTenantId}
-        AND project_id = COALESCE(${normalizedProjectId ?? null}, project_id) AND actor_id = ${normalizedSubjectId}
-      RETURNING id
-    `;
-    const notificationPreferences = await tx<{ id: string }>`
-      DELETE FROM notification_preferences WHERE tenant_id = ${normalizedTenantId}
-        AND project_id = COALESCE(${normalizedProjectId ?? null}, project_id) AND actor_id = ${normalizedSubjectId}
-      RETURNING id
-    `;
-
     return {
       tenantId: normalizedTenantId,
       subjectId: normalizedSubjectId,
@@ -1388,9 +1375,7 @@ export async function privacyEraseSubject<
       deletedHandoffs: handoffRows.length,
       deletedRunnerQuestions,
       deletedRunnerTasks: tasks.length,
-      deletedTaskLeases,
-      deletedNotificationPreferences: notificationPreferences.length,
-      deletedNotificationOutbox: notificationOutbox.length
+      deletedTaskLeases
     };
   };
 

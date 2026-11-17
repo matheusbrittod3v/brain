@@ -112,6 +112,39 @@ export function registerIngestContextRoutes(
         if (pgGraph) await pgGraph.addEdge(ctx, edge);
       }
 
+      const isTestItem = item.type === "test" || item.id.startsWith("TEST-") || /\.(?:spec|test)\.[cm]?[jt]sx?$|_test\.py$/i.test(item.sourceUri);
+      for (const targetId of item.relatedIds ?? []) {
+        if (!targetId || targetId === item.id) continue;
+        const targetIsTest = targetId.startsWith("TEST-");
+        const edge = isTestItem
+          ? {
+              tenantId: ctx.tenantId,
+              fromProjectId: req.params.projectId,
+              toProjectId: req.params.projectId,
+              fromItemId: targetId,
+              toItemId: item.id,
+              fromPolicyId: item.accessPolicyId,
+              toPolicyId: item.accessPolicyId,
+              relationType: "VERIFIED_BY" as const,
+              isInferred: false as const,
+              confidence: 1.0
+            }
+          : {
+              tenantId: ctx.tenantId,
+              fromProjectId: req.params.projectId,
+              toProjectId: req.params.projectId,
+              fromItemId: item.id,
+              toItemId: targetId,
+              fromPolicyId: item.accessPolicyId,
+              toPolicyId: item.accessPolicyId,
+              relationType: targetIsTest ? ("VERIFIED_BY" as const) : ("DEPENDS_ON" as const),
+              isInferred: false as const,
+              confidence: 1.0
+            };
+        graph.addEdge(edge);
+        if (pgGraph) await pgGraph.addEdge(ctx, edge);
+      }
+
       await recordAudit(ctx, {
         tenantId: ctx.tenantId,
         projectId: req.params.projectId,

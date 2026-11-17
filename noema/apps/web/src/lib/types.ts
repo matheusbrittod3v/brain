@@ -4,7 +4,6 @@ export type WorkspaceId =
   | "agents"
   | "knowledge"
   | "search"
-  | "integrations"
   | "impact"
   | "operations"
   | "access"
@@ -64,4 +63,73 @@ export function normalizeSearchHits(
   }
   return [];
 }
+
+export interface FinOpsModelUsage {
+  model: string;
+  calls?: number;
+  provider?: string;
+  costBasis?: string;
+  inputTokens?: number | null;
+  outputTokens?: number | null;
+  promptTokens?: number | null;
+  completionTokens?: number | null;
+  totalTokens: number | null;
+  providerCostUsd: number | null;
+}
+
+export interface FinOpsDepartmentQuota {
+  department: string;
+  monthlyTokenLimit: number;
+  monthlyUsdLimit: number;
+  usedTokens?: number;
+  usedUsd?: number;
+  withinQuota?: boolean;
+  downgradeModel?: string;
+  recommendedDowngradeModel?: string;
+  updatedAt?: string;
+}
+
+export interface FinOpsData {
+  projectId: string;
+  indexedItems: number;
+  estimatedLocalTokens: number;
+  estimatedMonthlySaasSavingsUsd: number | null;
+  costTrackingAvailable: boolean;
+  actualProviderUsageAvailable: boolean;
+  actualProviderCostUsd: number | null;
+  modelUsage: {
+    windowDays?: number;
+    calls: number;
+    modelUsageAvailable?: boolean;
+    providerCostUsd: number | null;
+    byModel: FinOpsModelUsage[];
+  };
+  infrastructureEstimate: {
+    basis?: string;
+    computeCostUsd?: number;
+    energyKwh?: number;
+    energyCostUsd?: number;
+    totalInfraAndEnergyUsd: number;
+  };
+  departmentQuotas?: FinOpsDepartmentQuota[];
+  costTrackingNote?: string;
+  pgOperationalActive?: boolean;
+  pgTemporalActive?: boolean;
+}
+
+export interface AuditLogEntry {
+  id?: string;
+  timestamp?: string;
+  createdAt?: string;
+  actorId: string;
+  actorType?: "human" | "agent" | "service" | string;
+  action: string;
+  targetType: string;
+  targetId: string;
+  accessPolicyId?: string;
+  tenantId?: string;
+  projectId?: string;
+  metadata?: Record<string, unknown> | null;
+}
+
 

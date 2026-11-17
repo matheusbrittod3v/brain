@@ -213,18 +213,50 @@ export function SearchGraphWorkspace(props: {
           )}
         </SectionCard>
 
-        <SectionCard title="Grafo interativo" subtitle="Clique em um nó para inspecionar" icon={<Network size={15} />}>
+        <SectionCard title="Grafo interativo" subtitle={`${nodes.length} nós · ${graphEdges.length} arestas — clique em um nó para inspecionar`} icon={<Network size={15} />}>
           {nodes.length === 0 ? (
             <EmptyState icon={<Network size={18} />} title="Grafo vazio" description="Ingira conhecimento para visualizar as relações." />
           ) : (
-            <InteractiveGraphCanvas
-              nodes={nodes}
-              edges={graphEdges}
-              onSelectNode={(id) => {
-                const hit = hits.find((h) => h.item.id === id);
-                if (hit) onInspect(toInspected(hit));
-              }}
-            />
+            <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+              <InteractiveGraphCanvas
+                nodes={nodes}
+                edges={graphEdges}
+                onSelectNode={(id) => {
+                  const hit = hits.find((h) => h.item.id === id);
+                  if (hit) onInspect(toInspected(hit));
+                }}
+              />
+              {graphEdges.length > 0 && (
+                <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                  <div style={{ fontSize: 11, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.06em", color: "var(--text-muted)" }}>
+                    Arestas ({graphEdges.length})
+                  </div>
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: 6, maxHeight: 160, overflowY: "auto" }}>
+                    {graphEdges.map((edge, idx) => (
+                      <div
+                        key={`${edge.from}-${edge.relation}-${edge.to}-${idx}`}
+                        style={{
+                          display: "inline-flex",
+                          alignItems: "center",
+                          gap: 6,
+                          padding: "4px 9px",
+                          borderRadius: 8,
+                          border: "1px solid var(--border-subtle)",
+                          background: "var(--bg-inset)",
+                          fontSize: 11.5
+                        }}
+                      >
+                        <span className="noema-mono" style={{ color: "var(--text-primary)" }}>{edge.from}</span>
+                        <Badge tone={edge.relation === "VERIFIED_BY" ? "success" : edge.relation === "IMPACTS" ? "warning" : "accent"}>
+                          {edge.relation}
+                        </Badge>
+                        <span className="noema-mono" style={{ color: "var(--text-secondary)" }}>{edge.to}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
           )}
         </SectionCard>
       </div>

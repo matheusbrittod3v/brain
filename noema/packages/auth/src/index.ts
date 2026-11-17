@@ -32,7 +32,6 @@ export const PERMISSION_CATALOG = [
   { id: "menu:search", group: "Menu & Guias", label: "Ver Busca & Grafo" },
   { id: "menu:agents", group: "Menu & Guias", label: "Ver Agentes & Runner" },
   { id: "menu:impact", group: "Menu & Guias", label: "Ver Impacto" },
-  { id: "menu:integrations", group: "Menu & Guias", label: "Ver Integrações" },
   { id: "menu:operations", group: "Menu & Guias", label: "Ver Operação & FinOps" },
   { id: "menu:access", group: "Menu & Guias", label: "Ver Acesso & Cargos" },
   { id: "menu:templates", group: "Menu & Guias", label: "Ver Templates" },

@@ -265,12 +265,10 @@ test("API PG mode reads runner tasks from Postgres and calls privacyEraseSubject
     assert.equal(eraseRes.json().deletedMemories, 0);
     assert.equal(eraseRes.json().deletedHandoffs, 0);
     assert.equal(eraseRes.json().deletedRunnerTasks, 0);
-    assert.equal(eraseRes.json().deletedNotificationPreferences, 0);
-    assert.equal(eraseRes.json().deletedNotificationOutbox, 0);
     assert.equal(eraseRes.json().cryptoShredded, true);
     assert.equal(eraseRes.json().complete, true);
     assert.equal(eraseRes.json().limitations.length, 2);
-    assert.equal(deletedQueries.length, 13);
+    assert.equal(deletedQueries.length, 11);
     assert.match((deletedQueries[0] as { sql: string }).sql, /ANY\(tags\)/);
     assert.ok(deletedQueries.some((query) => (query as { sql: string }).sql.includes("INSERT INTO sync_project_locks")));
   } finally {
@@ -1032,7 +1030,7 @@ test("developer cross-project profile and IDE/CLI lifecycle hooks work end-to-en
   }
 });
 
-test("Access admin (members/grants/policies), integration reconnect/fallback-owner, and FinOps quotas work end-to-end", async () => {
+test("Access admin (members/grants/policies) and FinOps quotas work end-to-end", async () => {
   const app = buildApp("test-secret-key", ["sub", "other"], new InMemoryAuditLogger());
   const headers = { authorization: "Bearer test-secret-key" };
   try {
@@ -1108,24 +1106,6 @@ test("Access admin (members/grants/policies), integration reconnect/fallback-own
     });
     assert.equal(policyRes.statusCode, 200);
     assert.equal(policyRes.json().label, "Security Critical");
-
-    // Integration reconnect + fallback owner
-    const ownerRes = await app.inject({
-      method: "PUT",
-      url: "/v1/projects/sub/integrations/jira/fallback-owner",
-      headers,
-      payload: { fallbackOwner: "sre-oncall@acme.dev" }
-    });
-    assert.equal(ownerRes.statusCode, 200);
-    assert.equal(ownerRes.json().fallbackOwner, "sre-oncall@acme.dev");
-
-    const reconnectRes = await app.inject({
-      method: "POST",
-      url: "/v1/projects/sub/integrations/jira/reconnect",
-      headers
-    });
-    assert.equal(reconnectRes.statusCode, 200);
-    assert.equal(reconnectRes.json().provider, "jira");
 
     // FinOps department quota + infra/energy estimate
     const quotaRes = await app.inject({
