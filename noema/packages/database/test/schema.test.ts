@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import type { AuthContext } from "@noema/auth";
-import { approvalRequests, gitIngestionHeads, integrationEvents, knowledgeItems, knowledgeItemVersions, notificationOutbox, notificationPreferences, projectRepositoryHeads, runnerTaskQuestions, testExecutionResults } from "../src/schema.js";
+import { approvalRequests, customAccessPolicies, gitIngestionHeads, integrationEvents, knowledgeItems, knowledgeItemVersions, notificationOutbox, notificationPreferences, projectAccessMembers, projectRepositoryHeads, runnerTaskQuestions, temporaryAccessGrants, testExecutionResults } from "../src/schema.js";
 import { withTenantRls, type NoemaDb } from "../src/client.js";
 import { PgAuditLogger } from "../src/repositories.js";
 import { contextSessionItems } from "../src/schema.js";
@@ -45,6 +45,19 @@ test("exports schema tables with multi-tenant and versioning keys", () => {
   assert.ok(gitIngestionHeads.branch);
   assert.ok(gitIngestionHeads.commitSha);
   assert.ok(runnerTaskQuestions.status);
+  assert.ok(projectAccessMembers.tenantId);
+  assert.ok(projectAccessMembers.projectId);
+  assert.ok(projectAccessMembers.accessPolicyId);
+  assert.ok(projectAccessMembers.roles);
+  assert.ok(projectAccessMembers.allowedPolicies);
+  assert.ok(temporaryAccessGrants.grantId);
+  assert.ok(temporaryAccessGrants.tenantId);
+  assert.ok(temporaryAccessGrants.projectId);
+  assert.ok(temporaryAccessGrants.expiresAt);
+  assert.ok(customAccessPolicies.tenantId);
+  assert.ok(customAccessPolicies.projectId);
+  assert.ok(customAccessPolicies.policyId);
+  assert.ok(customAccessPolicies.allowedRoles);
 });
 
 test("validates opaque Context Session IDs without accepting empty, control, or oversized values", () => {

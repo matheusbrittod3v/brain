@@ -41,7 +41,7 @@ flowchart TB
 4. **Critério de Saída:** Nenhum dado entra ou sai sem `tenantId`, `projectId`, `accessPolicyId` e registro em `audit_logs`.
 
 ### Estágio 2 — Ingestão Incremental e Code Intelligence
-1. `packages/ingestion` (Gitleaks para segredos + chunking oficial AST/Markdown; `apps/ai-worker` Python com `Docling` + `Presidio` ativado sob demanda para PDF/Office e PII de SaaS).
+1. `packages/ingestion` (Gitleaks para segredos + chunking oficial AST/Markdown; `apps/ai-worker` Python com `Presidio` para redaction PII quando `AI_WORKER_URL` estiver configurado e `Docling` sob demanda para PDF/Office).
 2. Suporte a **repositórios online via GitHub** (`integrations/github/`): *shallow/partial clone* (`--depth 1 --filter=blob:none`) ou GitHub API/webhooks, diferenciando `sourceOrigin: "internal"` de `"external_reference"`.
 3. `packages/code-intelligence` (`web-tree-sitter` como base + extração de âncoras `@brain-rule` / `@brain-adr`; Sourcegraph SCIP na etapa semântica).
 4. `apps/worker` (TypeScript + **`pg-boss`** sobre PostgreSQL) com **idempotência por `content_hash`**.
@@ -54,9 +54,9 @@ flowchart TB
 4. **Critério de Saída:** `tests/retrieval-evals/` e `tests/security/` passando com **0% de vazamento cross-tenant**.
 
 ### Estágio 4 — Gateway Universal, Handoff, Edge Offline e CLI/MCP
-1. `apps/api` expõe as **13 ferramentas canônicas `brain_*` via `/mcp` em Streamable HTTP**; `apps/mcp-server` fornece `stdio` local e bridge CLI.
+1. `apps/api` expõe as ferramentas `brain_*` documentadas no catálogo extensível via `/mcp` em Streamable HTTP**; `apps/mcp-server` fornece `stdio` local e bridge CLI.
 2. `apps/cli` (`brain init`, `brain sync pull/push`, `brain context`, `brain handoff`, `brain validate`, `brain scaffold`).
-3. **Local Edge Brain** (SQLite + `FTS5` + `sqlite-vec` opcional + SQLCipher; Ollama opcional) com fila local durável em SQLite, sincronização delta filtrada por OPA, *Policy Revocation* e *Ingestion Gate* (`Gitleaks` + Presidio remoto sob demanda) no `push`.
+3. **Local Edge Brain** (SQLite + `FTS5` + `sqlite-vec` opcional + SQLCipher; Ollama opcional) com fila local durável em SQLite, sincronização delta filtrada por OPA, *Policy Revocation* e *Ingestion Gate* no `push` (Gitleaks obrigatório; PII via AI Worker no Hub quando configurado).
 4. `apps/cli` hospeda o **Brain Runner local** (`brain runner up --local/--provider/--hybrid`) usando a fila SQLite do Edge; o usuário pode selecionar Ollama ou, em macOS compatível quando `fm available` indicar pronto, Apple Foundation Models via `fm`. Provedor e modelo são opcionais; downloads de modelos Ollama exigem configuração explícita, e o Noema não baixa o modelo Apple.
 5. `packages/agent-handoff` + `workspace-detection` (branch efêmera `handoff/<taskId>` publicada no remoto Git; patch criptografado no MinIO é fallback opcional quando o remoto não permite escrita).
 6. Adaptadores finos em `packages/agent-adapters/` (Antigravity, Codex, Kiro, Cursor, Claude Code).

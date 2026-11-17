@@ -68,6 +68,9 @@ export const KnowledgeYamlSchema = z
     summary: z.string().optional(),
     description: z.string().optional(),
     access_policy: z.string().min(1).optional(),
+    confidence: z.coerce.number().min(0).max(1).optional(),
+    is_inferred: z.coerce.boolean().optional(),
+    trust_level: z.enum(["verified", "self_authored", "untrusted"]).optional(),
     owner: z.string().optional(),
     version: z.coerce.number().int().positive().optional(),
     tags: z.array(z.string()).optional(),
@@ -153,9 +156,25 @@ export function parseKnowledgeFile(opts: ParseFileOptions): KnowledgeItem {
   let rawMeta: Record<string, unknown> = {};
   let body = opts.rawContent;
 
+  const isKnowledgeDir = /(^|\/)(\.brain|data\/knowledge)\//.test(posixPath);
   if (posixPath.endsWith(".yaml") || posixPath.endsWith(".yml")) {
-    rawMeta = (yaml.load(opts.rawContent) as Record<string, unknown>) ?? {};
-    body = String(rawMeta.description ?? opts.rawContent);
+    if (isKnowledgeDir) {
+      rawMeta = (yaml.load(opts.rawContent) as Record<string, unknown>) ?? {};
+      body = String(rawMeta.description ?? opts.rawContent);
+    } else {
+      try {
+        const parsed = yaml.load(opts.rawContent);
+        if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+          const check = KnowledgeYamlSchema.safeParse(parsed);
+          if (check.success) {
+            rawMeta = parsed as Record<string, unknown>;
+            body = String(rawMeta.description ?? opts.rawContent);
+          }
+        }
+      } catch {
+        // Non-knowledge YAML (e.g., Helm templates with {{ ... }}) falls back to raw document.
+      }
+    }
   } else if (opts.rawContent.startsWith("---")) {
     const endIdx = opts.rawContent.indexOf("\n---", 3);
     if (endIdx !== -1) {
@@ -201,9 +220,9 @@ export function parseKnowledgeFile(opts: ParseFileOptions): KnowledgeItem {
     version,
     contentHash: computeContentHash(opts.rawContent),
     ownerId: typeof meta.owner === "string" ? meta.owner : undefined,
-    confidence: 1.0,
-    trustLevel: "verified",
-    isInferred: false,
+    confidence: meta.confidence ?? 1.0,
+    trustLevel: meta.trust_level ?? "verified",
+    isInferred: meta.is_inferred ?? false,
     validFrom: meta.validFrom,
     validUntil: meta.validUntil,
     tags: Array.isArray(meta.tags) ? meta.tags.map(String) : [],

@@ -5,7 +5,7 @@
   "main": "./dist/src/index.js",
   "types": "./dist/src/index.d.ts",
   "scripts": {
-    "build": "tsc -p tsconfig.json",
+    "build": "tsc -p tsconfig.json && node -e \"if (process.platform === 'darwin') require('node:child_process').execFileSync('swiftc', ['-parse-as-library', 'native/apple-fm-bridge.swift', '-o', 'dist/apple-fm-bridge'], { stdio: 'inherit' })\"",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "node --test dist/test/*.test.js"
   },

@@ -16,11 +16,13 @@ import { CrossServiceContractRegistry, PostgresCrossServiceRegistry } from "@noe
 import { createDatabaseClient, PgOperationalRepository } from "@noema/database";
 import { findChangedWorkspaceSources, hashWorkspaceSources } from "@noema/workspace-detection";
 import { parseKnowledgeFile } from "@noema/knowledge";
+import { PostgresMemoryManager } from "@noema/memory";
 import { PostgresKnowledgeRepository, type KnowledgeItemVersion, type KnowledgeRepository } from "@noema/knowledge";
 import { KnowledgeGraphStore, PostgresGraphStore, type GraphStoreContract } from "@noema/graph";
 import {
   HybridRetrievalEngine,
   PostgresRetrievalEngine,
+  ValkeyRetrievalCache,
   type SearchHit,
   type SearchQuery
 } from "@noema/retrieval";
@@ -81,6 +83,7 @@ export interface NoemaRuntime {
   crossServiceRegistry?: AnalyzeDistributedImpactOptions["crossServiceRegistry"];
   scheduleRunnerTask?: (input: RunnerSchedulePayload & { cron: string }) => Promise<{ scheduleId: string }>;
   opRepo?: PgOperationalRepository;
+  memory?: Pick<PostgresMemoryManager, "listVisible">;
   knowledge?: Pick<KnowledgeRepository, "listVersions" | "upsertItem"> & {
     incrementHitCounts?: (ctx: AuthContext, projectId: string, itemIds: readonly string[]) => Promise<Array<{ itemId: string; hitCount: number }>>;
   };
@@ -135,13 +138,17 @@ export function createSqlNoemaRuntime(
     throw new Error("createSqlNoemaRuntime requires a valid audit logger.");
   }
   const graph = new PostgresGraphStore(targetClient, rlsContext);
-  const retrieval = new PostgresRetrievalEngine(targetClient, graph);
+  const valkeyUrl = process.env.VALKEY_URL ?? process.env.REDIS_URL;
+  const retrieval = new PostgresRetrievalEngine(targetClient, graph, {
+    cache: valkeyUrl ? new ValkeyRetrievalCache(valkeyUrl) : undefined
+  });
   const contextEngine = new ContextEngine(retrieval);
   const handoffs = new HandoffStore();
   const runner = new BrainRunnerQueue();
   const approvals = new PostgresApprovalQueue(targetClient);
   const crossServiceRegistry = new PostgresCrossServiceRegistry(targetClient, rlsContext);
   const knowledge = new PostgresKnowledgeRepository(targetClient);
+  const memory = new PostgresMemoryManager(targetClient);
   const dbUrl = options?.databaseUrl ?? process.env.DATABASE_URL;
   const opRepo = options?.opRepo ?? (dbUrl ? new PgOperationalRepository(createDatabaseClient(dbUrl).db) : undefined);
   const scheduleDatabaseUrl = process.env.DATABASE_SYSTEM_URL ?? dbUrl;
@@ -151,7 +158,7 @@ export function createSqlNoemaRuntime(
       })
     : undefined);
   return {
-    graph, retrieval, contextEngine, handoffs, runner, audit: resolvedAudit, approvals, crossServiceRegistry, opRepo,
+    graph, retrieval, contextEngine, handoffs, runner, audit: resolvedAudit, approvals, crossServiceRegistry, opRepo, memory,
     knowledge,
     workspaceRoot: options?.workspaceRoot ?? process.env.NOEMA_WORKSPACE_ROOT ?? process.cwd(),
     workspaceRoots: options?.workspaceRoots ?? configuredProjectWorkspaceRoots(),
@@ -283,7 +290,9 @@ export function createNoemaMcpServer(runtime: NoemaRuntime, ctx: AuthContext, au
           intent: intent as IntentType | undefined,
           includeDomains,
           tokenBudget,
-          explain
+          explain,
+          sessionId,
+          memories: runtime.memory ? await runtime.memory.listVisible(ctx, projectId, sessionId) : []
         });
       const workspaceRoot = runtime.workspaceRoots?.[projectId] ?? runtime.workspaceRoot ?? process.env.NOEMA_WORKSPACE_ROOT ?? process.cwd();
       const sourceHashes = await hashWorkspaceSources(workspaceRoot, pack.sources.map((source) => source.sourceUri));
@@ -676,6 +685,50 @@ export function createNoemaMcpServer(runtime: NoemaRuntime, ctx: AuthContext, au
         action: "create", targetType: "proposal", targetId: proposalId, metadata: { title, targetType: typeVal }
       });
       return okJson({ proposalId, status: "draft", projectId, title, sourceUri: filePath });
+    }
+  );
+
+  server.tool(
+    "brain_change_decide",
+    "Registra decisão humana autorizada sobre uma proposta. Agentes não podem aprovar propostas.",
+    {
+      projectId: z.string(),
+      proposalId: z.string().min(1),
+      decision: z.enum(["approve", "reject", "request_changes"]),
+      note: z.string().optional()
+    },
+    async ({ projectId, proposalId, decision, note }) => {
+      assertProjectAccess(ctx, projectId);
+      if (!runtime.approvals) {
+        throw new BrainError("BRAIN_ERR_STORAGE_UNAVAILABLE", "Fila de aprovação indisponível neste runtime MCP.", 503);
+      }
+      const decided = await runtime.approvals.decide(ctx, projectId, proposalId, decision, note);
+      if (decision === "approve") {
+        if (runtime.knowledge?.upsertItem) {
+          await runtime.knowledge.upsertItem(ctx, decided.item);
+        } else if (typeof runtime.retrieval.upsertItem === "function") {
+          await runtime.retrieval.upsertItem(decided.item);
+        }
+      }
+      await runtime.audit.record({
+        tenantId: ctx.tenantId,
+        projectId,
+        accessPolicyId: decided.item.accessPolicyId ?? auditPolicyId,
+        actorId: ctx.actorId,
+        actorType: ctx.actorType,
+        action: decision === "approve" ? "approve" : "update",
+        targetType: "proposal",
+        targetId: proposalId,
+        metadata: { decision, status: decided.status, ...(note ? { note } : {}) }
+      });
+      return okJson({
+        proposalId: decided.proposalId,
+        projectId: decided.projectId,
+        status: decided.status,
+        itemStatus: decided.item.status,
+        reviewedBy: decided.reviewedBy,
+        ...(decided.reviewNote ? { reviewNote: decided.reviewNote } : {})
+      });
     }
   );
 

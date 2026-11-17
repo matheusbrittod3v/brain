@@ -207,3 +207,17 @@ test("PostgresMemoryManager enforces RLS, 24h/60d TTLs, compactEpisodicToSemanti
   assert.equal(visibleAfter[0]!.layer, "semantic");
 });
 
+test("MemoryManager applies access-weighted retention so accessed episodic memories decay slower", () => {
+  const mm = new MemoryManager();
+  const cold = mm.record(devCtx, { projectId: "sub", layer: "episodic", content: "Cold note" });
+  const warm = mm.record(devCtx, { projectId: "sub", layer: "episodic", content: "Frequently used note" });
+  mm.recordHit(devCtx, warm.id, 2);
+
+  const after65Days = new Date(Date.now() + 65 * 24 * 60 * 60 * 1000);
+  const res = mm.runDecay(devCtx, "sub", after65Days);
+  assert.equal(res.archivedCount, 1);
+  assert.equal(res.retainedByAccessCount, 1);
+  assert.ok(mm.listVisible(devCtx, "sub", undefined, after65Days).some((e) => e.id === warm.id));
+  assert.ok(!mm.listVisible(devCtx, "sub", undefined, after65Days).some((e) => e.id === cold.id));
+});
+

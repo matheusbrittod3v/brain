@@ -190,3 +190,33 @@ test("EdgeDatabase uses native SQLCipher mode when explicitly required", () => {
   }
 });
 
+
+test("EdgeDatabase manages local SQLite cron jobs and atomically enqueues due runner tasks", () => {
+  const db = new EdgeDatabase(":memory:");
+  const t0 = new Date("2026-11-17T10:00:00.000Z");
+  const job = db.upsertCronJob({
+    jobId: "cron-daily-scan",
+    projectId: "proj-1",
+    instruction: "Verificar drift arquitetural",
+    cron: "*/5 * * * *",
+    now: t0
+  });
+  assert.equal(job.nextRunAt, "2026-11-17T10:05:00.000Z");
+  assert.equal(db.listCronJobs("proj-1").length, 1);
+
+  assert.equal(db.claimDueCronJobs(new Date("2026-11-17T10:04:59.000Z")).length, 0);
+
+  const due = db.claimDueCronJobs(new Date("2026-11-17T10:05:00.000Z"));
+  assert.equal(due.length, 1);
+  assert.equal(due[0]!.projectId, "proj-1");
+  assert.equal(due[0]!.cron, "*/5 * * * *");
+  assert.equal(db.listRunnerTasks("proj-1").length, 1);
+
+  const [updated] = db.listCronJobs("proj-1");
+  assert.equal(updated?.nextRunAt, "2026-11-17T10:10:00.000Z");
+  assert.equal(updated?.lastRunAt, "2026-11-17T10:05:00.000Z");
+
+  assert.equal(db.deleteCronJob("cron-daily-scan"), true);
+  assert.equal(db.listCronJobs("proj-1").length, 0);
+  db.close();
+});

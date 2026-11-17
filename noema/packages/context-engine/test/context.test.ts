@@ -63,6 +63,15 @@ test("builds verifiable ContextPack respecting token budget and explain mode", (
   const pack: ContextPack = engine.buildContextPack(ctx, {
     projectId: "sub",
     task: "Implementar cancelamento de assinatura",
+    tokenBudget: 200,
+    memories: [{
+      id: "MEM-CANCEL",
+      layer: "episodic",
+      content: "Cancelamento de assinatura validado com cliente autorizado.",
+      createdAt: new Date().toISOString(),
+      confidence: 1,
+      isInferred: false
+    }],
     explain: true
   });
 
@@ -70,6 +79,29 @@ test("builds verifiable ContextPack respecting token budget and explain mode", (
   assert.equal(pack.context.businessRules.length, 1);
   assert.equal(pack.sources[0].id, "BR-SUB-014");
   assert.ok(pack.explain && pack.explain.length === 1);
+  assert.equal(pack.context.memories.length, 1);
+  assert.ok(pack.tokenUsage <= 180);
+});
+
+test("adds only task-relevant visible episodic memories within a bounded context budget", () => {
+  const engine = new ContextEngine(new HybridRetrievalEngine(new KnowledgeGraphStore()));
+  const ctx: AuthContext = {
+    tenantId: "acme", actorId: "dev", actorType: "human", roles: ["developer"],
+    allowedProjects: ["sub"], allowedPolicies: ["internal-project"]
+  };
+  const pack = engine.buildContextPack(ctx, {
+    projectId: "sub",
+    task: "Implement SCIP symbol relationships in graph ingestion",
+    tokenBudget: 2000,
+    memories: [
+      { id: "MEM-SCIP", layer: "episodic", content: "SCIP graph ingestion maps symbol relationships to persisted graph edges.", createdAt: "2026-11-17T12:00:00.000Z", confidence: 1, isInferred: false },
+      { id: "MEM-UNRELATED", layer: "episodic", content: "The local runner uses Ollama for embeddings.", createdAt: "2026-11-17T12:01:00.000Z", confidence: 1, isInferred: false },
+      { id: "MEM-WORKING", layer: "working", content: "SCIP graph relationships should stay session scoped.", createdAt: "2026-11-17T12:02:00.000Z", sessionId: "other-session", confidence: 1, isInferred: false }
+    ]
+  });
+  assert.deepEqual(pack.context.memories.map((memory) => memory.id), ["MEM-SCIP"]);
+  assert.match(pack.context.memories[0]!.content, /<external_data trust="untrusted">/);
+  assert.ok(pack.warnings.some((warning) => warning.includes("Episodic")));
 });
 
 test("supports PostgresRetrievalEngine / AsyncRetrievalEngine returning Promise<ContextPack> and AsyncContextEngine", async () => {

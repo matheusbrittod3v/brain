@@ -120,3 +120,40 @@ export function orchestrateLivingDocDrafts(opts: {
 
   return drafts;
 }
+
+/**
+ * Versão assíncrona de orquestração que utiliza análise de diff por LLM quando configurada,
+ * mantendo fallback determinístico se o provedor de LLM não estiver disponível.
+ */
+export async function orchestrateLivingDocDraftsWithLlm(opts: {
+  changedFiles: readonly string[];
+  items: readonly KnowledgeItem[];
+  diffSummary?: string;
+  authorId?: string;
+  now?: Date;
+  analyzeDiffWithLlm?: (input: { item: KnowledgeItem; matchedFiles: string[]; diffSummary?: string }) => Promise<string>;
+}): Promise<LivingDocDraft[]> {
+  const drafts = orchestrateLivingDocDrafts(opts);
+  if (!opts.analyzeDiffWithLlm) return drafts;
+  const itemById = new Map(opts.items.map((item) => [item.id, item]));
+  return Promise.all(
+    drafts.map(async (draft) => {
+      const item = itemById.get(draft.targetItemId);
+      if (!item) return draft;
+      try {
+        const llmSummary = await opts.analyzeDiffWithLlm!({
+          item,
+          matchedFiles: draft.matchedFiles,
+          diffSummary: opts.diffSummary
+        });
+        if (!llmSummary.trim()) return draft;
+        return {
+          ...draft,
+          proposedContent: `${item.content}\n\n## Atualização sugerida (LLM diff-analysis)\n${llmSummary.trim()}`
+        };
+      } catch {
+        return draft;
+      }
+    })
+  );
+}

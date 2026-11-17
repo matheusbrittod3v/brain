@@ -137,6 +137,24 @@ test("fetches remote repo tree and decodes file contents", async () => {
   assert.match(result.files[0]?.content ?? "", /id: BR-1/);
 });
 
+test("preserves remote SCIP index bytes as base64 and applies the larger bounded index limit", async () => {
+  const index = Buffer.from("\u0000SCIP binary fixture\ufffd");
+  const result = await fetchRepoTreeAndFiles(
+    "acme", "sub", "main", "ghs_test",
+    { pathFilter: (path) => path === ".scip/index.scip", maxBinaryFileBytes: 128 },
+    async (url) => {
+      const target = String(url);
+      if (target.endsWith("/repos/acme/sub")) return new Response(JSON.stringify({ private: true }), { status: 200 });
+      if (target.includes("/commits/main")) return new Response(JSON.stringify({ sha: "commit-sha-1" }), { status: 200 });
+      if (target.includes("/git/trees/")) return new Response(JSON.stringify({
+        sha: "tree-sha-1", truncated: false, tree: [{ path: ".scip/index.scip", type: "blob", sha: "scip-blob" }]
+      }), { status: 200 });
+      return new Response(JSON.stringify({ sha: "scip-blob", encoding: "base64", content: index.toString("base64") }), { status: 200 });
+    }
+  );
+  assert.deepEqual(result.files, [{ path: ".scip/index.scip", sha: "scip-blob", content: index.toString("base64"), contentEncoding: "base64" }]);
+});
+
 test("fetches only changed GitHub files and reports removed and renamed paths", async () => {
   const calls: string[] = [];
   const result = await fetchRepoCommitChanges(

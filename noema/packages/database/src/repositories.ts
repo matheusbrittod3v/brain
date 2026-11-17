@@ -119,7 +119,7 @@ export class PgKnowledgeRepository {
           isInferred: item.isInferred,
           tags: item.tags,
           accessPolicyId: item.accessPolicyId,
-          metadata: item.metadata ?? {}
+          metadata: sql`${item.metadata ?? {}}::jsonb`
         })
         .onConflictDoUpdate({
           target: [knowledgeItems.tenantId, knowledgeItems.projectId, knowledgeItems.id],
@@ -132,7 +132,7 @@ export class PgKnowledgeRepository {
             version: nextVersion,
             contentHash: item.contentHash,
             tags: item.tags,
-            metadata: item.metadata ?? {},
+            metadata: sql`${item.metadata ?? {}}::jsonb`,
             deletedAt: null,
             updatedAt: new Date()
           }
@@ -159,7 +159,7 @@ export class PgKnowledgeRepository {
         tags: item.tags,
         accessPolicyId: item.accessPolicyId,
         content: item.content,
-        metadata: item.metadata ?? {}
+        metadata: sql`${item.metadata ?? {}}::jsonb`
       });
 
       await tx.insert(syncProjectLocks).values({
@@ -219,6 +219,41 @@ export class PgKnowledgeRepository {
       if (!ids.length) return 0;
       await tx.update(knowledgeItems).set({ deletedAt: new Date(), updatedAt: new Date() }).where(and(eq(knowledgeItems.tenantId, ctx.tenantId), eq(knowledgeItems.projectId, input.projectId), inArray(knowledgeItems.id, ids)));
       await tx.delete(knowledgeEmbeddings).where(and(eq(knowledgeEmbeddings.tenantId, ctx.tenantId), eq(knowledgeEmbeddings.projectId, input.projectId), inArray(knowledgeEmbeddings.knowledgeItemId, ids)));
+      await tx.delete(knowledgeRelations).where(and(eq(knowledgeRelations.tenantId, ctx.tenantId), or(
+        and(eq(knowledgeRelations.fromProjectId, input.projectId), inArray(knowledgeRelations.fromItemId, ids)),
+        and(eq(knowledgeRelations.toProjectId, input.projectId), inArray(knowledgeRelations.toItemId, ids))
+      )));
+      return ids.length;
+    });
+  }
+
+  async retireScipSymbolsExcept(
+    ctx: AuthContext,
+    input: { projectId: string; repository?: string; retainedItemIds: readonly string[] }
+  ): Promise<number> {
+    const retained = [...new Set(input.retainedItemIds)];
+    return withTenantRls(this.db, ctx, async (tx) => {
+      const repositoryScope = input.repository
+        ? sql`${knowledgeItems.metadata}->>'sourceRepository' = ${input.repository.toLowerCase()}`
+        : sql`${knowledgeItems.metadata}->>'sourceRepository' IS NULL`;
+      const found = await tx.select({ id: knowledgeItems.id }).from(knowledgeItems).where(and(
+        eq(knowledgeItems.tenantId, ctx.tenantId),
+        eq(knowledgeItems.projectId, input.projectId),
+        eq(knowledgeItems.type, "code_symbol"),
+        eq(knowledgeItems.sourceKind, "git"),
+        sql`${knowledgeItems.metadata}->>'source' = 'scip'`,
+        repositoryScope,
+        isNull(knowledgeItems.deletedAt),
+        ...(retained.length ? [notInArray(knowledgeItems.id, retained)] : [])
+      ));
+      const ids = found.map((row) => row.id);
+      if (!ids.length) return 0;
+      await tx.update(knowledgeItems).set({ deletedAt: new Date(), updatedAt: new Date() }).where(and(
+        eq(knowledgeItems.tenantId, ctx.tenantId), eq(knowledgeItems.projectId, input.projectId), inArray(knowledgeItems.id, ids)
+      ));
+      await tx.delete(knowledgeEmbeddings).where(and(
+        eq(knowledgeEmbeddings.tenantId, ctx.tenantId), eq(knowledgeEmbeddings.projectId, input.projectId), inArray(knowledgeEmbeddings.knowledgeItemId, ids)
+      ));
       await tx.delete(knowledgeRelations).where(and(eq(knowledgeRelations.tenantId, ctx.tenantId), or(
         and(eq(knowledgeRelations.fromProjectId, input.projectId), inArray(knowledgeRelations.fromItemId, ids)),
         and(eq(knowledgeRelations.toProjectId, input.projectId), inArray(knowledgeRelations.toItemId, ids))

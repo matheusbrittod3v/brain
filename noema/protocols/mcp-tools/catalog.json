@@ -11,5 +11,6 @@
   "brain_resume_handoff",
   "brain_record_learning",
   "brain_change_propose",
+  "brain_change_decide",
   "brain_delegate_task"
 ]

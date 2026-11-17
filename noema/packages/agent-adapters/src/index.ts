@@ -17,7 +17,7 @@ export interface GeneratedAdapterFiles {
 
 const SHORT_INSTRUCTION = `# Noema — Project Brain OS 2.0
 
-Use sempre o servidor MCP \`noema\` (13 tools canônicas) antes de editar código crítico:
+Use sempre o servidor MCP \`noema\` (catálogo extensível, atualmente 14 tools) antes de editar código crítico; documente cada nova tool e preserve paridade/testes:
 1. \`brain_context_build\` para montar o Context Pack da tarefa.
 2. \`brain_validate_implementation\` antes de concluir alterações em regras de negócio.
 3. \`brain_create_handoff\` / \`brain_resume_handoff\` para continuidade cross-IDE.

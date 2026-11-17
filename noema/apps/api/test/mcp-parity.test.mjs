@@ -6,7 +6,7 @@ import { buildApp } from "../dist/src/server.js";
 
 const catalog = JSON.parse(readFileSync(new URL("../../../protocols/mcp-tools/catalog.json", import.meta.url), "utf8"));
 
-test("Streamable HTTP exposes the same canonical 13 MCP tools as stdio", async () => {
+test("Streamable HTTP exposes the same currently documented 14 MCP tools as stdio", async () => {
   const app = buildApp("mcp-catalog-test", ["allowed-project"], new InMemoryAuditLogger());
   try {
     const response = await app.inject({
@@ -25,7 +25,7 @@ test("Streamable HTTP exposes the same canonical 13 MCP tools as stdio", async (
     assert.ok(dataLine, "MCP response should contain a JSON-RPC event");
     const payload = JSON.parse(dataLine.slice("data: ".length));
     assert.deepEqual(payload.result.tools.map((tool) => tool.name), catalog);
-    assert.equal(payload.result.tools.length, 13);
+    assert.equal(payload.result.tools.length, 14);
   } finally {
     await app.close();
   }

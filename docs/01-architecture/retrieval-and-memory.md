@@ -73,6 +73,8 @@ O sistema separa a memória por ciclo de vida e nível de governança:
 
 > **Regra essencial:** Uma conclusão gerada por IA na *Working* ou *Episodic Memory* **nunca** sobrescreve automaticamente a *Organizational Memory*. Ela deve ser proposta via `brain_change_propose` ou marcada explicitamente como inferência (`is_inferred = true`).
 
+> **Memória no Context Pack:** API e MCP consultam as entradas visíveis sob RLS, escopadas por projeto e sessão para *Working Memory*. O montador inclui até cinco memórias episódicas, semânticas ou procedurais com termos em comum com a tarefa, usando no máximo 20% do orçamento de tokens. O texto é envelopado como dado externo não confiável; memória é referência contextual e não substitui fontes aprovadas do Knowledge Graph.
+
 > **Memory Decay & Cold Archiving:** Para evitar que sessões antigas poluam a busca após meses de operação, um job periódico compacta memórias episódicas com mais de 60 dias e baixo *Context Hit Rate* em resumos semânticos, arquivando os logs brutos no MinIO/S3 (*cold storage*).
 
 ---
@@ -91,6 +93,9 @@ O sistema separa a memória por ciclo de vida e nível de governança:
    - Ao final de uma sessão ou tarefa (via `brain_record_learning` ou evento de diff pós-sessão), calcula-se `hit_rate = hits / itens_enviados` dentro da mesma sessão. Um item conta como `hit` apenas quando: (a) foi consultado via `brain_knowledge_get`, (b) teve seu `id`/`sourceUri` citado na resposta/handoff, ou (c) seu arquivo/símbolo associado sofreu edição vinculada à `taskId` ativa (evitando falsos hits em edições não relacionadas).
    - Itens enviados repetidamente sem utilidade perdem prioridade no *Reranker*; itens buscados juntos com frequência criam reforços no grafo (`CO_ACCESSED_WITH`), tornando os próximos `Context Packs` menores e mais precisos.
    - **Estado implementado (2026-11-17):** `context_session_items` registra fontes distintas entregues por `(tenant, projeto, ator, sessão, item)` e evidências idempotentes `read`, `citation` e `edit`. O denominador inclui somente fontes do Context Pack; busca direta não entra. `edit` exige lease ativo do mesmo ator e tarefa vinculada. No primeiro envio, arquivos locais elegíveis sob o workspace configurado recebem baseline SHA-256; no feedback, o Noema detecta mudanças sem depender de `editedPaths`. Esse campo, quando enviado, apenas restringe os caminhos detectados. URIs remotas, arquivos indisponíveis e caminhos fora do workspace não têm detecção automática. O retrieval usa `context_hit_count / context_sent_count`, limitado a `[0,1]`; `hit_count` permanece legado. Primeira evidência de hit cria arestas direcionais inferidas `CO_ACCESSED_WITH` com itens já hit na sessão; reuso reforça confiança e atualiza `created_at`.
+5. **Access-Weighted Retention (Retenção Ponderada por Acesso) e Perfil Cross-Project:**
+   - **Retenção Ponderada por Acesso:** No `MemoryManager` (`packages/memory`) e no job `noema.memory-decay` (`PgOperationalRepository.runMemoryDecay`), memórias episódicas com `hit_count > 0` recebem extensão de retenção proporcional aos acessos (até +90 dias de carência sobre o TTL base de 60 dias), e arestas inferidas (`CO_ACCESSED_WITH`) conectadas a itens com `context_hit_count > 0` decaem mais devagar do que itens sem uso.
+   - **Perfil Pessoal Cross-Project (`developer_profiles`):** Preferências pessoais do desenvolvedor (`preferredPackageManager`, `preferredTestLayout`, `preferredArchitectureStyle`, `codingConventions`, `preferredHarness`) são isoladas por `(tenant_id, actor_id)` via RLS e incluídas no `Context Pack` quando `optInCrossProject = true`, sempre com precedência inferior às regras oficiais do repositório.
 
 ---
 

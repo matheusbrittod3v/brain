@@ -48,7 +48,7 @@ Como o **Brain Runner** é focado em **subagente de tarefas** (e não em um assi
 
 ## 3. Como os Agentes Principais Delegam Tarefas
 
-Agentes no **Antigravity, Codex, Kiro, Cursor ou Claude Code** podem enfileirar tarefas no Hub via ferramenta MCP **`brain_delegate_task`** ou API REST (`/v1/projects/:projectId/runner/tasks`), ou no Edge local via CLI (`brain task enqueue --local`). No Hub, `cron` cria uma agenda UTC no pg-boss; o worker converte cada disparo em tarefa durável. Agendas podem ser consultadas e canceladas em `/v1/projects/:projectId/runner/schedules`. O cron local no Edge ainda está pendente.
+Agentes no **Antigravity, Codex, Kiro, Cursor ou Claude Code** podem enfileirar tarefas no Hub via ferramenta MCP **`brain_delegate_task`** ou API REST (`/v1/projects/:projectId/runner/tasks`), ou no Edge local via CLI (`brain task enqueue --local`). No Hub, `cron` cria uma agenda UTC no pg-boss; o worker converte cada disparo em tarefa durável. Agendas podem ser consultadas e canceladas em `/v1/projects/:projectId/runner/schedules`. No Edge local, `brain runner cron add|list|remove` persiste agendas em `edge_cron_jobs` no SQLite local.
 
 - **Tarefas sob demanda (Delegação):**
   - Resumir últimos commits/PRs e gerar rascunho de release notes.
@@ -69,8 +69,8 @@ Quando a execução depende de uma decisão contextual, o Runner pode registrar 
 
 | Aspecto | Modo Local (Máquina do Usuário) | Modo Nuvem (Cluster da Empresa) |
 | :--- | :--- | :--- |
-| **Fila & Cron** | Tabela SQLite durável em `packages/database-edge`; polling pelo daemon `brain runner up --local`; cron ainda pendente | `pg-boss` sobre PostgreSQL com consumidores descobertos pelo worker; disparos viram tarefas em `runner_tasks`; Temporal.io opcional para workflows longos |
-| **Modelo de IA** | Ollama local, selecionado via preflight; outros adaptadores ainda pendentes | Adaptadores remotos/cloud ainda pendentes para o Runner |
+| **Fila & Cron** | Tabela SQLite durável (`edge_runner_tasks` e `edge_cron_jobs`) em `packages/database-edge`; polling pelo daemon `brain runner up --local` e `brain runner cron` | `pg-boss` sobre PostgreSQL com consumidores descobertos pelo worker; disparos viram tarefas em `runner_tasks`; Temporal.io opcional para workflows longos |
+| **Modelo de IA** | Ollama local, selecionado via preflight; suporte opcional a Apple Foundation Models (`apple-fm`) via bridge Swift em macOS e modo `--hybrid` | Adaptadores `ollama`, `apple-fm`, `openai`, `anthropic` e `hybrid` disponíveis em `apps/agent-runner` |
 | **Escopo** | Tarefas locais com saída draft-only persistida no Edge | Tarefas do Hub e crons via pg-boss; criação de PRs pelo Runner permanece em integração |
 | **Custo** | Sem cobrança de serviço externo; usa hardware local | Infraestrutura própria e orçamento por time/setor |
 

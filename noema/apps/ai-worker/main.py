@@ -1,6 +1,8 @@
+import json
 import re
-from fastapi import FastAPI, HTTPException
-from pydantic import BaseModel
+from fastapi import FastAPI, HTTPException, Request
+from pydantic import BaseModel, Field, ValidationError
+from document_parser import MAX_DOCUMENT_BYTES, parse_document_upload
 
 app = FastAPI(title="Noema AI Worker", version="0.1.0")
 
@@ -22,6 +24,12 @@ try:
 except Exception:
     _docling_converter = None
 
+try:
+    from markitdown import MarkItDown
+    _markitdown_converter = MarkItDown()
+except Exception:
+    _markitdown_converter = None
+
 
 try:
     from flashrank import Ranker, RerankRequest
@@ -35,7 +43,8 @@ class TextPayload(BaseModel):
 
 
 class DocumentPayload(BaseModel):
-    file_path: str
+    file_name: str = Field(min_length=1, max_length=255)
+    content_base64: str = Field(min_length=1, max_length=4 * ((MAX_DOCUMENT_BYTES + 2) // 3))
 
 
 @app.get("/health")
@@ -45,6 +54,7 @@ def health():
         "status": "ok",
         "presidio": _presidio_analyzer is not None,
         "docling": _docling_converter is not None,
+        "markitdown": _markitdown_converter is not None,
     }
 
 
@@ -63,11 +73,36 @@ def redact_pii(payload: TextPayload):
 
 
 @app.post("/parse-document")
-def parse_document(payload: DocumentPayload):
-    if _docling_converter is not None:
-        result = _docling_converter.convert(payload.file_path)
-        return {"markdown": result.document.export_to_markdown(), "engine": "docling"}
-    raise HTTPException(status_code=501, detail="Docling não instalado neste ambiente.")
+async def parse_document(request: Request):
+    max_request_bytes = 24 * 1024 * 1024
+    content_length = request.headers.get("content-length")
+    if content_length:
+        try:
+            if int(content_length) > max_request_bytes:
+                raise HTTPException(status_code=413, detail="Upload excede o limite de 16 MiB.")
+        except ValueError as error:
+            raise HTTPException(status_code=400, detail="Content-Length inválido.") from error
+    raw_body = bytearray()
+    async for chunk in request.stream():
+        raw_body.extend(chunk)
+        if len(raw_body) > max_request_bytes:
+            raise HTTPException(status_code=413, detail="Upload excede o limite de 16 MiB.")
+    try:
+        payload = DocumentPayload.model_validate(json.loads(raw_body))
+    except (json.JSONDecodeError, ValidationError, UnicodeDecodeError) as error:
+        raise HTTPException(status_code=422, detail="Payload do documento inválido.") from error
+    if _docling_converter is None and _markitdown_converter is None:
+        raise HTTPException(status_code=503, detail="Docling e MarkItDown indisponíveis neste ambiente.")
+    try:
+        markdown, engine = parse_document_upload(
+            payload.file_name, payload.content_base64,
+            converter=_docling_converter, fallback_converter=_markitdown_converter
+        )
+    except ValueError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+    except Exception as error:
+        raise HTTPException(status_code=422, detail="Docling não conseguiu converter o documento.") from error
+    return {"markdown": markdown, "engine": engine}
 
 
 class RerankDocument(BaseModel):

@@ -221,6 +221,7 @@ export const taskLeases = pgTable(
     taskId: text("task_id").notNull(),
     actorId: text("actor_id").notNull(),
     branch: text("branch").notNull(),
+    targetFiles: text("target_files").array().default([]).notNull(),
     expiresAt: timestamp("expires_at", { withTimezone: true }).notNull()
   },
   (t) => [primaryKey({ columns: [t.tenantId, t.projectId, t.taskId] })]
@@ -348,6 +349,7 @@ export const memoryEntries = pgTable("memory_entries", {
   sessionId: text("session_id"),
   content: text("content").notNull(),
   accessPolicyId: text("access_policy_id").notNull(),
+  hitCount: integer("hit_count").default(0).notNull(),
   expiresAt: timestamp("expires_at", { withTimezone: true }),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull()
 }, (t) => [index("idx_memory_entries_subject").on(t.tenantId, t.projectId, t.actorId)]);
@@ -447,4 +449,103 @@ export const notificationOutbox = pgTable("notification_outbox", {
   unique("uq_notification_outbox_event").on(t.tenantId, t.projectId, t.actorId, t.eventKey),
   index("idx_notification_outbox_pending").on(t.tenantId, t.projectId, t.actorId, t.scheduledAt)
 ]);
+
+export const developerProfiles = pgTable("developer_profiles", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  tenantId: text("tenant_id").notNull(),
+  actorId: text("actor_id").notNull(),
+  preferredPackageManager: text("preferred_package_manager"),
+  preferredTestLayout: text("preferred_test_layout"),
+  preferredArchitectureStyle: text("preferred_architecture_style"),
+  codingConventions: text("coding_conventions").array().notNull().default([]),
+  preferredHarness: text("preferred_harness"),
+  optInCrossProject: boolean("opt_in_cross_project").default(true).notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull()
+}, (t) => [unique("uq_developer_profiles_owner").on(t.tenantId, t.actorId)]);
+
+export const customAccessPolicies = pgTable("custom_access_policies", {
+  tenantId: text("tenant_id").notNull(),
+  projectId: text("project_id").notNull(),
+  accessPolicyId: text("access_policy_id").default("internal-project").notNull(),
+  policyId: text("policy_id").notNull(),
+  label: text("label").notNull(),
+  description: text("description").notNull(),
+  allowedRoles: text("allowed_roles").array().notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull()
+}, (t) => [
+  primaryKey({ columns: [t.tenantId, t.projectId, t.policyId] }),
+  index("idx_custom_access_policies_scope").on(t.tenantId, t.projectId)
+]);
+
+export const projectAccessMembers = pgTable("project_access_members", {
+  tenantId: text("tenant_id").notNull(),
+  projectId: text("project_id").notNull(),
+  accessPolicyId: text("access_policy_id").default("internal-project").notNull(),
+  actorId: text("actor_id").notNull(),
+  roles: text("roles").array().notNull(),
+  allowedPolicies: text("allowed_policies").array().notNull(),
+  syncedWithKeycloak: boolean("synced_with_keycloak").default(false).notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull()
+}, (t) => [
+  primaryKey({ columns: [t.tenantId, t.projectId, t.actorId] }),
+  index("idx_project_access_members_scope").on(t.tenantId, t.projectId)
+]);
+
+export const temporaryAccessGrants = pgTable("temporary_access_grants", {
+  grantId: text("grant_id").notNull(),
+  tenantId: text("tenant_id").notNull(),
+  projectId: text("project_id").notNull(),
+  accessPolicyId: text("access_policy_id").default("internal-project").notNull(),
+  actorId: text("actor_id").notNull(),
+  roles: text("roles").array().notNull(),
+  policyIds: text("policy_ids").array().notNull(),
+  expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+  grantedBy: text("granted_by").notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull()
+}, (t) => [
+  primaryKey({ columns: [t.tenantId, t.projectId, t.grantId] }),
+  index("idx_temporary_access_grants_active").on(t.tenantId, t.projectId, t.expiresAt)
+]);
+
+export const departmentFinopsQuotas = pgTable("department_finops_quotas", {
+  tenantId: text("tenant_id").notNull(),
+  projectId: text("project_id").notNull(),
+  department: text("department").notNull(),
+  monthlyTokenLimit: integer("monthly_token_limit").notNull(),
+  monthlyUsdLimit: text("monthly_usd_limit").notNull(),
+  downgradeModel: text("downgrade_model"),
+  accessPolicyId: text("access_policy_id").default("internal-project").notNull(),
+  updatedBy: text("updated_by").notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull()
+}, (t) => [primaryKey({ columns: [t.tenantId, t.projectId, t.department] })]);
+
+export const integrationFallbackOwners = pgTable("integration_fallback_owners", {
+  tenantId: text("tenant_id").notNull(),
+  projectId: text("project_id").notNull(),
+  provider: text("provider").notNull(),
+  fallbackOwner: text("fallback_owner").notNull(),
+  accessPolicyId: text("access_policy_id").default("internal-project").notNull(),
+  updatedBy: text("updated_by").notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull()
+}, (t) => [primaryKey({ columns: [t.tenantId, t.projectId, t.provider] })]);
+
+export const integrationReconnectHistory = pgTable("integration_reconnect_history", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  tenantId: text("tenant_id").notNull(),
+  projectId: text("project_id").notNull(),
+  provider: text("provider").notNull(),
+  status: text("status").notNull(),
+  actorId: text("actor_id").notNull(),
+  accessPolicyId: text("access_policy_id").default("internal-project").notNull(),
+  lastReconnectAt: timestamp("last_reconnect_at", { withTimezone: true }).defaultNow().notNull()
+}, (t) => [index("idx_integration_reconnect_history_scope").on(t.tenantId, t.projectId, t.provider, t.lastReconnectAt)]);
+
+export const lgpdShreddedSubjects = pgTable("lgpd_shredded_subjects", {
+  tenantId: text("tenant_id").notNull(),
+  projectId: text("project_id").notNull(),
+  subjectId: text("subject_id").notNull(),
+  accessPolicyId: text("access_policy_id").default("internal-project").notNull(),
+  shreddedBy: text("shredded_by").notNull(),
+  shreddedAt: timestamp("shredded_at", { withTimezone: true }).defaultNow().notNull()
+}, (t) => [primaryKey({ columns: [t.tenantId, t.projectId, t.subjectId] })]);
 

@@ -1,14 +1,19 @@
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
-import { extname, join, relative } from "node:path";
+import { existsSync, lstatSync, readdirSync, readFileSync } from "node:fs";
+import { extname, join, relative, resolve } from "node:path";
+import ignore from "ignore";
 import type { KnowledgeItem } from "@noema/core";
 import {
   extractCodeAnchors,
   extractCodeSymbols,
   extractFileDependencies,
+  initBundledTreeSitterLanguage,
+  parseScipIndex,
   type CodeAnchor,
-  type CodeSymbol
+  type CodeSymbol,
+  type ScipDocument,
+  type TreeSitterGrammar
 } from "@noema/code-intelligence";
 
 export interface GitCommitSummary {
@@ -38,7 +43,17 @@ export interface DeterministicDiscoveryResult {
   symbols: CodeSymbol[];
   anchors: CodeAnchor[];
   sqlTables: string[];
+  testFiles: string[];
+  infrastructureFiles: string[];
   dependencies: Record<string, string[]>;
+  treeSitter: { activeLanguages: string[]; fallbackFiles: string[] };
+  scip: {
+    state: "not_found" | "available" | "invalid";
+    indexPath?: string;
+    toolInfo?: string;
+    documents: ScipDocument[];
+    error?: string;
+  };
   confidence: 1.0;
   isInferred: false;
 }
@@ -51,14 +66,38 @@ export interface ProjectDiscoveryReport {
 
 const SKIP_DIRS = new Set(["node_modules", "dist", ".git", ".next", "__pycache__", ".venv"]);
 
-function walkFiles(dir: string, acc: string[] = []): string[] {
+interface GitIgnoreLayer {
+  baseDir: string;
+  matcher: ReturnType<typeof ignore>;
+}
+
+function isIgnored(fullPath: string, isDirectory: boolean, layers: GitIgnoreLayer[]): boolean {
+  let ignored = false;
+  for (const layer of layers) {
+    const pathFromLayer = relative(layer.baseDir, fullPath).replace(/\\/g, "/");
+    if (pathFromLayer === ".." || pathFromLayer.startsWith("../")) continue;
+    const result = layer.matcher.test(`${pathFromLayer}${isDirectory ? "/" : ""}`);
+    if (result.ignored) ignored = true;
+    else if (result.unignored) ignored = false;
+  }
+  return ignored;
+}
+
+function walkFiles(projectRoot: string, dir = projectRoot, acc: string[] = [], inheritedIgnores: GitIgnoreLayer[] = []): string[] {
   if (!existsSync(dir)) return acc;
+  const ignorePath = join(dir, ".gitignore");
+  const hasRegularIgnoreFile = existsSync(ignorePath) && lstatSync(ignorePath).isFile();
+  const ignoreLayers = hasRegularIgnoreFile
+    ? [...inheritedIgnores, { baseDir: dir, matcher: ignore().add(readFileSync(ignorePath, "utf8")) }]
+    : inheritedIgnores;
   for (const entry of readdirSync(dir)) {
     if (SKIP_DIRS.has(entry)) continue;
     const full = join(dir, entry);
-    const st = statSync(full);
+    const st = lstatSync(full);
+    if (st.isSymbolicLink()) continue;
+    if (isIgnored(full, st.isDirectory(), ignoreLayers)) continue;
     if (st.isDirectory()) {
-      walkFiles(full, acc);
+      walkFiles(projectRoot, full, acc, ignoreLayers);
     } else {
       acc.push(full);
     }
@@ -69,7 +108,65 @@ function walkFiles(dir: string, acc: string[] = []): string[] {
 /**
  * Camada 1 (Determinística, confidence=1.0): linguagens, frameworks, rotas, símbolos, SQL e dependências.
  */
-export function discoverDeterministic(projectRoot: string): DeterministicDiscoveryResult {
+function loadScipDiscovery(projectRoot: string, explicitPath?: string): DeterministicDiscoveryResult["scip"] {
+  const candidates = explicitPath
+    ? [resolve(projectRoot, explicitPath)]
+    : [join(projectRoot, "index.scip"), join(projectRoot, ".scip", "index.scip")];
+  const indexPath = candidates.find(existsSync);
+  if (!indexPath) return { state: "not_found", documents: [] };
+  try {
+    const relativeIndexPath = relative(projectRoot, resolve(indexPath));
+    if (relativeIndexPath.startsWith("..") || lstatSync(indexPath).isSymbolicLink()) {
+      throw new Error("Índice SCIP inválido: caminho fora do projeto ou symlink não permitido.");
+    }
+    const index = parseScipIndex(readFileSync(indexPath));
+    return { state: "available", indexPath, toolInfo: index.metadata.toolInfo, documents: index.documents };
+  } catch (error) {
+    return {
+      state: "invalid",
+      indexPath,
+      documents: [],
+      error: error instanceof Error ? error.message : "Índice SCIP inválido."
+    };
+  }
+}
+
+function treeSitterGrammarForPath(filePath: string): TreeSitterGrammar | undefined {
+  const ext = extname(filePath).toLowerCase();
+  if (ext === ".py") return "python";
+  if (ext === ".go") return "go";
+  if (ext === ".java") return "java";
+  if (ext === ".rs") return "rust";
+  return undefined;
+}
+
+function isTestPath(filePath: string): boolean {
+  const base = filePath.split("/").at(-1) ?? filePath;
+  const ext = extname(base).toLowerCase();
+  if (![".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs", ".py", ".go", ".java", ".rs"].includes(ext)) return false;
+  return /(^|\/)(__tests__|tests?)(\/|$)/i.test(filePath)
+    || /\.(?:test|spec)\.(?:[cm]?[jt]sx?)$/i.test(base)
+    || /^test_.*\.py$/i.test(base)
+    || /_test\.go$/i.test(base)
+    || /^(?:Test.*|.*Test(?:s|Case)?)\.java$/i.test(base);
+}
+
+function isInfrastructurePath(filePath: string): boolean {
+  const base = filePath.split("/").at(-1) ?? filePath;
+  const lower = filePath.toLowerCase();
+  return /^(?:dockerfile|containerfile)(?:\..*)?$/i.test(base)
+    || /^(?:docker-compose|compose)(?:\.[^/]+)*\.ya?ml$/i.test(base)
+    || /^(?:\.gitlab-ci\.yml|jenkinsfile)$/i.test(base)
+    || /\.github\/workflows\/[^/]+\.ya?ml$/i.test(lower)
+    || /\.(?:tf|tfvars|hcl)$/i.test(base)
+    || /(?:^|\/)(?:infra|infrastructure|terraform|k8s|kubernetes|helm|charts)(?:\/|$)/i.test(filePath)
+      && /\.(?:ya?ml|json|toml)$/i.test(base);
+}
+
+export async function discoverDeterministic(
+  projectRoot: string,
+  options: { scipIndexPath?: string; treeSitterLoader?: typeof initBundledTreeSitterLanguage } = {}
+): Promise<DeterministicDiscoveryResult> {
   const files = walkFiles(projectRoot);
   const languages = new Set<string>();
   const frameworks = new Set<string>();
@@ -77,54 +174,87 @@ export function discoverDeterministic(projectRoot: string): DeterministicDiscove
   const routes: CodeSymbol[] = [];
   const anchors: CodeAnchor[] = [];
   const sqlTables = new Set<string>();
+  const testFiles = new Set<string>();
+  const infrastructureFiles = new Set<string>();
   const dependencies: Record<string, string[]> = {};
+  const grammarNames = new Set(files.map(treeSitterGrammarForPath).filter((value): value is TreeSitterGrammar => Boolean(value)));
+  const parsers = new Map<TreeSitterGrammar, Awaited<ReturnType<typeof initBundledTreeSitterLanguage>>>();
+  const fallbackFiles = new Set<string>();
 
-  for (const fullPath of files) {
-    const rel = relative(projectRoot, fullPath).replace(/\\/g, "/");
-    const ext = extname(fullPath);
+  for (const grammar of grammarNames) {
+    try {
+      parsers.set(grammar, await (options.treeSitterLoader ?? initBundledTreeSitterLanguage)(grammar));
+    } catch {
+      // Sem gramática válida, a extração determinística anterior permanece disponível.
+    }
+  }
 
-    if (ext === ".ts" || ext === ".tsx") languages.add("typescript");
-    else if (ext === ".js" || ext === ".mjs") languages.add("javascript");
-    else if (ext === ".py") languages.add("python");
-    else if (ext === ".go") languages.add("go");
-    else if (ext === ".java") languages.add("java");
-    else if (ext === ".rs") languages.add("rust");
-    else if (ext === ".sql") languages.add("sql");
+  try {
+    for (const fullPath of files) {
+      const rel = relative(projectRoot, fullPath).replace(/\\/g, "/");
+      const ext = extname(fullPath);
+      if (isTestPath(rel)) testFiles.add(rel);
+      if (isInfrastructurePath(rel)) infrastructureFiles.add(rel);
 
-    if (rel.endsWith("package.json")) {
-      try {
-        const pkg = JSON.parse(readFileSync(fullPath, "utf8")) as {
-          dependencies?: Record<string, string>;
-          devDependencies?: Record<string, string>;
-        };
-        const allDeps = { ...pkg.dependencies, ...pkg.devDependencies };
-        for (const fw of ["fastify", "next", "react", "drizzle-orm", "express", "@modelcontextprotocol/sdk"]) {
-          if (allDeps[fw]) frameworks.add(fw);
+      if (ext === ".ts" || ext === ".tsx") languages.add("typescript");
+      else if (ext === ".js" || ext === ".mjs") languages.add("javascript");
+      else if (ext === ".py") languages.add("python");
+      else if (ext === ".go") languages.add("go");
+      else if (ext === ".java") languages.add("java");
+      else if (ext === ".rs") languages.add("rust");
+      else if (ext === ".sql") languages.add("sql");
+
+      if (rel.endsWith("package.json")) {
+        try {
+          const pkg = JSON.parse(readFileSync(fullPath, "utf8")) as {
+            dependencies?: Record<string, string>;
+            devDependencies?: Record<string, string>;
+          };
+          const allDeps = { ...pkg.dependencies, ...pkg.devDependencies };
+          for (const fw of ["fastify", "next", "react", "drizzle-orm", "express", "@modelcontextprotocol/sdk"]) {
+            if (allDeps[fw]) frameworks.add(fw);
+          }
+        } catch {
+          // Ignora package.json inválido
         }
-      } catch {
-        // Ignora package.json inválido
       }
-    }
 
-    if ([".ts", ".tsx", ".js", ".mjs", ".py", ".go", ".java", ".rs"].includes(ext)) {
-      const code = readFileSync(fullPath, "utf8");
-      const fileSymbols = extractCodeSymbols(rel, code);
-      for (const s of fileSymbols) {
-        symbols.push(s);
-        if (s.kind === "route") routes.push(s);
+      if ([".ts", ".tsx", ".js", ".mjs", ".py", ".go", ".java", ".rs"].includes(ext)) {
+        const code = readFileSync(fullPath, "utf8");
+        if (ext === ".rs" && /#\[(?:cfg\s*\(\s*test\s*\)|test)\]/.test(code)) testFiles.add(rel);
+        const grammar = treeSitterGrammarForPath(rel);
+        const parser = grammar ? parsers.get(grammar) : undefined;
+        let fileSymbols: CodeSymbol[];
+        if (parser) {
+          try {
+            fileSymbols = extractCodeSymbols(rel, code, { treeSitterParser: parser });
+          } catch {
+            fallbackFiles.add(rel);
+            fileSymbols = extractCodeSymbols(rel, code);
+          }
+        } else {
+          if (grammar) fallbackFiles.add(rel);
+          fileSymbols = extractCodeSymbols(rel, code);
+        }
+        for (const s of fileSymbols) {
+          symbols.push(s);
+          if (s.kind === "route") routes.push(s);
+        }
+        anchors.push(...extractCodeAnchors(rel, code));
+        const deps = extractFileDependencies(rel, code);
+        if (deps.length > 0) dependencies[rel] = deps;
       }
-      anchors.push(...extractCodeAnchors(rel, code));
-      const deps = extractFileDependencies(rel, code);
-      if (deps.length > 0) dependencies[rel] = deps;
-    }
 
-    if (ext === ".sql") {
-      const sqlText = readFileSync(fullPath, "utf8");
-      const tableMatches = sqlText.matchAll(/CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?["`]?([A-Za-z0-9_.]+)["`]?/gi);
-      for (const m of tableMatches) {
-        if (m[1]) sqlTables.add(m[1]);
+      if (ext === ".sql") {
+        const sqlText = readFileSync(fullPath, "utf8");
+        const tableMatches = sqlText.matchAll(/CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?["`]?([A-Za-z0-9_.]+)["`]?/gi);
+        for (const m of tableMatches) {
+          if (m[1]) sqlTables.add(m[1]);
+        }
       }
     }
+  } finally {
+    for (const parser of parsers.values()) parser.delete();
   }
 
   return {
@@ -135,7 +265,11 @@ export function discoverDeterministic(projectRoot: string): DeterministicDiscove
     symbols,
     anchors,
     sqlTables: [...sqlTables].sort(),
+    testFiles: [...testFiles].sort(),
+    infrastructureFiles: [...infrastructureFiles].sort(),
     dependencies,
+    treeSitter: { activeLanguages: [...parsers.keys()].sort(), fallbackFiles: [...fallbackFiles].sort() },
+    scip: loadScipDiscovery(projectRoot, options.scipIndexPath),
     confidence: 1.0,
     isInferred: false
   };
@@ -238,7 +372,7 @@ function createDraftKnowledgeItem(params: DraftItemParams): KnowledgeItem {
     version: 1,
     contentHash: createHash("sha256").update(params.content).digest("hex"),
     confidence: params.confidence,
-    trustLevel: "verified",
+    trustLevel: "untrusted",
     isInferred: true,
     validFrom: params.now,
     tags: params.tags,
@@ -253,12 +387,12 @@ function createDraftKnowledgeItem(params: DraftItemParams): KnowledgeItem {
 /**
  * Camada 2 (Inferência Assistida, is_inferred=true, status='draft'): sugere itens de documentação para revisão humana.
  */
-export function runProjectAutodiscovery(
+export async function runProjectAutodiscovery(
   projectRoot: string,
   tenantId = "default-org",
   projectId = "default-project"
-): ProjectDiscoveryReport {
-  const deterministic = discoverDeterministic(projectRoot);
+): Promise<ProjectDiscoveryReport> {
+  const deterministic = await discoverDeterministic(projectRoot);
   const gitHistory = analyzeGitHistory(projectRoot);
   const inferredDrafts: KnowledgeItem[] = [];
   const now = new Date().toISOString();
@@ -274,6 +408,9 @@ export function runProjectAutodiscovery(
     `- SQL tables: ${deterministic.sqlTables.length}`,
     `- Recent git commits analyzed: ${gitHistory.commits.length}`
   ];
+  overviewLines.push(`- SCIP documents: ${deterministic.scip.documents.length} (${deterministic.scip.state})`);
+  overviewLines.push(`- Test files: ${deterministic.testFiles.length}`);
+  overviewLines.push(`- Infrastructure files: ${deterministic.infrastructureFiles.length}`);
   const overviewContent = overviewLines.join("\n");
   inferredDrafts.push(
     createDraftKnowledgeItem({
@@ -296,6 +433,35 @@ export function runProjectAutodiscovery(
       now
     })
   );
+
+  if (deterministic.testFiles.length > 0 || deterministic.infrastructureFiles.length > 0) {
+    const content = [
+      "# Mapa de testes e infraestrutura",
+      "",
+      "Arquivos identificados por convenções de nome, diretório e conteúdo. Revise antes de tratar a lista como completa.",
+      "",
+      "## Testes",
+      ...(deterministic.testFiles.length ? deterministic.testFiles.map((file) => `- ${file}`) : ["- Nenhum arquivo detectado"]),
+      "",
+      "## Infraestrutura",
+      ...(deterministic.infrastructureFiles.length ? deterministic.infrastructureFiles.map((file) => `- ${file}`) : ["- Nenhum arquivo detectado"])
+    ].join("\n");
+    inferredDrafts.push(createDraftKnowledgeItem({
+      id: `DRAFT-TEST-INFRA-${normalizedProjectId}`,
+      tenantId,
+      projectId,
+      domainId: 5,
+      type: "document",
+      title: "Mapa de Testes e Infraestrutura",
+      content,
+      summary: `${deterministic.testFiles.length} arquivos de teste e ${deterministic.infrastructureFiles.length} arquivos de infraestrutura detectados.`,
+      sourceUri: ".brain/05-code/test-and-infrastructure-map.md",
+      confidence: 0.8,
+      tags: ["autodiscovery", "draft", "tests", "infrastructure"],
+      metadata: { testFiles: deterministic.testFiles, infrastructureFiles: deterministic.infrastructureFiles },
+      now
+    }));
+  }
 
   // 01-business/ (inferred rule candidates)
   const businessSymbols = deterministic.symbols.filter(
@@ -378,6 +544,66 @@ export function runProjectAutodiscovery(
         now
       })
     );
+  }
+
+  const scipOccurrences = deterministic.scip.documents.flatMap((document) =>
+    document.occurrences.map((occurrence) => ({ document, occurrence }))
+  );
+  const scipSymbols = deterministic.scip.documents.flatMap((document) =>
+    document.symbols.map((symbol) => ({ document, symbol }))
+  );
+  const scipRelationships = scipSymbols.flatMap(({ document, symbol }) => [
+    ...(symbol.enclosingSymbol ? [{ document, from: symbol.symbol, to: symbol.enclosingSymbol, kind: "ENCLOSED_BY" }] : []),
+    ...symbol.relationships.flatMap((relationship) => [
+      ...(relationship.isImplementation ? [{ document, from: symbol.symbol, to: relationship.symbol, kind: "IMPLEMENTS" }] : []),
+      ...(relationship.isReference ? [{ document, from: symbol.symbol, to: relationship.symbol, kind: "REFERENCES" }] : []),
+      ...(relationship.isTypeDefinition ? [{ document, from: symbol.symbol, to: relationship.symbol, kind: "TYPE_DEFINITION" }] : []),
+      ...(relationship.isDefinition ? [{ document, from: symbol.symbol, to: relationship.symbol, kind: "DEFINITION_ALIAS" }] : [])
+    ])
+  ]);
+  if (scipOccurrences.length > 0 || scipSymbols.length > 0) {
+    const content = [
+      `Mapa extraído do índice SCIP oficial (${deterministic.scip.toolInfo ?? "indexador desconhecido"}):`,
+      `Símbolos: ${scipSymbols.length}; ocorrências: ${scipOccurrences.length}; relações semânticas: ${scipRelationships.length}.`,
+      "",
+      "### Símbolos definidos",
+      ...scipSymbols.slice(0, 200).map(({ document, symbol }) =>
+        `- ${symbol.displayName || symbol.symbol} [kind=${symbol.kind}] — ${document.relativePath}${symbol.documentation.length ? ` — ${symbol.documentation.join(" ")}` : ""}`
+      ),
+      "",
+      "### Relações SCIP",
+      ...(scipRelationships.length
+        ? scipRelationships.slice(0, 200).map(({ document, from, to, kind }) => `- ${kind}: \`${from}\` → \`${to}\` (${document.relativePath})`)
+        : ["- Nenhuma relação semântica declarada pelo indexador"]),
+      "",
+      "### Ocorrências",
+      ...scipOccurrences.slice(0, 200).map(({ document, occurrence }) =>
+        `- ${occurrence.role} \`${occurrence.symbol}\` — ${document.relativePath}:${occurrence.range[0] + 1}`
+      )
+    ].join("\n");
+    inferredDrafts.push(createDraftKnowledgeItem({
+      id: `DRAFT-SCIP-${normalizedProjectId}`,
+      tenantId,
+      projectId,
+      domainId: 5,
+      type: "document",
+      title: `Mapa Semântico SCIP (${scipSymbols.length} símbolos, ${scipRelationships.length} relações)`,
+      content,
+      summary: `${scipSymbols.length} símbolos, ${scipRelationships.length} relações e ${scipOccurrences.length} ocorrências em ${deterministic.scip.documents.length} documentos SCIP.`,
+      sourceUri: ".brain/05-code/scip-symbol-map.md",
+      confidence: 0.9,
+      tags: ["autodiscovery", "draft", "code", "scip"],
+      metadata: {
+        scipToolInfo: deterministic.scip.toolInfo,
+        indexPath: deterministic.scip.indexPath,
+        documentCount: deterministic.scip.documents.length,
+        symbolCount: scipSymbols.length,
+        scipRelationshipCount: scipRelationships.length,
+        definitionCount: scipOccurrences.filter(({ occurrence }) => occurrence.role === "definition").length,
+        referenceCount: scipOccurrences.filter(({ occurrence }) => occurrence.role === "reference").length
+      },
+      now
+    }));
   }
 
   // 03-architecture/ (discovered services, classes/interfaces, & git hotspots)

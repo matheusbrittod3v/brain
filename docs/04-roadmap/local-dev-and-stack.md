@@ -16,7 +16,7 @@
 | **Observabilidade** | OpenTelemetry | Langfuse (traces/custo de IA) | **Obrigatória** |
 | **Embeddings & LLM Local** | Ollama (`bge-m3` 1024d) | Provedores externos via `LiteLLM` | **Opcional** |
 | **Auth Corporativa** | API Key local + RLS (dev/single) / Keycloak + OPA (corporativo) | — | **Opcional (Nuvem)** |
-| **Docs Complexos & PII** | `apps/ai-worker` Python (`Docling` + `Presidio`) | — | **Sob Demanda (PDF/SaaS)** |
+| **Docs Complexos & PII** | `apps/ai-worker` Python (`Docling` + `Presidio`); rota autenticada de ingestão de documentos converte PDF/DOCX/PPTX/XLSX/HTML/CSV em Markdown antes dos gates de segredo, PII, OPA e persistência; `AI_WORKER_URL` habilita sanitização nos demais fluxos REST/Edge/Git/SaaS | — | **Sob Demanda**; limite de 16 MiB; OCR de scans reais ainda sem avaliação; fallback de PII limitado a emails/CPF |
 | **Dashboard & Storage** | Next.js (`apps/web`) + MinIO (patches/arquivos grandes) | — | **Sob Demanda** |
 | **Conectores SaaS** | API oficial GitHub + Webhooks | Nango (quando houver 2+ SaaS OAuth) | **Sob Demanda** |
 

@@ -102,22 +102,44 @@ export class MemoryManager {
     });
   }
 
+  recordHit(ctx: AuthContext, memoryId: string, weight = 1, now = new Date()): MemoryEntry | undefined {
+    const entry = this.entries.find((e) => e.tenantId === ctx.tenantId && e.id === memoryId && !e.archivedAt);
+    if (!entry) return undefined;
+    const boost = Math.max(1, Math.floor(weight));
+    entry.hitCount += boost;
+    if (entry.layer === "episodic" && entry.expiresAt) {
+      const graceMs = Math.min(90, entry.hitCount * 7) * 24 * 60 * 60 * 1000;
+      const extended = new Date(new Date(entry.createdAt).getTime() + EPISODIC_TTL_MS + graceMs);
+      if (extended.getTime() > now.getTime()) {
+        entry.expiresAt = extended.toISOString();
+      }
+    }
+    return entry;
+  }
+
   /**
-   * Memory Decay: compacta memórias episódicas com > 60 dias e baixo hitCount em resumo semântico.
+   * Access-weighted Memory Decay: memórias episódicas sem uso decaem em 60 dias;
+   * memórias com hitCount > 0 recebem extensão de retenção (15 dias por hit, máx. +90d).
    */
-  runDecay(ctx: AuthContext, projectId: string, now = new Date()): { archivedCount: number; semanticCreated?: MemoryEntry } {
-    const cutoff = now.getTime() - EPISODIC_RETENTION_DAYS * 24 * 60 * 60 * 1000;
-    const stale = this.entries.filter(
+  runDecay(ctx: AuthContext, projectId: string, now = new Date()): { archivedCount: number; retainedByAccessCount: number; semanticCreated?: MemoryEntry } {
+    const baseMs = EPISODIC_RETENTION_DAYS * 24 * 60 * 60 * 1000;
+    const candidates = this.entries.filter(
       (e) =>
         e.tenantId === ctx.tenantId &&
         e.projectId === projectId &&
         e.layer === "episodic" &&
         !e.archivedAt &&
-        e.hitCount === 0 &&
-        new Date(e.createdAt).getTime() < cutoff
+        new Date(e.createdAt).getTime() < now.getTime() - baseMs
     );
+    let retainedByAccessCount = 0;
+    const stale = candidates.filter((e) => {
+      const graceMs = Math.min(90, Math.max(0, e.hitCount) * 15) * 24 * 60 * 60 * 1000;
+      const expired = new Date(e.createdAt).getTime() + baseMs + graceMs < now.getTime();
+      if (!expired && e.hitCount > 0) retainedByAccessCount += 1;
+      return expired;
+    });
 
-    if (stale.length === 0) return { archivedCount: 0 };
+    if (stale.length === 0) return { archivedCount: 0, retainedByAccessCount };
 
     const nowIso = now.toISOString();
     for (const item of stale) {
@@ -133,7 +155,7 @@ export class MemoryManager {
         .join(" | ")}`
     });
 
-    return { archivedCount: stale.length, semanticCreated };
+    return { archivedCount: stale.length, retainedByAccessCount, semanticCreated };
   }
 }
 

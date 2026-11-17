@@ -20,7 +20,7 @@ O **Project Brain OS 2.0** conecta código, arquitetura, regras de negócio, dec
 
 | Camada | Módulo | Papel no Produto |
 | :--- | :--- | :--- |
-| **Núcleo Base** | **MCP Universal** | Servidor de contexto único (13 tools canônicas) para diferentes agentes e IDEs |
+| **Núcleo Base** | **MCP Universal** | Servidor de contexto único (14 tools atualmente no catálogo extensível) para diferentes agentes e IDEs |
 | **Núcleo Base** | **Project Autodiscovery** | Mapeamento automático de repositórios, stack, microsserviços e arquitetura |
 | **Núcleo Base** | **Business Rule Engine** | Regras de negócio versionadas, auditáveis e rastreáveis via `@brain-rule` |
 | **Núcleo Base** | **Agent Handoff** | Continuidade real de código e tarefas entre IDEs, máquinas e sessões |
@@ -46,7 +46,7 @@ O **Project Brain OS 2.0** conecta código, arquitetura, regras de negócio, dec
 ### 2. Especificações Funcionais & Contratos
 | Documento | Descrição |
 | :--- | :--- |
-| [06. Especificação de API, MCP e Protocolos](docs/02-specifications/mcp-and-api-spec.md) | As 13 ferramentas MCP canônicas (`brain_*`), CLI, endpoints REST e contratos em `protocols/`. |
+| [06. Especificação de API, MCP e Protocolos](docs/02-specifications/mcp-and-api-spec.md) | As ferramentas MCP documentadas no catálogo extensível (`brain_*`), CLI, endpoints REST e contratos em `protocols/`. |
 | [07. Capacidades 2.0 e Command Center](docs/02-specifications/capabilities-and-command-center.md) | As 10 novas funcionalidades (Autodiscovery, Guardians, Temporal, etc.), Dashboard e visão de futuro. |
 | [08. Perfis, Microsserviços e Blueprinting](docs/02-specifications/enterprise-roles-and-microservices.md) | Valor para Devs, CTO, DevOps, QA e AppSec; *Cross-Service Registry*, *Federated Context Pack* e `brain scaffold`. |
 | [09. Connector Framework e Integrações](docs/02-specifications/connector-framework-and-integrations.md) | Framework de conectores incrementais, repos online no GitHub e matriz de integrações. |

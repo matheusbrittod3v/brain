@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -184,6 +185,69 @@ test("processGitIngestJob persists embeddings via replaceItemEmbeddings and @bra
   }
 });
 
+test("processGitIngestJob persists SCIP relationships between ingested source items under their project policies", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "noema-git-scip-edges-"));
+  try {
+    mkdirSync(join(dir, "src"), { recursive: true });
+    mkdirSync(join(dir, ".scip"), { recursive: true });
+    writeFileSync(join(dir, "src/dog.ts"), "export class Dog {}\n", "utf8");
+    writeFileSync(join(dir, "src/animal.ts"), "export interface Animal {}\n", "utf8");
+    writeFileSync(join(dir, ".scip/index.scip"), JSON.stringify({
+      metadata: { toolInfo: "scip-typescript test", projectRoot: `file://${dir}` },
+      documents: [
+        { relativePath: "src/dog.ts", language: "typescript", occurrences: [{ symbol: "demo Dog#", range: [0, 13, 16], role: "definition" }], symbols: [{
+          symbol: "demo Dog#", displayName: "Dog", kind: 12, documentation: [], enclosingSymbol: "",
+          relationships: [{ symbol: "demo Animal#", isReference: false, isImplementation: true, isTypeDefinition: false, isDefinition: false }]
+        }] },
+        { relativePath: "src/animal.ts", language: "typescript", occurrences: [{ symbol: "demo Animal#", range: [0, 18, 24], role: "definition" }], symbols: [{
+          symbol: "demo Animal#", displayName: "Animal", kind: 12, documentation: [], enclosingSymbol: "", relationships: []
+        }] }
+      ]
+    }), "utf8");
+
+    const persisted: Array<{ id: string; accessPolicyId: string; type: string; sourceUri: string; metadata?: Record<string, unknown> }> = [];
+    const edges: Array<Record<string, unknown>> = [];
+    let reconciledSymbolIds: string[] | undefined;
+    const result = await processGitIngestJob({ tenantId: "acme", projectId: "billing", repoDir: dir }, {
+      async upsertItem(_ctx, item) { persisted.push({ id: item.id, accessPolicyId: item.accessPolicyId, type: item.type, sourceUri: item.sourceUri, metadata: item.metadata }); return { version: 1, changed: true }; },
+      async replaceItemEmbeddings(_ctx, input) { return input.chunks.length; }
+    }, {
+      embedFn: async () => [0.1],
+      piiRedactFn: async (content) => content,
+      graphStore: { async addEdge(edge) { edges.push(edge as unknown as Record<string, unknown>); } },
+      retireScipSymbolsExcept: async (_ctx, input) => { reconciledSymbolIds = [...input.retainedItemIds]; return 0; }
+    });
+
+    assert.equal(result.errors, 0);
+    assert.equal(result.edgesCreated, 4);
+    assert.deepEqual(persisted.map((item) => item.id).filter((id) => id.startsWith("SCIP-")).sort(), [
+      `SCIP-${createHash("sha256").update("demo Animal#").digest("hex").slice(0, 24)}`,
+      `SCIP-${createHash("sha256").update("demo Dog#").digest("hex").slice(0, 24)}`
+    ].sort());
+    assert.equal(persisted.filter((item) => item.id.startsWith("SCIP-")).length, 2);
+    assert.deepEqual(reconciledSymbolIds, [
+      `SCIP-${createHash("sha256").update("demo Animal#").digest("hex").slice(0, 24)}`,
+      `SCIP-${createHash("sha256").update("demo Dog#").digest("hex").slice(0, 24)}`
+    ].sort());
+    assert.deepEqual(persisted.filter((item) => !item.id.startsWith("SCIP-")).map((item) => item.id).sort(), ["src/animal.ts", "src/dog.ts"]);
+    assert.ok(persisted.filter((item) => item.type === "code_symbol").every((item) => item.sourceUri.startsWith("src/")));
+    assert.deepEqual(edges.find((edge) => edge.fromItemId === "src/dog.ts" && edge.toItemId === "src/animal.ts"), {
+      tenantId: "acme", fromProjectId: "billing", toProjectId: "billing",
+      fromItemId: "src/dog.ts", toItemId: "src/animal.ts",
+      fromPolicyId: "internal-project", toPolicyId: "internal-project",
+      relationType: "IMPLEMENTS", isInferred: false, confidence: 1,
+      evidenceUri: ".scip/index.scip",
+      metadata: { source: "scip", symbolMappings: [{
+        fromSymbol: "demo Dog#", toSymbol: "demo Animal#", kind: "IMPLEMENTS",
+        flags: { isReference: false, isImplementation: true, isTypeDefinition: false, isDefinition: false }
+      }] }
+    });
+    assert.ok(edges.some((edge) => edge.relationType === "IMPLEMENTS" && String(edge.fromItemId).startsWith("SCIP-") && String(edge.toItemId).startsWith("SCIP-")));
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("Git ingestion persists and embeds only redacted source content", async () => {
   const dir = mkdtempSync(join(tmpdir(), "noema-git-pii-"));
   try {
@@ -349,6 +413,52 @@ test("processGitIngestJob fetches remote GitHub files without cloning and record
     metadata: { id: "BR-REMOTE", type: "business_rule", title: "Remote Rule", status: "approved", access_policy: "internal-project", description: "Fetched from GitHub.", sourceRepository: "acme/billing" }
   }]);
   assert.ok(calls.some((url) => url.includes("/git/trees/commit-sha-1?recursive=1")));
+  assert.equal(edges.length, 0);
+});
+
+test("processGitIngestJob fetches a remote SCIP index and creates policy-scoped symbol items", async () => {
+  const index = JSON.stringify({
+    metadata: { toolInfo: "scip-typescript test", projectRoot: "" },
+    documents: [{ relativePath: "src/payments.ts", language: "typescript", occurrences: [
+      { symbol: "demo charge().", range: [2, 0, 6], role: "definition" }
+    ], symbols: [{ symbol: "demo charge().", displayName: "charge", kind: 17, documentation: ["Charges an invoice."], enclosingSymbol: "", relationships: [] }] }]
+  });
+  const saved: Array<{ id: string; type: string; sourceUri: string; accessPolicyId: string; metadata?: Record<string, unknown> }> = [];
+  const requested: string[] = [];
+  const edges: unknown[] = [];
+  const result = await processGitIngestJob(
+    { tenantId: "acme", projectId: "billing", owner: "acme", repo: "billing", ref: "main" },
+    { async upsertItem(_ctx, item) { saved.push({ id: item.id, type: item.type, sourceUri: item.sourceUri, accessPolicyId: item.accessPolicyId, metadata: item.metadata }); return { version: 1, changed: true }; } },
+    {
+      embedFn: async () => [0.1],
+      fetchFn: async (url) => {
+        const target = String(url);
+        requested.push(target);
+        if (target.endsWith("/repos/acme/billing")) return new Response(JSON.stringify({ private: true }), { status: 200 });
+        if (target.includes("/commits/main")) return new Response(JSON.stringify({ sha: "commit-sha-1" }), { status: 200 });
+        if (target.includes("/git/trees/")) return new Response(JSON.stringify({
+          sha: "tree-sha-1", truncated: false,
+          tree: [
+            { path: "src/payments.ts", type: "blob", sha: "source-blob" },
+            { path: ".scip/index.scip", type: "blob", sha: "scip-blob" }
+          ]
+        }), { status: 200 });
+        const isIndex = target.includes(".scip/index.scip");
+        const text = isIndex ? index : "export function charge() { return true; }";
+        return new Response(JSON.stringify({ sha: isIndex ? "scip-blob" : "source-blob", encoding: "base64", content: Buffer.from(text).toString("base64") }), { status: 200 });
+      }
+    }
+  );
+  assert.equal(result.errors, 0);
+  assert.equal(saved.filter((item) => item.type === "code_symbol").length, 1, JSON.stringify({ saved, result, requested }));
+  assert.deepEqual(saved.find((item) => item.type === "code_symbol"), {
+    id: `SCIP-${createHash("sha256").update("demo charge().").digest("hex").slice(0, 24)}`,
+    type: "code_symbol", sourceUri: "src/payments.ts", accessPolicyId: "internal-project",
+    metadata: {
+      source: "scip", symbol: "demo charge().", language: "typescript", filePath: "src/payments.ts",
+      definitionRange: [2, 0, 6], kind: 17, enclosingSymbol: "", sourceRepository: "acme/billing"
+    }
+  });
   assert.equal(edges.length, 0);
 });
 

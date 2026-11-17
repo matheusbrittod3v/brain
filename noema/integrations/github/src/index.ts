@@ -169,6 +169,11 @@ export interface RemoteRepoFile {
   path: string;
   sha: string;
   content: string;
+  contentEncoding?: "base64";
+}
+
+function isScipIndexPath(path: string): boolean {
+  return path === "index.scip" || path === ".scip/index.scip";
 }
 
 export async function fetchRepoCommitChanges(
@@ -177,7 +182,7 @@ export async function fetchRepoCommitChanges(
   baseSha: string,
   headSha: string,
   token: string | undefined,
-  opts?: { pathFilter?: (path: string) => boolean; maxFiles?: number; maxFileBytes?: number },
+  opts?: { pathFilter?: (path: string) => boolean; maxFiles?: number; maxFileBytes?: number; maxBinaryFileBytes?: number },
   fetchFn: typeof fetch = fetch
 ): Promise<{
   commitSha: string;
@@ -240,15 +245,16 @@ export async function fetchRepoCommitChanges(
       `GitHub content fetch falhou para ${change.filename}`,
       fetchFn
     );
-    const content = fileData.encoding === "base64" && fileData.content
-      ? Buffer.from(fileData.content.replace(/\n/g, ""), "base64").toString("utf8")
-      : (fileData.content ?? "");
-    if (Buffer.byteLength(content, "utf8") > (opts?.maxFileBytes ?? 1_048_576)) {
-      throw new Error(`GitHub arquivo excede o limite de ${opts?.maxFileBytes ?? 1_048_576} bytes: ${change.filename}`);
-    }
+    const isScipIndex = isScipIndexPath(change.filename);
+    const encoded = fileData.content?.replace(/\s/g, "") ?? "";
+    const bytes = fileData.encoding === "base64" ? Buffer.from(encoded, "base64") : Buffer.from(fileData.content ?? "", "utf8");
+    const maxBytes = isScipIndex ? opts?.maxBinaryFileBytes ?? 16_777_216 : opts?.maxFileBytes ?? 1_048_576;
+    if (bytes.byteLength > maxBytes) throw new Error(`GitHub arquivo excede o limite de ${maxBytes} bytes: ${change.filename}`);
+    if (isScipIndex && fileData.encoding !== "base64") throw new Error(`Índice SCIP remoto precisa vir codificado em base64: ${change.filename}`);
+    const content = isScipIndex ? encoded : (fileData.encoding === "base64" ? bytes.toString("utf8") : (fileData.content ?? ""));
     const sha = fileData.sha ?? change.sha;
     if (!sha) throw new Error(`GitHub content response is missing a blob SHA for ${change.filename}.`);
-    files.push({ path: change.filename, sha, content });
+    files.push({ path: change.filename, sha, content, ...(isScipIndex ? { contentEncoding: "base64" as const } : {}) });
   }
 
   return {
@@ -265,7 +271,7 @@ export async function fetchRepoTreeAndFiles(
   repo: string,
   ref: string,
   token: string | undefined,
-  opts?: { pathFilter?: (path: string) => boolean; maxFiles?: number; maxFileBytes?: number },
+  opts?: { pathFilter?: (path: string) => boolean; maxFiles?: number; maxFileBytes?: number; maxBinaryFileBytes?: number },
   fetchFn: typeof fetch = fetch
 ): Promise<{ commitSha: string; isPrivate: boolean; truncated: boolean; files: RemoteRepoFile[] }> {
   const repoData = await githubRequest<{ private: boolean }>(
@@ -314,17 +320,18 @@ export async function fetchRepoTreeAndFiles(
       `GitHub content fetch falhou para ${blob.path}`,
       fetchFn
     );
-    const content =
-      fileData.encoding === "base64" && fileData.content
-        ? Buffer.from(fileData.content.replace(/\n/g, ""), "base64").toString("utf8")
-        : (fileData.content ?? "");
-    if (Buffer.byteLength(content, "utf8") > (opts?.maxFileBytes ?? 1_048_576)) {
-      throw new Error(`GitHub arquivo excede o limite de ${opts?.maxFileBytes ?? 1_048_576} bytes: ${blob.path}`);
-    }
+    const isScipIndex = isScipIndexPath(blob.path);
+    const encoded = fileData.content?.replace(/\s/g, "") ?? "";
+    const bytes = fileData.encoding === "base64" ? Buffer.from(encoded, "base64") : Buffer.from(fileData.content ?? "", "utf8");
+    const maxBytes = isScipIndex ? opts?.maxBinaryFileBytes ?? 16_777_216 : opts?.maxFileBytes ?? 1_048_576;
+    if (bytes.byteLength > maxBytes) throw new Error(`GitHub arquivo excede o limite de ${maxBytes} bytes: ${blob.path}`);
+    if (isScipIndex && fileData.encoding !== "base64") throw new Error(`Índice SCIP remoto precisa vir codificado em base64: ${blob.path}`);
+    const content = isScipIndex ? encoded : (fileData.encoding === "base64" ? bytes.toString("utf8") : (fileData.content ?? ""));
     files.push({
       path: blob.path,
       sha: fileData.sha ?? blob.sha,
-      content
+      content,
+      ...(isScipIndex ? { contentEncoding: "base64" as const } : {})
     });
   }
 

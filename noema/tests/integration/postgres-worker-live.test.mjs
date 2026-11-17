@@ -54,6 +54,23 @@ test("live pg-boss worker ingests synthetic Git/SaaS records, scopes and audits 
     `id: ${gitOutOfScopeRuleId}`, "type: business_rule", "title: Out-of-scope policy rule", "status: draft",
     "access_policy: external-policy-not-in-job-scope", "description: This record must be rejected."
   ].join("\n"), "utf8");
+  mkdirSync(join(gitWorkspace, "src"), { recursive: true });
+  mkdirSync(join(gitWorkspace, ".scip"), { recursive: true });
+  writeFileSync(join(gitWorkspace, "src/dog.ts"), "export class Dog {}\n", "utf8");
+  writeFileSync(join(gitWorkspace, "src/animal.ts"), "export interface Animal {}\n", "utf8");
+  const liveScipIndex = {
+    metadata: { toolInfo: "scip-typescript live-test", projectRoot: "" },
+    documents: [
+      { relativePath: "src/dog.ts", language: "typescript", occurrences: [{ symbol: "live Dog#", range: [0, 13, 16], role: "definition" }], symbols: [{
+        symbol: "live Dog#", displayName: "Dog", kind: 12, documentation: ["A dog."], enclosingSymbol: "",
+        relationships: [{ symbol: "live Animal#", isReference: false, isImplementation: true, isTypeDefinition: false, isDefinition: false }]
+      }] },
+      { relativePath: "src/animal.ts", language: "typescript", occurrences: [{ symbol: "live Animal#", range: [0, 18, 24], role: "definition" }], symbols: [{
+        symbol: "live Animal#", displayName: "Animal", kind: 12, documentation: ["An animal."], enclosingSymbol: "", relationships: []
+      }] }
+    ]
+  };
+  writeFileSync(join(gitWorkspace, ".scip/index.scip"), JSON.stringify(liveScipIndex), "utf8");
   const saasQueueName = `noema.ingest-saas-live-${randomUUID()}`;
   const pgBossSchema = `worker_saas_live_${randomUUID().replaceAll("-", "_").slice(0, 24)}`;
   const boss = new PgBoss({ connectionString: systemUrl, schema: pgBossSchema });
@@ -360,7 +377,7 @@ test("live pg-boss worker ingests synthetic Git/SaaS records, scopes and audits 
       WHERE from_item_id IN (${relationInScope}, ${relationOutOfScope}) ORDER BY from_item_id
     `;
     assert.deepEqual([...remainingRelations], [{ from_project_id: foreignProjectId, from_item_id: relationOutOfScope }]);
-    assert.deepEqual(memoryDecayJob.output, { expiredMemoryRemoved: 1, decayedRelationsRemoved: 1 });
+    assert.deepEqual(memoryDecayJob.output, { expiredMemoryRemoved: 1, decayedRelationsRemoved: 1, retainedByAccessCount: 0 });
     const memoryDecayAudit = await admin`
       SELECT access_policy_id, action, target_type, metadata FROM audit_logs
       WHERE tenant_id = 'default-org' AND project_id = ${projectId}
@@ -385,7 +402,7 @@ test("live pg-boss worker ingests synthetic Git/SaaS records, scopes and audits 
       await delay(250);
     }
     assert.equal(gitJob?.state, "completed", `Git job did not complete: ${JSON.stringify(gitJob)}\n${childOutput}`);
-    assert.equal(gitJob.output?.ingested, 1, JSON.stringify(gitJob.output));
+    assert.equal(gitJob.output?.ingested, 5, JSON.stringify(gitJob.output));
     assert.equal(gitJob.output?.errors, 1, JSON.stringify(gitJob.output));
     const [gitItem] = await admin`
       SELECT id, access_policy_id, source_version, status, trust_level, source_kind
@@ -410,6 +427,61 @@ test("live pg-boss worker ingests synthetic Git/SaaS records, scopes and audits 
     assert.equal(gitAuditRows[0].access_policy_id, "restricted-security");
     assert.equal(gitAuditRows[0].actor_id, "noema-worker");
     assert.equal(gitAuditRows[0].metadata.source, "git_ingest");
+    const liveSymbols = await admin`
+      SELECT id, type, source_uri, access_policy_id, metadata
+      FROM knowledge_items
+      WHERE tenant_id = 'default-org' AND project_id = ${projectId} AND type = 'code_symbol'
+      ORDER BY id
+    `;
+    assert.equal(liveSymbols.length, 2);
+    assert.ok(liveSymbols.every((item) => item.access_policy_id === "internal-project" && item.metadata.source === "scip"));
+    const liveScipEdges = await admin`
+      SELECT from_item_id, to_item_id, relation_type, metadata, evidence_uri
+      FROM knowledge_relations
+      WHERE tenant_id = 'default-org' AND from_project_id = ${projectId}
+        AND metadata->>'source' = 'scip'
+      ORDER BY relation_type, from_item_id, to_item_id
+    `;
+    assert.equal(liveScipEdges.length, 4, JSON.stringify({ workerOutput: gitJob.output, persistedRelations: await admin`
+      SELECT from_item_id, to_item_id, relation_type, evidence_uri, metadata
+      FROM knowledge_relations WHERE tenant_id = 'default-org' AND from_project_id = ${projectId}
+    ` }));
+    assert.ok(liveScipEdges.every((edge) => edge.evidence_uri === ".scip/index.scip"));
+
+    const reindexedScip = {
+      ...liveScipIndex,
+      documents: liveScipIndex.documents.map((document) => document.relativePath === "src/dog.ts"
+        ? { ...document, occurrences: [], symbols: [] }
+        : document)
+    };
+    writeFileSync(join(gitWorkspace, ".scip/index.scip"), JSON.stringify(reindexedScip), "utf8");
+    const reindexJobId = await boss.send("noema.ingest-git", {
+      tenantId: "default-org", projectId, repoDir: gitWorkspace, commitSha: gitCommitSha,
+      accessPolicyId: "internal-project"
+    });
+    assert.ok(reindexJobId);
+    let reindexJob;
+    const reindexDeadline = Date.now() + 25_000;
+    while (Date.now() < reindexDeadline) {
+      reindexJob = await boss.getJobById("noema.ingest-git", reindexJobId);
+      if (reindexJob?.state === "completed" || reindexJob?.state === "failed") break;
+      await delay(250);
+    }
+    assert.equal(reindexJob?.state, "completed", `SCIP reindex job did not complete: ${JSON.stringify(reindexJob)}\n${childOutput}`);
+    assert.equal(reindexJob.output?.scipSymbolsRetired, 1, JSON.stringify({ output: reindexJob.output, symbols: await admin`
+      SELECT id, type, source_kind, deleted_at, metadata FROM knowledge_items
+      WHERE tenant_id = 'default-org' AND project_id = ${projectId} AND type = 'code_symbol'
+    ` }));
+    const symbolsAfterReindex = await admin`
+      SELECT id FROM knowledge_items
+      WHERE tenant_id = 'default-org' AND project_id = ${projectId} AND type = 'code_symbol' AND deleted_at IS NULL
+    `;
+    assert.equal(symbolsAfterReindex.length, 1);
+    const edgesAfterReindex = await admin`
+      SELECT from_item_id, to_item_id FROM knowledge_relations
+      WHERE tenant_id = 'default-org' AND from_project_id = ${projectId} AND metadata->>'source' = 'scip'
+    `;
+    assert.equal(edgesAfterReindex.length, 1);
 
     child.kill("SIGTERM");
     const exit = await new Promise((resolveExit, rejectExit) => {
@@ -436,7 +508,7 @@ test("live pg-boss worker ingests synthetic Git/SaaS records, scopes and audits 
     await admin`DELETE FROM notification_outbox WHERE tenant_id = 'default-org' AND project_id = ${projectId} AND actor_id = ${notificationActorId}`;
     await admin`DELETE FROM memory_entries WHERE tenant_id = 'default-org' AND content IN (${memoryInScope}, ${memoryOutOfScope})`;
     await admin`DELETE FROM knowledge_relations WHERE tenant_id = 'default-org' AND from_item_id IN (${relationInScope}, ${relationOutOfScope})`;
-    await admin`DELETE FROM audit_logs WHERE tenant_id = 'default-org' AND project_id = ${projectId} AND metadata->>'source' IN ('saas_ingest', 'git_ingest', 'embed_item', 'approval_reminder', 'notification_digest', 'memory_decay')`;
+    await admin`DELETE FROM audit_logs WHERE tenant_id = 'default-org' AND project_id = ${projectId} AND metadata->>'source' IN ('saas_ingest', 'git_ingest', 'scip_symbol', 'embed_item', 'approval_reminder', 'notification_digest', 'memory_decay')`;
     await admin`DELETE FROM knowledge_items WHERE tenant_id = 'default-org' AND project_id = ${projectId}`;
     await admin`DELETE FROM knowledge_relations WHERE tenant_id = 'default-org' AND (from_project_id = ${foreignProjectId} OR to_project_id = ${foreignProjectId})`;
     await admin`DELETE FROM knowledge_embeddings WHERE tenant_id = 'default-org' AND project_id = ${foreignProjectId}`;

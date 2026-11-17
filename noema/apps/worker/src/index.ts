@@ -1,15 +1,16 @@
-import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
+import { existsSync, lstatSync, readdirSync, readFileSync, realpathSync, statSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { join, relative } from "node:path";
 import PgBoss from "pg-boss";
 import { Ollama } from "ollama";
 import {
   executeRunnerAgentLoop,
+  executeRunnerTaskWithAppleFm,
   executeRunnerTaskWithOllama,
   startRunnerDaemon
 } from "@noema/agent-runner";
 import type { AuthContext } from "@noema/auth";
-import { extractCodeAnchors } from "@noema/code-intelligence";
+import { extractCodeAnchors, extractScipDocumentRelationships, extractScipSymbols, parseScipIndex, type ScipIndex } from "@noema/code-intelligence";
 import { deduplicateCanonicalItems, runWithExponentialBackoff } from "@noema/connector-framework";
 import { createGitHubAppJwt, exchangeInstallationToken, fetchRepoCommitChanges, fetchRepoTreeAndFiles } from "@noema/connector-github";
 import {
@@ -258,10 +259,14 @@ export interface WorkerGraphEdgeInput {
   relationType: RelationType;
   isInferred: boolean;
   confidence: number;
+  evidenceUri?: string;
+  metadata?: Record<string, unknown>;
 }
 
 export interface WorkerGraphStore {
   addEdge(edge: WorkerGraphEdgeInput): Promise<unknown> | unknown;
+  deleteScipEdges?(input: { tenantId: string; projectId: string; evidenceUri: string; repository?: string }): Promise<void> | void;
+  replaceScipEdges?(input: { tenantId: string; projectId: string; evidenceUri: string; repository?: string; edges: WorkerGraphEdgeInput[] }): Promise<void> | void;
 }
 
 export interface GitIngestOptions {
@@ -277,6 +282,8 @@ export interface GitIngestOptions {
   gitState?: Pick<PgOperationalRepository, "getGitIngestionHead" | "advanceGitIngestionHead" | "withGitIngestionLock" | "getGitHubRefHead">;
   retireGitSources?: PgKnowledgeRepository["retireGitSources"];
   retireGitSourcesExcept?: PgKnowledgeRepository["retireGitSourcesExcept"];
+  retireScipSymbolsExcept?: PgKnowledgeRepository["retireScipSymbolsExcept"];
+  enqueueEmbed?: (payload: EmbedJobPayload) => Promise<void>;
   lockHeld?: boolean;
 }
 
@@ -408,6 +415,7 @@ export async function processGitIngestJob(
   errors: number;
   chunksEmbedded: number;
   edgesCreated: number;
+  scipSymbolsRetired: number;
   warnings: string[];
   sourceCommitSha?: string;
   ingestionMode?: "full" | "incremental";
@@ -438,7 +446,7 @@ export async function processGitIngestJob(
       branch: payload.branch ?? payload.ref ?? "main"
     });
     if (accepted && accepted.commitSha !== payload.commitSha.toLowerCase()) {
-      return { ingested: 0, skippedSecrets: 0, errors: 0, chunksEmbedded: 0, edgesCreated: 0, warnings: [], ignoredOutOfOrder: true };
+      return { ingested: 0, skippedSecrets: 0, errors: 0, chunksEmbedded: 0, edgesCreated: 0, scipSymbolsRetired: 0, warnings: [], ignoredOutOfOrder: true };
     }
   }
   let ingested = 0;
@@ -446,8 +454,11 @@ export async function processGitIngestJob(
   let errors = 0;
   let chunksEmbedded = 0;
   let edgesCreated = 0;
+  let scipSymbolsRetired = 0;
   const warnings: string[] = [];
   const files: Array<{ path: string; content: string }> = [];
+  let scipIndex: ScipIndex | undefined;
+  let scipEvidenceUri: string | undefined;
 
   let sourceCommitSha = payload.commitSha;
   let remoteIsPrivate: boolean | undefined;
@@ -476,8 +487,8 @@ export async function processGitIngestJob(
     const canCompare = Boolean(checkpoint && payload.beforeCommitSha && checkpoint.commitSha === payload.beforeCommitSha.toLowerCase() && payload.commitSha && payload.commitSha !== checkpoint.commitSha);
     if (canCompare) {
       const incremental = await fetchRepoCommitChanges(payload.owner!, payload.repo!, checkpoint!.commitSha, payload.commitSha!, githubToken, {
-        maxFiles: 500, maxFileBytes: 1_048_576,
-        pathFilter: (path) => /\.(md|ya?ml|tsx?|jsx?|py|go)$/i.test(path) && !path.split("/").some((segment) => ["node_modules", "dist", "build", ".next", "vendor", ".git"].includes(segment))
+        maxFiles: 500, maxFileBytes: 1_048_576, maxBinaryFileBytes: 16_777_216,
+        pathFilter: (path) => path === "index.scip" || path === ".scip/index.scip" || (/\.(md|ya?ml|tsx?|jsx?|py|go)$/i.test(path) && !path.split("/").some((segment) => ["node_modules", "dist", "build", ".next", "vendor", ".git"].includes(segment)))
       }, options.fetchFn);
       if (!incremental.fallbackRequired) {
         ingestionMode = "incremental";
@@ -493,9 +504,10 @@ export async function processGitIngestJob(
       {
         maxFiles: 500,
         maxFileBytes: 1_048_576,
-        pathFilter: (path) =>
+        maxBinaryFileBytes: 16_777_216,
+        pathFilter: (path) => path === "index.scip" || path === ".scip/index.scip" || (
           /\.(md|ya?ml|tsx?|jsx?|py|go)$/i.test(path) &&
-          !path.split("/").some((segment) => ["node_modules", "dist", "build", ".next", "vendor", ".git"].includes(segment))
+          !path.split("/").some((segment) => ["node_modules", "dist", "build", ".next", "vendor", ".git"].includes(segment)))
       },
       options.fetchFn
     );
@@ -505,7 +517,18 @@ export async function processGitIngestJob(
     sourceCommitSha = remote.commitSha;
     remoteIsPrivate = remote.isPrivate;
     remoteRepository = `${payload.owner}/${payload.repo}`;
-    files.push(...remote.files.map(({ path, content }) => ({ path, content })));
+    const remoteScip = remote.files.find(({ path }) => path === "index.scip" || path === ".scip/index.scip");
+    if (remoteScip) {
+      try {
+        scipIndex = parseScipIndex(remoteScip.contentEncoding === "base64" ? Buffer.from(remoteScip.content, "base64") : remoteScip.content);
+        scipEvidenceUri = remoteScip.path;
+      } catch (error) {
+        const warning = `Relações SCIP remotas ignoradas: ${error instanceof Error ? error.message : String(error)}`;
+        warnings.push(warning);
+        options.onWarning?.(warning);
+      }
+    }
+    files.push(...remote.files.filter(({ path }) => path !== "index.scip" && path !== ".scip/index.scip").map(({ path, content }) => ({ path, content })));
   } else if (payload.repoDir) {
     const walk = (dir: string): string[] => {
       if (!existsSync(dir)) return [];
@@ -521,6 +544,23 @@ export async function processGitIngestJob(
     for (const fullPath of walk(payload.repoDir)) {
       files.push({ path: relative(payload.repoDir, fullPath).replace(/\\/g, "/"), content: readFileSync(fullPath, "utf8") });
     }
+    const projectRoot = realpathSync(payload.repoDir);
+    for (const candidate of [join(projectRoot, "index.scip"), join(projectRoot, ".scip", "index.scip")]) {
+      if (!existsSync(candidate)) continue;
+      try {
+        if (!lstatSync(candidate).isFile()) throw new Error("Índice SCIP precisa ser um arquivo regular, não symlink.");
+        const resolvedIndex = realpathSync(candidate);
+        const relativeIndex = relative(projectRoot, resolvedIndex).replace(/\\/g, "/");
+        if (relativeIndex === ".." || relativeIndex.startsWith("../")) throw new Error("Índice SCIP fora da raiz do projeto.");
+        scipIndex = parseScipIndex(readFileSync(resolvedIndex));
+        scipEvidenceUri = relativeIndex;
+        break;
+      } catch (error) {
+        const warning = `Relações SCIP ignoradas: ${error instanceof Error ? error.message : String(error)}`;
+        warnings.push(warning);
+        options.onWarning?.(warning);
+      }
+    }
   } else {
     throw new Error("Git ingestion requires a local repoDir or remote GitHub owner/repo/ref.");
   }
@@ -533,6 +573,7 @@ export async function processGitIngestJob(
     }
   }
 
+  const persistedItemsByPath = new Map<string, { id: string; accessPolicyId: string; item: KnowledgeItem }>();
   for (const { path: rel, content } of files) {
     try {
       const secretScan: SecretScanResult = (options.secretScanFn ?? scanForSecrets)(content);
@@ -578,6 +619,7 @@ export async function processGitIngestJob(
 
       const upsert = await repo.upsertItem(systemCtx, item);
       const persistedItem = { ...item, sourceVersion: upsert.sourceVersion ?? item.sourceVersion };
+      persistedItemsByPath.set(rel, { id: item.id, accessPolicyId: item.accessPolicyId, item: persistedItem });
       if (upsert.changed) ingested += 1;
       if (options.auditFn) {
         await options.auditFn({
@@ -602,15 +644,26 @@ export async function processGitIngestJob(
         }, systemCtx);
       }
 
-      chunksEmbedded += await persistChunkEmbeddings(
-        systemCtx,
-        repo,
-        persistedItem,
-        chunks,
-        embedFn,
-        warnings,
-        options.onWarning
-      );
+      if (options.enqueueEmbed) {
+        await options.enqueueEmbed({
+          tenantId: persistedItem.tenantId,
+          projectId: persistedItem.projectId,
+          itemId: persistedItem.id,
+          sourceVersion: persistedItem.sourceVersion,
+          content: sanitizedContent,
+          accessPolicyId: persistedItem.accessPolicyId
+        });
+      } else {
+        chunksEmbedded += await persistChunkEmbeddings(
+          systemCtx,
+          repo,
+          persistedItem,
+          chunks,
+          embedFn,
+          warnings,
+          options.onWarning
+        );
+      }
 
       if (options.graphStore && anchors.length > 0 && !(remoteRepository && remoteIsPrivate === false)) {
         for (const anchor of anchors) {
@@ -635,6 +688,140 @@ export async function processGitIngestJob(
       if (err instanceof WorkerAuditWriteError) throw err;
     }
   }
+  if (scipIndex && scipEvidenceUri) {
+    const symbolItemsByName = new Map<string, { id: string; accessPolicyId: string; record: ReturnType<typeof extractScipSymbols>[number] }>();
+    let scipReconciliationSafe = true;
+    for (const record of extractScipSymbols(scipIndex)) {
+      const source = persistedItemsByPath.get(record.relativePath);
+      if (!source) {
+        scipReconciliationSafe = false;
+        continue;
+      }
+      try {
+        const rawContent = [`SCIP symbol: ${record.symbol}`, ...record.documentation].join("\n\n");
+        const secretScan = (options.secretScanFn ?? scanForSecrets)(rawContent);
+        if (secretScan.engine === "unavailable" || !secretScan.clean) {
+          if (secretScan.engine === "unavailable") scipReconciliationSafe = false;
+          if (!secretScan.clean) skippedSecrets += 1;
+          warnings.push(`Símbolo SCIP '${record.symbol}' ignorado: documentação não passou pela verificação de segredos.`);
+          continue;
+        }
+        const content = await (options.piiRedactFn ?? ((text: string) => redactPiiWithAiWorker(text, options.fetchFn)))(rawContent);
+        const line = record.definitionRange[0] + 1;
+        const itemId = `SCIP-${createHash("sha256").update(record.symbol).digest("hex").slice(0, 24)}`;
+        const symbolItem: KnowledgeItem = {
+          id: itemId,
+          tenantId: source.item.tenantId,
+          projectId: source.item.projectId,
+          domainId: source.item.domainId,
+          type: "code_symbol",
+          title: record.displayName || record.symbol,
+          content,
+          summary: `${record.language} ${record.displayName || record.symbol} em ${record.relativePath}:${line}`,
+          status: source.item.status,
+          sourceId: source.item.sourceId,
+          sourceOrigin: source.item.sourceOrigin,
+          sourceKind: "git",
+          sourceVersion: source.item.sourceVersion,
+          sourceUri: source.item.sourceUri,
+          version: 1,
+          contentHash: createHash("sha256").update(content).digest("hex"),
+          confidence: source.item.confidence,
+          trustLevel: source.item.trustLevel,
+          isInferred: false,
+          tags: ["scip", record.language],
+          relatedIds: [source.item.id],
+          accessPolicyId: source.accessPolicyId,
+          metadata: {
+            source: "scip", symbol: record.symbol, language: record.language,
+            filePath: record.relativePath, definitionRange: record.definitionRange,
+            kind: record.kind, enclosingSymbol: record.enclosingSymbol,
+            sourceRepository: source.item.metadata?.sourceRepository
+          },
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString()
+        };
+        const upsert = await repo.upsertItem(systemCtx, symbolItem);
+        const persistedSymbol = { ...symbolItem, sourceVersion: upsert.sourceVersion ?? symbolItem.sourceVersion };
+        symbolItemsByName.set(record.symbol, { id: itemId, accessPolicyId: source.accessPolicyId, record });
+        if (upsert.changed) ingested += 1;
+        if (options.auditFn) await options.auditFn({
+          tenantId: symbolItem.tenantId, projectId: symbolItem.projectId, accessPolicyId: symbolItem.accessPolicyId,
+          actorId: systemCtx.actorId, actorType: systemCtx.actorType,
+          action: upsert.version === 1 ? "create" : "update", targetType: "knowledge_item", targetId: itemId,
+          metadata: { source: "scip_symbol", sourceUri: symbolItem.sourceUri, sourceVersion: persistedSymbol.sourceVersion, contentHash: symbolItem.contentHash }
+        }, systemCtx);
+        if (options.enqueueEmbed) await options.enqueueEmbed({
+          tenantId: persistedSymbol.tenantId, projectId: persistedSymbol.projectId, itemId,
+          sourceVersion: persistedSymbol.sourceVersion, content, accessPolicyId: persistedSymbol.accessPolicyId
+        });
+        else chunksEmbedded += await persistChunkEmbeddings(systemCtx, repo, persistedSymbol, chunkCodeByAst(record.relativePath, content), embedFn, warnings, options.onWarning);
+      } catch (error) {
+        errors += 1;
+        scipReconciliationSafe = false;
+        options.onFileError?.(`${record.relativePath}#${record.symbol}`, error);
+        if (error instanceof WorkerAuditWriteError) throw error;
+      }
+    }
+    if (scipReconciliationSafe && options.retireScipSymbolsExcept) {
+      scipSymbolsRetired = await options.retireScipSymbolsExcept(systemCtx, {
+        projectId: payload.projectId,
+        ...(remoteRepository ? { repository: remoteRepository } : {}),
+        retainedItemIds: [...symbolItemsByName.values()].map(({ id }) => id)
+      });
+    }
+    const scipEdges: WorkerGraphEdgeInput[] = [];
+    if (scipReconciliationSafe && options.graphStore) for (const { id, accessPolicyId, record } of symbolItemsByName.values()) {
+      const source = persistedItemsByPath.get(record.relativePath)!;
+      scipEdges.push({ tenantId: payload.tenantId, fromProjectId: payload.projectId, toProjectId: payload.projectId,
+        fromItemId: source.id, toItemId: id, fromPolicyId: source.accessPolicyId, toPolicyId: accessPolicyId,
+        relationType: "IMPLEMENTS", isInferred: false, confidence: 1, evidenceUri: scipEvidenceUri,
+        metadata: { source: "scip", symbol: record.symbol, definitionRange: record.definitionRange, ...(remoteRepository ? { sourceRepository: remoteRepository.toLowerCase() } : {}) } });
+    }
+    if (scipReconciliationSafe && options.graphStore) for (const { id, accessPolicyId, record } of symbolItemsByName.values()) {
+      for (const relationship of record.relationships) {
+        const target = symbolItemsByName.get(relationship.symbol);
+        if (!target || !systemCtx.allowedPolicies.includes(accessPolicyId) || !systemCtx.allowedPolicies.includes(target.accessPolicyId)) continue;
+        scipEdges.push({
+          tenantId: payload.tenantId, fromProjectId: payload.projectId, toProjectId: payload.projectId,
+          fromItemId: id, toItemId: target.id, fromPolicyId: accessPolicyId, toPolicyId: target.accessPolicyId,
+          relationType: relationship.isImplementation ? "IMPLEMENTS" : "DEPENDS_ON",
+          isInferred: false, confidence: 1, evidenceUri: scipEvidenceUri,
+          metadata: { source: "scip", fromSymbol: record.symbol, toSymbol: relationship.symbol, flags: relationship, ...(remoteRepository ? { sourceRepository: remoteRepository.toLowerCase() } : {}) }
+        });
+      }
+    }
+    if (scipReconciliationSafe && options.graphStore) for (const relation of extractScipDocumentRelationships(scipIndex)) {
+      const from = persistedItemsByPath.get(relation.fromPath);
+      const to = persistedItemsByPath.get(relation.toPath);
+      if (!from || !to) continue;
+      if (!systemCtx.allowedPolicies.includes(from.accessPolicyId) || !systemCtx.allowedPolicies.includes(to.accessPolicyId)) continue;
+      scipEdges.push({
+        tenantId: payload.tenantId,
+        fromProjectId: payload.projectId,
+        toProjectId: payload.projectId,
+        fromItemId: from.id,
+        toItemId: to.id,
+        fromPolicyId: from.accessPolicyId,
+        toPolicyId: to.accessPolicyId,
+        relationType: relation.relationType,
+        isInferred: false,
+        confidence: 1.0,
+        evidenceUri: scipEvidenceUri,
+        metadata: { source: "scip", symbolMappings: relation.mappings, ...(remoteRepository ? { sourceRepository: remoteRepository.toLowerCase() } : {}) }
+      });
+    }
+    if (scipReconciliationSafe && options.graphStore) {
+      const scope = { tenantId: payload.tenantId, projectId: payload.projectId, evidenceUri: scipEvidenceUri, ...(remoteRepository ? { repository: remoteRepository } : {}) };
+      if (options.graphStore.replaceScipEdges) {
+        await options.graphStore.replaceScipEdges({ ...scope, edges: scipEdges });
+        edgesCreated += scipEdges.length;
+      } else {
+        if (options.graphStore.deleteScipEdges) await options.graphStore.deleteScipEdges(scope);
+        for (const edge of scipEdges) { await options.graphStore.addEdge(edge); edgesCreated += 1; }
+      }
+    }
+  }
   let checkpointAdvanced = false;
   if (remoteRepository && ingestionMode === "full" && errors === 0 && options.retireGitSourcesExcept) {
     const retainedSourceUris = files.map(({ path }) => remoteIsPrivate === false ? `external/${remoteRepository}/${path}` : path);
@@ -649,7 +836,7 @@ export async function processGitIngestJob(
       ...(previous ? { expectedPreviousCommitSha: previous.commitSha } : {})
     });
   }
-  return { ingested, skippedSecrets, errors, chunksEmbedded, edgesCreated, warnings, ingestionMode, checkpointAdvanced, ...(sourceCommitSha ? { sourceCommitSha } : {}) };
+  return { ingested, skippedSecrets, errors, chunksEmbedded, edgesCreated, scipSymbolsRetired, warnings, ingestionMode, checkpointAdvanced, ...(sourceCommitSha ? { sourceCommitSha } : {}) };
 }
 
 export interface SaasIngestJobPayload {
@@ -894,6 +1081,8 @@ export async function startWorker(
         gitState: opRepo,
         retireGitSources: repo.retireGitSources.bind(repo),
         retireGitSourcesExcept: repo.retireGitSourcesExcept.bind(repo),
+        retireScipSymbolsExcept: repo.retireScipSymbolsExcept.bind(repo),
+        enqueueEmbed: async (embedPayload) => { await boss.send("noema.embed-item", embedPayload); },
         auditFn: (event, ctx) => persistWorkerAudit(appClient, event, ctx),
         onFileError: (filePath, error) => {
           console.error(JSON.stringify({
@@ -1061,19 +1250,22 @@ export async function startWorker(
           const claimed = await opRepo.claimNextRunnerTask();
           return claimed ?? undefined;
         },
-        async completeRunnerTask(taskId, status, resultSummary) {
-          await opRepo.completeRunnerTask(taskId, status, resultSummary);
+        async completeRunnerTask(taskId, status, resultSummary, resultMetadata) {
+          await opRepo.completeRunnerTask(taskId, status, resultSummary, resultMetadata);
         }
       },
       executeTask: (task) =>
         executeRunnerAgentLoop(task, {
           recordBudgetUsage: (tenantId, projectId, tokens) => opRepo.recordRunnerTokenUsage(tenantId, projectId, tokens, dailyTokenLimit),
-          ...(process.env.NOEMA_RUNNER_MODEL_EXECUTION === "ollama" ? {
+          ...(process.env.NOEMA_RUNNER_MODEL_EXECUTION === "ollama" || process.env.NOEMA_RUNNER_MODEL_EXECUTION === "apple-fm" || process.env.NOEMA_RUNNER_MODEL_EXECUTION === "fm" ? {
             callModel: async ({ task: runnerTask, context }) => {
-              const generated = await executeRunnerTaskWithOllama({
+              const enrichedTask = {
                 ...runnerTask,
                 instruction: `${runnerTask.instruction}\n\nAuthorized Context Pack (JSON):\n${JSON.stringify(context)}`
-              });
+              };
+              const generated = process.env.NOEMA_RUNNER_MODEL_EXECUTION === "ollama"
+                ? await executeRunnerTaskWithOllama(enrichedTask)
+                : await executeRunnerTaskWithAppleFm(enrichedTask);
               return {
                 response: (generated.resultSummary ?? "").replace(/^\[bot-draft\]\s*/, ""),
                 usage: generated.modelUsage

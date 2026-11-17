@@ -21,7 +21,7 @@ Esta seção é o catálogo de dependências e blocos reutilizáveis. **“Em us
 | `zod` | **Em uso** | Validação de schemas MCP em `apps/mcp-server` e conhecimento em `packages/knowledge`. Não é o schema de rota da API. Evitar criar novos contratos paralelos: contratos publicados continuam definidos em `protocols/`. |
 | `drizzle-orm` + `drizzle-kit` | **Em uso** | Acesso SQL e migrations de `packages/database`. PostgreSQL FTS e `pgvector` são a base; ParadeDB é uma extensão futura condicionada a avaliações. |
 | `pg-boss` | **Em uso no Hub** | Fila e agendamento persistentes no PostgreSQL, consumidos por `apps/worker`. Não é a fila do Edge, que usa SQLite. |
-| `web-tree-sitter` | **Em uso** | Parsing de código em `packages/code-intelligence`. |
+| `web-tree-sitter` + `@repomix/tree-sitter-wasms` | **Em uso na descoberta** | `packages/project-discovery` carrega localmente parsers WASM para Python, Go, Java e Rust; TS/JS continuam no AST do compilador TypeScript. Não há download de gramáticas em runtime. O pacote de gramáticas acrescenta 23,9 MB descompactados; o resultado do `brain init` informa idiomas ativos e arquivos que usaram o fallback determinístico. |
 | `dependency-cruiser` | **Em uso** | Verificação de dependências e ciclos em JS/TS. |
 | `js-yaml` + `zod` | **Em uso** | Parsing de YAML e validação em `packages/knowledge`. `gray-matter` não está atualmente declarado como dependência. |
 | `js-tiktoken` | **Em uso** | Contagem de tokens em `packages/context-engine`, `context-optimizer` e `ingestion`. Não adicionar `tiktoken` separado. |
@@ -76,7 +76,7 @@ O Command Center atual implementa carregamento, estados de erro e atualização 
 | Biblioteca | Onde Entra | O que Resolve |
 | :--- | :--- | :--- |
 | `fastapi` | `apps/ai-worker` | Serviço interno de IA/Parsing acionado via HTTP/Temporal pelos workers TS |
-| `docling` (IBM) | `packages/ingestion` | **Padrão oficial de parsing:** conversão gratuita e local de PDF, DOCX, PPTX, HTML e planilhas para Markdown estruturado (com `markitdown` como fallback leve) |
+| `docling` (IBM) + `markitdown` (Microsoft) | `apps/ai-worker` | **Parsing local disponível:** Docling é o parser preferido; MarkItDown é fallback. A rota autenticada de ingestão do Hub envia PDF, DOCX, PPTX, XLSX, HTML e CSV como bytes temporários ao AI Worker e persiste Markdown após Gitleaks/PII/OPA. Se ambos os parsers falharem, a ingestão é bloqueada. Formatos binários Office antigos que exigem LibreOffice e qualidade de OCR ainda não são suportados/avaliados. |
 | `presidio-analyzer` + `presidio-anonymizer` | `packages/ingestion` | Detecção e mascaramento local de PII (LGPD) antes de gerar embeddings |
 | `flashrank` | `packages/retrieval` | Reranking ultrarrápido local em CPU (ONNX), sem API paga |
 | `litellm` | `apps/ai-worker`, `context-optimizer` | Interface única para usar **Ollama / vLLM** (padrão local/self-hosted) ou provedores pagos opcionais |
@@ -94,7 +94,7 @@ Em vez de reescrever utilitários complexos do zero, vale **adaptar ou forkar** 
 | **Semgrep OSS** (CLI + regras YAML) | Executar em modo local/CI com regras customizadas por projeto | `packages/architecture-guardian` e `security` |
 | **Gitleaks** (binário CLI leve) | Rodar como etapa pré-ingestão para bloquear tokens/chaves/senhas | `packages/ingestion` |
 | **Promptfoo** (JS/TS) | Adaptar suíte de testes de prompt/retrieval no CI | `tests/retrieval-evals/` |
-| **Sourcegraph SCIP** (indexadores OSS) | Usar os indexadores prontos (`scip-typescript`, `scip-python`, etc.) para grafo de símbolos | `packages/code-intelligence` |
+| **Sourcegraph SCIP** (indexadores OSS) | Consumir o protobuf oficial com bindings gerados; `brain init` lê índices existentes e `brain init --scip` invoca explicitamente `scip-typescript` ou `scip-python` | `packages/code-intelligence`, `packages/project-discovery`, `apps/cli` |
 | **Modelo Temporal (estilo Graphiti)** | Adotar o modelo conceitual de validade temporal (`valid_from`/`valid_until`) diretamente sobre PostgreSQL CTEs (sem exigir Neo4j/FalkorDB) | `packages/temporal-knowledge` e `graph` |
 | **Nango** (JS/TS OSS) | Self-hosted para OAuth e sync incremental de SaaS (Jira, Notion, Figma, Slack, CRM); `integrations/*` implementa os *mappers*. GitHub/GitLab usam App próprio; operações Git locais continuam via CLI enquanto simples, e `Octokit` é uma opção condicional apenas para REST. | `packages/connector-framework` |
 | **Vercel AI SDK ou loop próprio + MCP SDK** (TS) | Avaliar somente se o Runner precisar de abstração multi-provedor/tool-calling padronizado; para HTTP direto ao Ollama, preferir o SDK oficial `ollama`. A adoção não substitui fila, scheduler, sandbox ou controles de aprovação. | `apps/agent-runner` (*Brain Runner*) |

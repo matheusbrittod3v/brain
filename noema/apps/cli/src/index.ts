@@ -16,7 +16,10 @@ import {
   resolveCliAuthToken,
   runDoctor,
   runHandoffCreate,
+  runHookEmit,
+  runHookInstall,
   runInit,
+  runInitWithScip,
   runLocalTaskEnqueue,
   runLocalTaskList,
   runRunnerUp,
@@ -58,7 +61,11 @@ function getHubConfig(projectFallback?: string) {
 async function main() {
   switch (command) {
     case "init": {
-      const res = runInit(process.cwd(), sub || undefined);
+      const scip = sub === "--scip" || rest.includes("--scip");
+      const initProjectId = (sub && !sub.startsWith("--") ? sub : rest.find((arg) => !arg.startsWith("--"))) || undefined;
+      const res = scip
+        ? await runInitWithScip(process.cwd(), initProjectId)
+        : await runInit(process.cwd(), initProjectId);
       console.log(JSON.stringify(res, null, 2));
       break;
     }
@@ -126,35 +133,64 @@ async function main() {
         const provider = providerIdx >= 0 ? rest[providerIdx + 1] : undefined;
         const res = await runRunnerUp({ local: isLocal, pull, provider, hybrid });
         console.log(JSON.stringify(res, null, 2));
-        if (res.status !== "ready") {
+        const readyForDaemon = res.status === "ready" || res.status === "cloud_fallback_ready";
+        if (!readyForDaemon) {
           process.exitCode = 1;
           break;
         }
-        if (res.status === "ready") {
-          const db = openEdgeDatabase();
-          try {
-            const projectId = process.env.NOEMA_PROJECT_ID ?? detectWorkspaceContext(process.cwd()).projectId;
-            const runner = startEdgeRunner(db, {
-              projectId,
-              model: res.model,
-              onTaskComplete: (task) => console.log(JSON.stringify({
-                taskId: task.taskId, status: task.status, resultSummary: task.resultSummary,
-                modelUsage: task.modelUsage
-              })),
-              onError: (error) => console.error(`Runner local: ${error instanceof Error ? error.message : String(error)}`)
-            });
-            console.log(JSON.stringify({
-              runner: "running",
-              projectId,
-              model: res.model
-            }));
-            await waitForRunnerShutdown(runner);
-          } finally {
-            db.close();
+        const db = openEdgeDatabase();
+        try {
+          const projectId = process.env.NOEMA_PROJECT_ID ?? detectWorkspaceContext(process.cwd()).projectId;
+          const resolvedModel = "model" in res ? res.model : ("localModel" in res ? res.localModel : undefined);
+          const resolvedProvider =
+            "provider" in res
+              ? res.provider
+              : ("localProvider" in res ? res.localProvider : "ollama");
+          const runner = startEdgeRunner(db, {
+            projectId,
+            model: resolvedModel,
+            provider: resolvedProvider,
+            hybrid: res.mode === "hybrid",
+            onTaskComplete: (task) => console.log(JSON.stringify({
+              taskId: task.taskId, status: task.status, resultSummary: task.resultSummary,
+              modelUsage: task.modelUsage
+            })),
+            onError: (error) => console.error(`Runner local: ${error instanceof Error ? error.message : String(error)}`)
+          });
+          console.log(JSON.stringify({
+            runner: "running",
+            mode: res.mode,
+            projectId,
+            model: resolvedModel
+          }));
+          await waitForRunnerShutdown(runner);
+        } finally {
+          db.close();
+        }
+      } else if (sub === "cron") {
+        const db = openEdgeDatabase();
+        try {
+          const cronSub = rest[0];
+          const projectId = process.env.NOEMA_PROJECT_ID ?? detectWorkspaceContext(process.cwd()).projectId;
+          if (cronSub === "add") {
+            const cronExpr = rest[1] ?? "";
+            const instruction = rest.slice(2).join(" ").trim();
+            if (!cronExpr || !instruction) {
+              throw new Error("Uso: brain runner cron add \"<cron>\" \"<instrucao>\"");
+            }
+            console.log(JSON.stringify(db.upsertCronJob({ projectId, cron: cronExpr, instruction }), null, 2));
+          } else if (cronSub === "list") {
+            console.log(JSON.stringify(db.listCronJobs(projectId), null, 2));
+          } else if (cronSub === "remove" && rest[1]) {
+            console.log(JSON.stringify({ deleted: db.deleteCronJob(rest[1]) }, null, 2));
+          } else {
+            console.log("Uso: brain runner cron <add|list|remove>");
           }
+        } finally {
+          db.close();
         }
       } else {
-        console.log("Uso: brain runner up --local [--pull] | brain runner up --provider ollama [--pull]");
+        console.log("Uso: brain runner up --local [--pull] | --hybrid | --provider <ollama|fm|openai|anthropic> [--pull] | brain runner cron <add|list|remove>");
       }
       break;
     }
@@ -211,6 +247,7 @@ async function main() {
       } else if (sub === "connect" && rest[0]) {
         const targetUrl = rest[0];
         const token = await resolveCliAuthToken();
+        let mcpSessionId: string | null = null;
         const rl = createInterface({ input: process.stdin, crlfDelay: Infinity });
         for await (const line of rl) {
           const trimmed = line.trim();
@@ -220,12 +257,26 @@ async function main() {
             headers: {
               "content-type": "application/json",
               accept: "application/json, text/event-stream",
-              authorization: `Bearer ${token}`
+              authorization: `Bearer ${token}`,
+              ...(mcpSessionId ? { "mcp-session-id": mcpSessionId } : {})
             },
             body: trimmed
           });
+          const respSessionId = res.headers.get("mcp-session-id");
+          if (respSessionId) mcpSessionId = respSessionId;
           const text = await res.text();
-          if (text) process.stdout.write(`${text}\n`);
+          if (!text.trim()) continue;
+          const ct = res.headers.get("content-type") ?? "";
+          if (ct.includes("text/event-stream") || text.includes("\ndata:") || text.startsWith("event:")) {
+            for (const sseLine of text.split(/\r?\n/)) {
+              if (sseLine.startsWith("data:")) {
+                const payload = sseLine.slice(5).trim();
+                if (payload) process.stdout.write(`${payload}\n`);
+              }
+            }
+          } else {
+            process.stdout.write(`${text.trim()}\n`);
+          }
         }
       } else {
         console.log("Uso: brain mcp <serve|connect <url>>");
@@ -276,11 +327,34 @@ async function main() {
         const res = await fetch(`${hubUrl}/v1/projects/${projectId}/handoffs/latest${taskId ? `?taskId=${encodeURIComponent(taskId)}` : ""}`, {
           headers: { authorization: `Bearer ${apiKey}` }
         });
-        const data = (await res.json()) as { handoff?: { branch?: string } };
-        if (data.handoff?.branch) {
-          execFileSync("git", ["checkout", data.handoff.branch], { stdio: "inherit" });
+        const data = (await res.json()) as {
+          handoff?: { handoffId?: string; branch?: string; baseCommitSha?: string; patchRef?: string; ephemeralBranch?: string };
+        };
+        let resumeBranch: string | undefined;
+        let patchApplied = false;
+        if (data.handoff?.ephemeralBranch || data.handoff?.branch) {
+          const targetBranch = data.handoff.ephemeralBranch ?? data.handoff.branch!;
+          try {
+            execFileSync("git", ["checkout", targetBranch], { stdio: "inherit" });
+            resumeBranch = targetBranch;
+          } catch {
+            if (data.handoff.handoffId && data.handoff.baseCommitSha) {
+              const { prepareResumeBranch } = await import("@noema/agent-handoff");
+              resumeBranch = prepareResumeBranch(process.cwd(), data.handoff.handoffId, data.handoff.baseCommitSha);
+            }
+          }
+          if (data.handoff.patchRef?.startsWith("http") && process.env.NOEMA_HANDOFF_ENCRYPTION_KEY) {
+            const patchRes = await fetch(data.handoff.patchRef);
+            if (patchRes.ok) {
+              const envelope = (await patchRes.json()) as Parameters<typeof import("@noema/agent-handoff")["decryptHandoffPatch"]>[0];
+              const { decryptHandoffPatch } = await import("@noema/agent-handoff");
+              const diffText = decryptHandoffPatch(envelope, process.env.NOEMA_HANDOFF_ENCRYPTION_KEY);
+              execFileSync("git", ["apply", "--whitespace=nowarn", "-"], { input: diffText, stdio: ["pipe", "inherit", "inherit"] });
+              patchApplied = true;
+            }
+          }
         }
-        console.log(JSON.stringify(data, null, 2));
+        console.log(JSON.stringify({ ...data, resumeBranch, patchApplied }, null, 2));
       } else {
         console.log("Uso: brain handoff <create <taskId> [nextSteps...]|checkout [taskId]>");
       }
@@ -389,6 +463,42 @@ async function main() {
         console.log(await res.text());
       } else {
         console.log("Uso: brain import <file.brainpack.json> [projectId]");
+      }
+      break;
+    }
+    case "hook": {
+      const readOption = (key: string) => {
+        const index = rest.indexOf(`--${key}`);
+        if (index < 0) return undefined;
+        const value = rest[index + 1];
+        return value && !value.startsWith("--") ? value : undefined;
+      };
+      if (sub === "install") {
+        const res = runHookInstall(process.cwd(), {
+          harness: readOption("harness"),
+          projectId: readOption("project")
+        });
+        console.log(JSON.stringify(res, null, 2));
+      } else if (sub === "emit") {
+        const { hubUrl, apiKey, projectId } = getHubConfig(readOption("project"));
+        const event = (readOption("event") ?? "session_start") as "session_start" | "tool_use" | "session_end" | "pre_compact";
+        const harness = readOption("harness") ?? "cli";
+        const sessionId = readOption("session") ?? `sess-${Date.now()}`;
+        const summary = readOption("summary");
+        const filesRaw = readOption("files");
+        const res = await runHookEmit({
+          hubUrl,
+          apiKey,
+          projectId,
+          harness,
+          event,
+          sessionId,
+          summary,
+          modifiedFiles: filesRaw ? filesRaw.split(",").map((s) => s.trim()).filter(Boolean) : undefined
+        });
+        console.log(res.body);
+      } else {
+        console.log("Uso: brain hook <install|emit> [--harness <ide>] [--event <session_start|tool_use|pre_compact|session_end>]");
       }
       break;
     }

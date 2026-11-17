@@ -62,6 +62,7 @@ export type PostgresRetrievalEngineOptions<
       cache?: RetrievalCacheBackend;
       cacheTtlMs?: number;
       cacheMaxEntries?: number;
+      rerankUrl?: string;
     }
   | {
       sql: AppPostgresClient<TTx>;
@@ -70,6 +71,7 @@ export type PostgresRetrievalEngineOptions<
       cache?: RetrievalCacheBackend;
       cacheTtlMs?: number;
       cacheMaxEntries?: number;
+      rerankUrl?: string;
     };
 
 const UNSAFE_RAW_SQL_TEST_SEAM = Symbol("noema.retrieval.unsafeRawSqlTestSeam");
@@ -429,11 +431,12 @@ export class PostgresRetrievalEngine<
   private readonly queryCache: LruQueryCache;
   private readonly externalCache?: RetrievalCacheBackend;
   private readonly cacheTtlMs: number;
+  private readonly rerankUrl?: string;
 
   constructor(
     clientOrOptions: RetrievalPostgresTarget<TTx> | PostgresRetrievalEngineOptions<TTx>,
     maybeGraph?: GraphStoreContract,
-    maybeOptions?: { now?: () => Date; cache?: RetrievalCacheBackend; cacheTtlMs?: number; cacheMaxEntries?: number }
+    maybeOptions?: { now?: () => Date; cache?: RetrievalCacheBackend; cacheTtlMs?: number; cacheMaxEntries?: number; rerankUrl?: string }
   ) {
     let target: unknown;
     let graph: GraphStoreContract | undefined;
@@ -441,6 +444,7 @@ export class PostgresRetrievalEngine<
     let cache: RetrievalCacheBackend | undefined;
     let cacheTtlMs: number | undefined;
     let cacheMaxEntries: number | undefined;
+    let rerankUrl: string | undefined;
 
     if (
       clientOrOptions &&
@@ -456,6 +460,7 @@ export class PostgresRetrievalEngine<
       cache = clientOrOptions.cache;
       cacheTtlMs = clientOrOptions.cacheTtlMs;
       cacheMaxEntries = clientOrOptions.cacheMaxEntries;
+      rerankUrl = clientOrOptions.rerankUrl;
     } else {
       target = clientOrOptions;
       graph = maybeGraph;
@@ -463,6 +468,7 @@ export class PostgresRetrievalEngine<
       cache = maybeOptions?.cache;
       cacheTtlMs = maybeOptions?.cacheTtlMs;
       cacheMaxEntries = maybeOptions?.cacheMaxEntries;
+      rerankUrl = maybeOptions?.rerankUrl;
     }
 
     if (isUnsafeTestSeamTarget<TTx>(target)) {
@@ -476,6 +482,7 @@ export class PostgresRetrievalEngine<
     this.graph = graph;
     this.now = now ?? (() => new Date());
     this.externalCache = cache;
+    this.rerankUrl = rerankUrl ?? process.env.AI_WORKER_URL;
     this.cacheTtlMs = cacheTtlMs ?? DEFAULT_CACHE_TTL_MS;
     this.queryCache = new LruQueryCache(
       cacheMaxEntries ?? DEFAULT_CACHE_MAX_ENTRIES,
@@ -905,15 +912,47 @@ export class PostgresRetrievalEngine<
       return ranked.slice(0, q.limit ?? 10);
     });
 
-    this.queryCache.set(cacheKey, scope.resolved.tenantId, scope.normalizedProjectId, results);
+    let finalResults = results;
+    if (this.rerankUrl && normalizedQuery.length > 0 && results.length > 1) {
+      try {
+        const res = await fetch(`${this.rerankUrl.replace(/\/$/, "")}/rerank`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            query: normalizedQuery,
+            documents: results.map((hit) => `${hit.item.title}\n${hit.item.content.slice(0, 1500)}`),
+            top_n: results.length
+          }),
+          signal: AbortSignal.timeout(1500)
+        });
+        if (res.ok) {
+          const payload = (await res.json()) as { results?: Array<{ index: number; score: number }> };
+          if (Array.isArray(payload.results) && payload.results.length > 0) {
+            const rerankByIndex = new Map(payload.results.map((entry) => [entry.index, entry.score]));
+            finalResults = results
+              .map((hit, index) => {
+                const rrScore = rerankByIndex.get(index);
+                if (rrScore === undefined || !Number.isFinite(rrScore)) return hit;
+                const clamped = Math.max(0, Math.min(1, rrScore));
+                return { ...hit, score: 0.7 * hit.score + 0.3 * clamped };
+              })
+              .sort((a, b) => b.score - a.score);
+          }
+        }
+      } catch {
+        // Fail-open to deterministic RRF + graph ranking if AI worker is unavailable
+      }
+    }
+
+    this.queryCache.set(cacheKey, scope.resolved.tenantId, scope.normalizedProjectId, finalResults);
     if (this.externalCache) {
       await this.externalCache.set(
         cacheKey,
-        JSON.stringify(results),
+        JSON.stringify(finalResults),
         Math.max(1, Math.ceil(this.cacheTtlMs / 1000))
       );
     }
-    return results;
+    return finalResults;
   }
 
   private async traverseGraphInTransaction(

@@ -90,6 +90,83 @@ export interface EdgeRunnerTask {
   modelUsage?: Record<string, unknown>;
 }
 
+export interface EdgeCronJob {
+  jobId: string;
+  projectId: string;
+  instruction: string;
+  cron: string;
+  enabled: boolean;
+  nextRunAt: string;
+  lastRunAt?: string;
+  createdAt: string;
+}
+
+function parseCronField(field: string, min: number, max: number): Set<number> {
+  const values = new Set<number>();
+  for (const part of field.split(",")) {
+    const trimmed = part.trim();
+    if (!trimmed) throw new Error(`Expressão cron inválida: '${field}'.`);
+    const [rangePart, stepPart] = trimmed.split("/");
+    const step = stepPart ? Number(stepPart) : 1;
+    if (!Number.isInteger(step) || step <= 0) {
+      throw new Error(`Passo cron inválido: '${trimmed}'.`);
+    }
+    if (rangePart === "*") {
+      for (let v = min; v <= max; v += step) values.add(v);
+      continue;
+    }
+    if (rangePart.includes("-")) {
+      const [startStr, endStr] = rangePart.split("-");
+      const start = Number(startStr);
+      const end = Number(endStr);
+      if (!Number.isInteger(start) || !Number.isInteger(end) || start < min || end > max || start > end) {
+        throw new Error(`Intervalo cron inválido: '${trimmed}'.`);
+      }
+      for (let v = start; v <= end; v += step) values.add(v);
+      continue;
+    }
+    const single = Number(rangePart);
+    if (!Number.isInteger(single) || single < min || single > max) {
+      throw new Error(`Valor cron inválido: '${trimmed}'.`);
+    }
+    values.add(single);
+  }
+  if (values.size === 0) throw new Error(`Campo cron vazio: '${field}'.`);
+  return values;
+}
+
+/** Computes the next UTC execution timestamp for a standard 5-field cron expression. */
+export function computeNextCronRun(cron: string, fromDate = new Date()): Date {
+  const parts = cron.trim().split(/\s+/);
+  if (parts.length !== 5) {
+    throw new Error(`Expressão cron deve ter 5 campos (recebido '${cron}').`);
+  }
+  const minutes = parseCronField(parts[0]!, 0, 59);
+  const hours = parseCronField(parts[1]!, 0, 23);
+  const daysOfMonth = parseCronField(parts[2]!, 1, 31);
+  const months = parseCronField(parts[3]!, 1, 12);
+  const daysOfWeek = parseCronField(parts[4]!, 0, 6);
+
+  const candidate = new Date(fromDate.getTime());
+  candidate.setUTCSeconds(0, 0);
+  candidate.setUTCMinutes(candidate.getUTCMinutes() + 1);
+
+  // Search up to 366 days ahead (527040 minutes)
+  for (let i = 0; i < 527040; i += 1) {
+    if (
+      months.has(candidate.getUTCMonth() + 1) &&
+      daysOfMonth.has(candidate.getUTCDate()) &&
+      daysOfWeek.has(candidate.getUTCDay()) &&
+      hours.has(candidate.getUTCHours()) &&
+      minutes.has(candidate.getUTCMinutes())
+    ) {
+      return candidate;
+    }
+    candidate.setUTCMinutes(candidate.getUTCMinutes() + 1);
+  }
+  throw new Error(`Não foi possível calcular próxima execução para cron '${cron}'.`);
+}
+
 const MAX_OFFLINE_LEASE_MS = 7 * 24 * 60 * 60 * 1000;
 const DEFAULT_OFFLINE_LEASE_MS = 24 * 60 * 60 * 1000;
 
@@ -419,6 +496,23 @@ export class EdgeDatabase {
         COMMIT;
       `);
     }
+    if ((migratedVersion?.user_version ?? 0) < 5) {
+      this.db.exec(`
+        BEGIN IMMEDIATE;
+        CREATE TABLE IF NOT EXISTS edge_cron_jobs (
+          job_id TEXT PRIMARY KEY,
+          project_id TEXT NOT NULL,
+          instruction TEXT NOT NULL,
+          cron TEXT NOT NULL,
+          enabled INTEGER NOT NULL DEFAULT 1,
+          next_run_at TEXT NOT NULL,
+          last_run_at TEXT,
+          created_at TEXT NOT NULL
+        );
+        PRAGMA user_version = 5;
+        COMMIT;
+      `);
+    }
   }
 
   getSyncCursor(): { syncSeq: number; policyEpoch: number } {
@@ -607,9 +701,35 @@ export class EdgeDatabase {
     this.db
       .prepare(`INSERT OR REPLACE INTO edge_vectors (id, vector_json) VALUES (?, ?)`)
       .run(id, JSON.stringify(vector));
+    if (this.sqliteVecActive && vector.length > 0) {
+      try {
+        this.db.exec(
+          `CREATE VIRTUAL TABLE IF NOT EXISTS vec_edge_vectors USING vec0(item_id text primary key, embedding float[${vector.length}])`
+        );
+        this.db
+          .prepare(`INSERT OR REPLACE INTO vec_edge_vectors (item_id, embedding) VALUES (?, ?)`)
+          .run(id, JSON.stringify(vector));
+      } catch {
+        // Keep edge_vectors fallback if sqlite-vec extension rejects dimensions or virtual table creation
+      }
+    }
   }
 
   searchVectors(queryVector: number[], limit = 10): Array<{ id: string; score: number }> {
+    if (this.sqliteVecActive && queryVector.length > 0) {
+      try {
+        const vecRows = this.db
+          .prepare(
+            `SELECT item_id AS id, distance FROM vec_edge_vectors WHERE embedding MATCH ? AND k = ? ORDER BY distance ASC`
+          )
+          .all(JSON.stringify(queryVector), limit) as Array<{ id: string; distance: number }>;
+        if (vecRows.length > 0) {
+          return vecRows.map((r) => ({ id: r.id, score: 1 / (1 + Math.max(0, Number(r.distance))) }));
+        }
+      } catch {
+        // Fall through to edge_vectors cosine similarity if vec_edge_vectors is not yet initialized
+      }
+    }
     const rows = this.db.prepare(`SELECT id, vector_json FROM edge_vectors`).all() as Array<{
       id: string;
       vector_json: string;
@@ -665,6 +785,7 @@ export class EdgeDatabase {
   applyTombstones(itemIds: readonly string[]): number {
     let removed = 0;
     for (const id of itemIds) {
+      this.db.prepare(`DELETE FROM edge_relations WHERE from_id = ? OR to_id = ?`).run(id, id);
       this.db.prepare(`DELETE FROM edge_fts WHERE id = ?`).run(id);
       this.db.prepare(`DELETE FROM edge_vectors WHERE id = ?`).run(id);
       const res = this.db.prepare(`DELETE FROM edge_items WHERE id = ?`).run(id);
@@ -686,6 +807,7 @@ export class EdgeDatabase {
         .prepare(`SELECT id FROM edge_items WHERE access_policy_id = ?`)
         .all(policy) as Array<{ id: string }>;
       for (const r of rows) {
+        this.db.prepare(`DELETE FROM edge_relations WHERE from_id = ? OR to_id = ?`).run(r.id, r.id);
         this.db.prepare(`DELETE FROM edge_fts WHERE id = ?`).run(r.id);
         this.db.prepare(`DELETE FROM edge_vectors WHERE id = ?`).run(r.id);
         removed += 1;
@@ -864,6 +986,129 @@ export class EdgeDatabase {
   ): void {
     this.db.prepare(`UPDATE edge_runner_tasks SET status = ?, result_summary = ?, model_usage_json = ? WHERE task_id = ?`)
       .run(status, resultSummary ?? null, modelUsage ? JSON.stringify(modelUsage) : null, taskId);
+  }
+
+  /** Creates or updates a local Edge SQLite cron job and computes its next UTC run. */
+  upsertCronJob(input: {
+    jobId?: string;
+    projectId: string;
+    instruction: string;
+    cron: string;
+    enabled?: boolean;
+    now?: Date;
+  }): EdgeCronJob {
+    const now = input.now ?? new Date();
+    const jobId = input.jobId?.trim() || `CRON-${randomUUID().slice(0, 8)}`;
+    const nextRunAt = computeNextCronRun(input.cron, now).toISOString();
+    const createdAt = now.toISOString();
+    const enabled = input.enabled ?? true;
+    this.db
+      .prepare(
+        `INSERT INTO edge_cron_jobs (job_id, project_id, instruction, cron, enabled, next_run_at, last_run_at, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, NULL, ?)
+         ON CONFLICT(job_id) DO UPDATE SET
+           project_id = excluded.project_id,
+           instruction = excluded.instruction,
+           cron = excluded.cron,
+           enabled = excluded.enabled,
+           next_run_at = excluded.next_run_at`
+      )
+      .run(jobId, input.projectId, input.instruction.trim(), input.cron.trim(), enabled ? 1 : 0, nextRunAt, createdAt);
+    return {
+      jobId,
+      projectId: input.projectId,
+      instruction: input.instruction.trim(),
+      cron: input.cron.trim(),
+      enabled,
+      nextRunAt,
+      createdAt
+    };
+  }
+
+  listCronJobs(projectId?: string): EdgeCronJob[] {
+    const rows = (
+      projectId
+        ? this.db
+            .prepare(
+              `SELECT job_id, project_id, instruction, cron, enabled, next_run_at, last_run_at, created_at
+               FROM edge_cron_jobs WHERE project_id = ? ORDER BY created_at ASC`
+            )
+            .all(projectId)
+        : this.db
+            .prepare(
+              `SELECT job_id, project_id, instruction, cron, enabled, next_run_at, last_run_at, created_at
+               FROM edge_cron_jobs ORDER BY created_at ASC`
+            )
+            .all()
+    ) as Array<{
+      job_id: string;
+      project_id: string;
+      instruction: string;
+      cron: string;
+      enabled: number;
+      next_run_at: string;
+      last_run_at: string | null;
+      created_at: string;
+    }>;
+    return rows.map((row) => ({
+      jobId: row.job_id,
+      projectId: row.project_id,
+      instruction: row.instruction,
+      cron: row.cron,
+      enabled: row.enabled === 1,
+      nextRunAt: row.next_run_at,
+      ...(row.last_run_at ? { lastRunAt: row.last_run_at } : {}),
+      createdAt: row.created_at
+    }));
+  }
+
+  deleteCronJob(jobId: string): boolean {
+    const res = this.db.prepare(`DELETE FROM edge_cron_jobs WHERE job_id = ?`).run(jobId);
+    return Number(res.changes ?? 0) > 0;
+  }
+
+  /** Atomically claims due local cron jobs, advances their next_run_at, and enqueues runner tasks. */
+  claimDueCronJobs(now = new Date()): EdgeRunnerTask[] {
+    const nowIso = now.toISOString();
+    this.db.exec("BEGIN IMMEDIATE");
+    try {
+      const dueRows = this.db
+        .prepare(
+          `SELECT job_id, project_id, instruction, cron
+           FROM edge_cron_jobs
+           WHERE enabled = 1 AND next_run_at <= ?
+           ORDER BY next_run_at ASC`
+        )
+        .all(nowIso) as Array<{ job_id: string; project_id: string; instruction: string; cron: string }>;
+
+      const enqueued: EdgeRunnerTask[] = [];
+      for (const row of dueRows) {
+        const nextRunAt = computeNextCronRun(row.cron, now).toISOString();
+        this.db
+          .prepare(`UPDATE edge_cron_jobs SET last_run_at = ?, next_run_at = ? WHERE job_id = ?`)
+          .run(nowIso, nextRunAt, row.job_id);
+        const taskId = `RUN-${randomUUID().slice(0, 8)}`;
+        this.db
+          .prepare(
+            `INSERT INTO edge_runner_tasks (task_id, project_id, instruction, cron, status, created_at)
+             VALUES (?, ?, ?, ?, 'queued', ?)`
+          )
+          .run(taskId, row.project_id, row.instruction, row.cron, nowIso);
+        enqueued.push({
+          taskId,
+          projectId: row.project_id,
+          instruction: row.instruction,
+          cron: row.cron,
+          status: "queued",
+          createdAt: nowIso
+        });
+      }
+      this.db.exec("COMMIT");
+      return enqueued;
+    } catch (err) {
+      this.db.exec("ROLLBACK");
+      throw err;
+    }
   }
 
   close(): void {

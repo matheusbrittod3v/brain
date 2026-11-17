@@ -15,6 +15,15 @@ O **Noema** conecta código, arquitetura, regras de negócio, decisões históri
 - `protocols/` — Contratos canônicos em JSON Schema (`context-pack`, `agent-handoff`, `knowledge-events`, `project-manifest`, `runner-tasks`, `edge-sync`)
 - `infra/docker/` — Infraestrutura local via Docker Compose
 
+## Documentação
+
+- [Guia de onboarding](.brain/02-onboarding/guide.md) — mapa dos componentes, preparação local e fluxo de mudança.
+- [Decisões normativas](../docs/00-normative-decisions.md)
+- [Arquitetura](../docs/01-architecture/)
+- [Especificações](../docs/02-specifications/)
+- [Segurança e governança](../docs/03-security-and-governance/security-architecture.md)
+- [Roadmap e desenvolvimento local](../docs/04-roadmap/)
+
 ## Início Rápido (Estágio 0)
 
 ```bash

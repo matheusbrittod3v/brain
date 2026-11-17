@@ -5,7 +5,7 @@ const ARCH_DETAILS = {
   },
   gateway: {
     title: "2. Universal Agent Gateway & Motores",
-    text: "Expõe 13 ferramentas MCP canônicas (snake_case), CLI (brain) e API REST (Fastify). Inclui Context Router, Hybrid Retrieval (RRF + FlashRank), Context Optimizer (Context Hit Rate), Architecture/Business Rule Guardians (Semgrep + dependency-cruiser) e o Brain Runner (subagente leve com fila e cron). O roadmap prevê Caixa de Entrada HumanOps e decisões por canais conectados; MCP pode propor e consultar, mas não aprovar conhecimento oficial."
+    text: "Expõe um catálogo MCP extensível e documentado de ferramentas (snake_case), CLI (brain) e API REST (Fastify). Inclui Context Router, Hybrid Retrieval (RRF + FlashRank), Context Optimizer (Context Hit Rate), Architecture/Business Rule Guardians (Semgrep + dependency-cruiser) e o Brain Runner (subagente leve com fila e cron). O roadmap prevê Caixa de Entrada HumanOps e decisões por canais conectados; Revisores humanos autorizados também podem decidir propostas via brain_change_decide no MCP; agentes não podem aprovar."
   },
   storage: {
     title: "3. Persistência Open-Source (Zero-Cost First)",
@@ -13,7 +13,7 @@ const ARCH_DETAILS = {
   },
   sources: {
     title: "4. Fontes, Conectores & Segurança",
-    text: "Git é a fonte da verdade para conhecimento oficial conforme ownerRepo e precedência do manifesto. Referências usam sourceOrigin/sourceKind; Nango é opcional a partir de 2 conectores SaaS OAuth. Gitleaks é padrão; Presidio entra sob demanda. O Hub usa RLS; o perfil corporativo ativa Keycloak + OPA. Edge offline usa SQLite + SQLCipher e offline lease de até 7 dias."
+    text: "Git é a fonte da verdade para conhecimento oficial conforme ownerRepo e precedência do manifesto. Referências usam sourceOrigin/sourceKind; Nango é opcional a partir de 2 conectores SaaS OAuth. Gitleaks é obrigatório; redaction PII via AI Worker depende de AI_WORKER_URL e o fallback cobre email/CPF. O Hub usa RLS; o perfil corporativo ativa Keycloak + OPA. Edge offline usa SQLite + SQLCipher e offline lease de até 7 dias."
   }
 };
 
@@ -103,7 +103,7 @@ const ROLES = [
     id: "appsec", label: "AppSec / Segurança",
     items: [
       "Threat Model Vivo & Data Classification exigindo revisão de segurança em rotas com PII/pagamentos.",
-      "Policy-as-Code (OPA + Semgrep) e scanner Gitleaks + Presidio antes de qualquer indexação.",
+      "Policy-as-Code (OPA + Semgrep), Gitleaks obrigatório e redaction PII configurável via AI Worker antes da indexação.",
       "Supply Chain & CVE Guard cruzando SBOM entre todos os microsserviços da empresa."
     ]
   },
@@ -120,9 +120,9 @@ const ROLES = [
 const STAGES = [
   ["0", "Contratos, Banco & Infra", "JSON Schema, Drizzle, PostgreSQL FTS + pgvector + pg-boss; serviços de IA/storage opcionais."],
   ["1", "Segurança & Camada Git", "API Key local, RLS, trilha de auditoria, OpenTelemetry e parser Git; OIDC/OPA no perfil corporativo."],
-  ["2", "Ingestão & Code Intelligence", "Gitleaks, partial clone, web-tree-sitter e âncoras @brain-rule; Presidio/Docling sob demanda, SCIP depois."],
+  ["2", "Ingestão & Code Intelligence", "Gitleaks, partial clone, web-tree-sitter e âncoras @brain-rule; redaction PII configurável, Docling sob demanda e SCIP depois."],
   ["3", "Busca Híbrida, Grafo & Memória", "PostgreSQL FTS + busca vetorial exata autorizada, grafo seguro, RRF e memória em 5 camadas."],
-  ["4", "Gateway, Edge Offline & Brain Runner", "13 tools MCP, CLI, Local Edge Brain (SQLite + sqlite-vec), brain runner up e Agent Handoff cross-IDE."],
+  ["4", "Gateway, Edge Offline & Brain Runner", "14 tools MCP atualmente (catálogo extensível), CLI, Local Edge Brain (SQLite + sqlite-vec), brain runner up e Agent Handoff cross-IDE."],
   ["5", "Guardians, Command Center & Escala", "Semgrep/PR Checks, Dashboard (Dev/CTO/DevOps/QA/AppSec), Cross-Service Registry e brain scaffold."]
 ];
 

@@ -1,6 +1,7 @@
 import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { join, basename, relative } from "node:path";
 import os from "node:os";
+import { loadAndVerifyModelLock, probeAppleFm, type AppleFmCheckResult } from "@noema/agent-runner";
 import { createHandoffWithSync, HandoffStore } from "@noema/agent-handoff";
 import {
   evaluateArchitectureChange,
@@ -9,11 +10,14 @@ import {
 } from "@noema/architecture-guardian";
 import type { AuthContext } from "@noema/auth";
 import { evaluateBusinessRuleCompliance, type GuardianMode } from "@noema/business-rule-guardian";
+import { scanForSecrets } from "@noema/ingestion";
 import { parseKnowledgeFile } from "@noema/knowledge";
+import { runProjectAutodiscovery } from "@noema/project-discovery";
+import { runExternalScipIndexer } from "@noema/code-intelligence";
 import type { KnowledgeItem } from "@noema/core";
 import type { EdgeDatabase, EdgeRunnerTask } from "./edge-db.js";
 
-export function runInit(rootDir: string, projectId?: string) {
+export async function runInit(rootDir: string, projectId?: string) {
   const resolvedId = projectId ?? basename(rootDir).toLowerCase().replace(/[^a-z0-9-]/g, "-");
   const pkgPath = join(rootDir, "package.json");
   const hasNode = existsSync(pkgPath);
@@ -30,17 +34,59 @@ export function runInit(rootDir: string, projectId?: string) {
     detectedStack: { node: hasNode, python: hasPython, envExample: hasEnvExample }
   };
 
-  writeFileSync(join(rootDir, ".project-brain.json"), JSON.stringify(manifest, null, 2));
+  const manifestPath = ".project-brain.json";
+  const created: string[] = [];
+  const skipped: string[] = [];
+  const writeIfMissing = (relativePath: string, contents: string) => {
+    const absolutePath = join(rootDir, relativePath);
+    mkdirSync(join(absolutePath, ".."), { recursive: true });
+    if (existsSync(absolutePath)) { skipped.push(relativePath); return; }
+    writeFileSync(absolutePath, contents, { flag: "wx" });
+    created.push(relativePath);
+  };
+  writeIfMissing(manifestPath, JSON.stringify(manifest, null, 2) + "\n");
   mkdirSync(join(rootDir, ".brain/00-overview"), { recursive: true });
   mkdirSync(join(rootDir, ".brain/01-business/business-rules"), { recursive: true });
   mkdirSync(join(rootDir, ".brain/03-architecture/decisions"), { recursive: true });
 
-  writeFileSync(
-    join(rootDir, ".brain/00-overview/vision.md"),
-    `---\nid: VIS-${resolvedId}\ntype: document\nstatus: draft\n---\n\n# Visão do Projeto (${resolvedId})\n\nGerado automaticamente pelo Noema Autodiscovery (${files.length} entradas na raiz).\n`
-  );
+  writeIfMissing(".brain/00-overview/vision.md", `---\nid: VIS-${resolvedId}\ntype: document\nstatus: draft\n---\n\n# Visão do Projeto (${resolvedId})\n\nGerado automaticamente pelo Noema Autodiscovery (${files.length} entradas na raiz).\n`);
 
-  return { projectId: resolvedId, manifestPath: ".project-brain.json", stack: manifest.detectedStack };
+  const discovery = await runProjectAutodiscovery(rootDir, manifest.tenantId, resolvedId);
+  for (const item of discovery.inferredDrafts) {
+    const frontmatter = {
+      id: item.id, type: item.type, status: item.status, confidence: item.confidence,
+      is_inferred: item.isInferred, trust_level: item.trustLevel,
+      access_policy: item.accessPolicyId, summary: item.summary, tags: item.tags
+    };
+    const body = `---\n${Object.entries(frontmatter).map(([key, value]) => `${key}: ${JSON.stringify(value)}`).join("\n")}\n---\n\n${item.content}\n`;
+    writeIfMissing(item.sourceUri, body);
+  }
+  return {
+    projectId: resolvedId, manifestPath, stack: manifest.detectedStack,
+    autodiscovery: {
+      languages: discovery.deterministic.languages, frameworks: discovery.deterministic.frameworks,
+      symbolCount: discovery.deterministic.symbols.length, routeCount: discovery.deterministic.routes.length,
+      sqlTableCount: discovery.deterministic.sqlTables.length, scipState: discovery.deterministic.scip.state,
+      testFileCount: discovery.deterministic.testFiles.length,
+      infrastructureFileCount: discovery.deterministic.infrastructureFiles.length,
+      treeSitter: discovery.deterministic.treeSitter
+    },
+    draftsCreated: created, draftsSkipped: skipped
+  };
+}
+
+export async function runInitWithScip(
+  rootDir: string,
+  projectId?: string,
+  indexer: typeof runExternalScipIndexer = runExternalScipIndexer
+) {
+  const discovery = await runProjectAutodiscovery(rootDir, "default-org", projectId ?? basename(rootDir));
+  const language = discovery.deterministic.languages.includes("typescript") || discovery.deterministic.languages.includes("javascript")
+    ? "typescript"
+    : discovery.deterministic.languages.includes("python") ? "python" : undefined;
+  if (!language) throw new Error("--scip requer arquivos TypeScript/JavaScript ou Python no projeto.");
+  await indexer(rootDir, language);
+  return runInit(rootDir, projectId);
 }
 
 export function runDoctor(rootDir: string, env: NodeJS.ProcessEnv = process.env) {
@@ -79,18 +125,107 @@ export function selectRunnerProfile(totalRamBytes = os.totalmem()) {
 }
 
 export async function runRunnerUp(
-  opts: { local?: boolean; pull?: boolean; provider?: string; hybrid?: boolean; ollamaUrl?: string },
+  opts: {
+    local?: boolean;
+    pull?: boolean;
+    provider?: string;
+    hybrid?: boolean;
+    cloudProvider?: "openai" | "anthropic";
+    ollamaUrl?: string;
+    appleFmCheck?: () => Promise<AppleFmCheckResult>;
+  },
   fetchFn: typeof fetch = fetch
 ) {
   const selected = selectRunnerProfile();
+  const normalizedProvider = opts.provider === "fm" ? "apple-fm" : opts.provider;
+  const supportedProviders = new Set(["ollama", "apple-fm", "openai", "anthropic"]);
+  if (normalizedProvider && !supportedProviders.has(normalizedProvider)) {
+    throw new Error(`O provedor '${opts.provider}' não é suportado no Brain Runner.`);
+  }
+  if (!opts.local && !opts.hybrid && !normalizedProvider) {
+    throw new Error("Selecione --local, --hybrid, --provider ollama|fm|openai|anthropic; nenhum provedor padrão está configurado.");
+  }
+  const lockPath = process.env.NOEMA_MODEL_LOCK_PATH;
+  if (lockPath && existsSync(lockPath)) {
+    loadAndVerifyModelLock(lockPath);
+  }
+
+  const checkCloudReady = (cloud: "openai" | "anthropic") => {
+    if (cloud === "openai") {
+      if (!process.env.OPENAI_API_KEY) {
+        throw new Error("OPENAI_API_KEY não configurada para o provedor OpenAI.");
+      }
+      return { provider: "openai" as const, model: process.env.NOEMA_OPENAI_MODEL ?? "gpt-4o-mini" };
+    }
+    if (!process.env.ANTHROPIC_API_KEY) {
+      throw new Error("ANTHROPIC_API_KEY não configurada para o provedor Anthropic.");
+    }
+    return { provider: "anthropic" as const, model: process.env.NOEMA_ANTHROPIC_MODEL ?? "claude-3-5-haiku-latest" };
+  };
+
+  if (normalizedProvider === "openai" || normalizedProvider === "anthropic") {
+    const cloud = checkCloudReady(normalizedProvider);
+    return {
+      mode: opts.hybrid ? ("hybrid" as const) : ("cloud" as const),
+      provider: cloud.provider,
+      status: "ready",
+      pulled: false,
+      profile: "cloud",
+      model: cloud.model,
+      useVector: true
+    };
+  }
+
   if (opts.hybrid) {
-    throw new Error("O modo --hybrid ainda não tem executor de fallback implementado.");
+    const cloudTarget = opts.cloudProvider ?? (process.env.ANTHROPIC_API_KEY && !process.env.OPENAI_API_KEY ? "anthropic" : "openai");
+    const cloud = checkCloudReady(cloudTarget);
+    let localReady = false;
+    let localProvider: "ollama" | "apple-fm" = normalizedProvider === "apple-fm" ? "apple-fm" : "ollama";
+    let localModel = selected.model;
+    if (localProvider === "apple-fm") {
+      const check = await (opts.appleFmCheck ?? (() => probeAppleFm()))();
+      localReady = check.available;
+      localModel = check.model;
+    } else {
+      const baseUrl = opts.ollamaUrl ?? process.env.OLLAMA_BASE_URL ?? "http://localhost:11434";
+      try {
+        const tagsRes = await fetchFn(`${baseUrl}/api/tags`);
+        if (tagsRes.ok) {
+          const tagsJson = (await tagsRes.json()) as { models?: Array<{ name: string }> };
+          localReady = (tagsJson.models ?? []).some((m) => m.name.startsWith(selected.model));
+        }
+      } catch {
+        localReady = false;
+      }
+    }
+    return {
+      mode: "hybrid" as const,
+      status: localReady ? "ready" : "cloud_fallback_ready",
+      localProvider,
+      localReady,
+      localModel,
+      cloudProvider: cloud.provider,
+      cloudModel: cloud.model,
+      pulled: false,
+      useVector: true
+    };
   }
-  if (opts.provider && opts.provider !== "ollama") {
-    throw new Error(`O provedor '${opts.provider}' ainda não está implementado no Brain Runner.`);
-  }
-  if (!opts.local && !opts.provider) {
-    throw new Error("Selecione --local ou --provider ollama; nenhum provedor padrão está configurado.");
+
+  if (normalizedProvider === "apple-fm") {
+    const check = await (opts.appleFmCheck ?? (() => probeAppleFm()))();
+    if (!check.available) {
+      throw new Error(`Apple Foundation Models indisponível neste ambiente: ${check.reason ?? check.macOsVersion}.`);
+    }
+    return {
+      mode: "local",
+      provider: "apple-fm" as const,
+      status: "ready",
+      pulled: false,
+      profile: "apple-fm",
+      model: check.model,
+      macOsVersion: check.macOsVersion,
+      useVector: true
+    };
   }
   const baseUrl = opts.ollamaUrl ?? process.env.OLLAMA_BASE_URL ?? "http://localhost:11434";
   const tagsRes = await fetchFn(`${baseUrl}/api/tags`);
@@ -240,6 +375,13 @@ export async function runSyncPush(
   enforceOfflineLeaseIfStored(opts.db);
   const drafts = opts.db.listStaged();
   if (drafts.length === 0) return { pushed: 0 };
+  for (const draft of drafts) {
+    const textToScan = `${draft.title}\n${draft.content}`;
+    const scan = scanForSecrets(textToScan, { useGitleaks: process.env.NOEMA_DISABLE_GITLEAKS !== "1" });
+    if (!scan.clean) {
+      throw new Error(`Sync push bloqueado por Gitleaks/secret-scan local no draft '${draft.id}': ${scan.findings.join(", ")}`);
+    }
+  }
   const res = await fetchFn(`${opts.hubUrl}/v1/sync/push`, {
     method: "POST",
     headers: {
@@ -590,6 +732,83 @@ export async function runHandoffCreate(
     method: "POST",
     headers: { "content-type": "application/json", authorization: `Bearer ${opts.apiKey}` },
     body: JSON.stringify(payload)
+  });
+  return { status: res.status, body: await res.text() };
+}
+
+export type LifecycleHookEvent = "session_start" | "tool_use" | "session_end" | "pre_compact";
+
+export function runHookInstall(
+  rootDir: string,
+  opts: { harness?: string; projectId?: string } = {}
+) {
+  const harness = opts.harness?.trim() || "all";
+  let projectId = opts.projectId;
+  const manifestPath = join(rootDir, ".project-brain.json");
+  if (!projectId && existsSync(manifestPath)) {
+    try {
+      const manifest = JSON.parse(readFileSync(manifestPath, "utf8")) as { projectId?: string };
+      projectId = manifest.projectId;
+    } catch {
+      // ignore invalid manifest
+    }
+  }
+  projectId = projectId || basename(rootDir).toLowerCase().replace(/[^a-z0-9-]+/g, "-");
+  const hooksDir = join(rootDir, ".noema/hooks");
+  mkdirSync(hooksDir, { recursive: true });
+  const scriptPath = join(hooksDir, "noema-lifecycle.sh");
+  writeFileSync(
+    scriptPath,
+    `#!/usr/bin/env bash\nset -euo pipefail\nEVENT="\${1:-session_start}"\nHARNESS="\${2:-${harness}}"\nnoema hook emit --event "$EVENT" --harness "$HARNESS" --project "${projectId}" || true\n`,
+    { mode: 0o755 }
+  );
+  const configPath = join(rootDir, ".noema/hooks.json");
+  const config = {
+    schemaVersion: "1.0.0",
+    projectId,
+    harness,
+    events: {
+      session_start: ".noema/hooks/noema-lifecycle.sh session_start",
+      tool_use: ".noema/hooks/noema-lifecycle.sh tool_use",
+      pre_compact: ".noema/hooks/noema-lifecycle.sh pre_compact",
+      session_end: ".noema/hooks/noema-lifecycle.sh session_end"
+    }
+  };
+  writeFileSync(configPath, JSON.stringify(config, null, 2));
+  return { installed: true, projectId, harness, configPath: ".noema/hooks.json", scriptPath: ".noema/hooks/noema-lifecycle.sh" };
+}
+
+export async function runHookEmit(
+  opts: {
+    hubUrl: string;
+    apiKey: string;
+    projectId: string;
+    harness: string;
+    event: LifecycleHookEvent;
+    sessionId: string;
+    summary?: string;
+    modifiedFiles?: string[];
+    branch?: string;
+    commitSha?: string;
+    usedItemIds?: string[];
+    taskId?: string;
+  },
+  fetchFn: typeof fetch = fetch
+) {
+  const res = await fetchFn(`${opts.hubUrl}/v1/projects/${encodeURIComponent(opts.projectId)}/hooks/lifecycle`, {
+    method: "POST",
+    headers: { "content-type": "application/json", authorization: `Bearer ${opts.apiKey}` },
+    body: JSON.stringify({
+      harness: opts.harness,
+      event: opts.event,
+      sessionId: opts.sessionId,
+      ...(opts.summary ? { summary: opts.summary } : {}),
+      ...(opts.modifiedFiles?.length ? { modifiedFiles: opts.modifiedFiles } : {}),
+      ...(opts.branch ? { branch: opts.branch } : {}),
+      ...(opts.commitSha ? { commitSha: opts.commitSha } : {}),
+      ...(opts.usedItemIds?.length ? { usedItemIds: opts.usedItemIds } : {}),
+      ...(opts.taskId ? { taskId: opts.taskId } : {})
+    })
   });
   return { status: res.status, body: await res.text() };
 }

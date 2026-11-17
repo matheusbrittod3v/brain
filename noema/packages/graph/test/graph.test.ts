@@ -22,7 +22,7 @@ import type { AuthContext } from "@noema/auth";
 interface RecordedGraphStatement {
   txId: number;
   sqlTemplate: string;
-  params: readonly string[];
+  params: readonly unknown[];
 }
 
 /**
@@ -46,7 +46,7 @@ function createBehavioralGraphSqlHarness(opts?: {
 
       const tx: GraphSqlTransactionRunner = async (
         template: TemplateStringsArray,
-        ...parameters: readonly string[]
+        ...parameters: readonly unknown[]
       ) => {
         const sqlTemplate = template.join("?");
         statements.push({ txId, sqlTemplate, params: parameters });
@@ -70,6 +70,15 @@ function createBehavioralGraphSqlHarness(opts?: {
           throw new Error("RLS violation: transaction-local GUCs were not set on this tx before query.");
         }
 
+        if (sqlTemplate.includes("DELETE FROM knowledge_relations")) {
+          const [tenantId, projectId, toProjectId, evidenceUri] = parameters as [string, string, string, string];
+          for (let index = rows.length - 1; index >= 0; index -= 1) {
+            const row = rows[index]!;
+            if (row.tenantId === tenantId && row.fromProjectId === projectId && row.toProjectId === toProjectId && row.evidenceUri === evidenceUri && row.metadata?.source === "scip") rows.splice(index, 1);
+          }
+          return [];
+        }
+
         if (sqlTemplate.includes("INSERT INTO knowledge_relations")) {
           if (opts?.failOnInsert) {
             throw opts.failOnInsert;
@@ -78,7 +87,7 @@ function createBehavioralGraphSqlHarness(opts?: {
             sqlTemplate.includes("ON CONFLICT ON CONSTRAINT knowledge_relations_identity_uq DO NOTHING"),
             "INSERT must enforce idempotency via knowledge_relations_identity_uq"
           );
-          assert.equal(parameters.length, 10, "Expected 10 bound parameters for INSERT INTO knowledge_relations");
+          assert.equal(parameters.length, 12, "Expected 12 bound parameters for INSERT INTO knowledge_relations");
 
           const [
             tenantId,
@@ -90,7 +99,9 @@ function createBehavioralGraphSqlHarness(opts?: {
             toPolicyId,
             relationType,
             isInferredStr,
-            confidenceStr
+            confidenceStr,
+            evidenceUri,
+            metadataJson
           ] = parameters as [
             string,
             string,
@@ -101,7 +112,9 @@ function createBehavioralGraphSqlHarness(opts?: {
             string,
             GraphEdge["relationType"],
             string,
-            string
+            string,
+            string,
+            Record<string, unknown>
           ];
 
           // Enforce PostgreSQL RLS WITH CHECK policy on knowledge_relations
@@ -136,7 +149,9 @@ function createBehavioralGraphSqlHarness(opts?: {
               toPolicyId,
               relationType,
               isInferred: isInferredStr === "true",
-              confidence: Number(confidenceStr)
+              confidence: Number(confidenceStr),
+              ...(evidenceUri ? { evidenceUri } : {}),
+            metadata: typeof metadataJson === "string" ? JSON.parse(metadataJson) : metadataJson as Record<string, unknown>
             });
           }
           return [];
@@ -351,7 +366,9 @@ test("prevents cross-project leakage on A -> B and B -> A edges unless both endp
     toPolicyId: "internal-project",
     relationType: "CONSUMES_API",
     isInferred: false,
-    confidence: 1.0
+    confidence: 1.0,
+    evidenceUri: ".scip/index.scip",
+    metadata: { source: "scip", fromSymbol: "demo Dog#", toSymbol: "demo Animal#" }
   });
   graph.addEdge({
     tenantId: "acme",
@@ -596,7 +613,9 @@ test("PostgresGraphStore.addEdge is idempotent via knowledge_relations_identity_
     toPolicyId: "public-org",
     relationType: "CONSUMES_API",
     isInferred: false,
-    confidence: 1.0
+    confidence: 1.0,
+    evidenceUri: ".scip/index.scip",
+    metadata: { source: "scip", fromSymbol: "demo Dog#", toSymbol: "demo Animal#" }
   };
 
   await store.addEdge(edge);
@@ -604,10 +623,31 @@ test("PostgresGraphStore.addEdge is idempotent via knowledge_relations_identity_
 
   assert.equal(harness.getBeginCount(), 2);
   assert.equal(harness.rows.length, 1, "Duplicate edge must be ignored by ON CONFLICT ON CONSTRAINT knowledge_relations_identity_uq");
+  assert.equal(harness.rows[0]?.evidenceUri, ".scip/index.scip");
+  assert.deepEqual(harness.rows[0]?.metadata, { source: "scip", fromSymbol: "demo Dog#", toSymbol: "demo Animal#" });
+  assert.deepEqual(harness.statements[1]?.params[11], { source: "scip", fromSymbol: "demo Dog#", toSymbol: "demo Animal#" });
   assert.equal(harness.statements.length, 4);
   assert.equal(harness.statements[0]!.txId, 1);
   assert.equal(harness.statements[1]!.txId, 1);
   assert.ok(!harness.statements[1]!.sqlTemplate.includes("SVC-A"), "SQL template must be parameterized");
+});
+
+test("PostgresGraphStore.replaceScipEdges replaces evidence edges in one authorized transaction", async () => {
+  const harness = createBehavioralGraphSqlHarness();
+  const context: RlsSessionContext = { tenantId: "acme", allowedProjects: ["proj-a"], allowedPolicies: ["internal-project"] };
+  const store = createPostgresGraphStoreForTesting(harness.sql, context);
+  await store.replaceScipEdges({ tenantId: "acme", projectId: "proj-a", evidenceUri: ".scip/index.scip", edges: [{
+    tenantId: "acme", fromProjectId: "proj-a", toProjectId: "proj-a", fromItemId: "FILE-A", toItemId: "SYMBOL-A",
+    fromPolicyId: "internal-project", toPolicyId: "internal-project", relationType: "IMPLEMENTS", isInferred: false,
+    confidence: 1, evidenceUri: ".scip/index.scip", metadata: { source: "scip", symbol: "demo A#" }
+  }] });
+  assert.equal(harness.getBeginCount(), 1);
+  assert.equal(harness.statements.length, 3, "RLS setup, scoped deletion, and insertion share one transaction");
+  assert.equal(harness.statements[1]?.txId, harness.statements[2]?.txId);
+  assert.match(harness.statements[1]!.sqlTemplate, /metadata->>'source' = 'scip'/);
+  assert.deepEqual(harness.rows[0]?.metadata, { source: "scip", symbol: "demo A#" });
+  await assert.rejects(store.replaceScipEdges({ tenantId: "acme", projectId: "proj-b", evidenceUri: ".scip/index.scip", edges: [] }), /not authorized/);
+  assert.equal(harness.getBeginCount(), 1, "unauthorized replacement must fail before opening a transaction");
 });
 
 test("PostgresGraphStore denies unauthorized addEdge and traverseRelated BEFORE opening a transaction", async () => {

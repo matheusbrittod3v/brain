@@ -10,21 +10,26 @@ Para funcionar em qualquer ferramenta ou plataforma de IA (Antigravity, Codex, K
 
 1. **MCP Local (`stdio`):** Executado localmente via CLI (`brain mcp serve`) para uso *Local-First* com latência mínima.
 2. **MCP Remoto (`Streamable HTTP`):** Hospedado na rota `/mcp` de `apps/api`, autenticado por API Key no modo local/dev ou OIDC no Hub corporativo.
-3. **CLI & Plugins (`brain <comando>`):** A CLI oferece equivalentes às operações MCP de contexto, busca, impacto, validação, handoff, proposta e delegação. Administração, conectores, auditoria, sync e export ficam na CLI/REST conforme a matriz abaixo.
+3. **CLI & Plugins (`brain <comando>`):** A CLI oferece operações de contexto, busca, impacto, validação, handoff, proposta, decisão humana e delegação. API, CLI e MCP são superfícies para as mesmas capacidades: toda ação manual do usuário deve poder ser exposta via MCP quando o contrato de escopo, autorização e auditoria puder ser respeitado.
 
 > **Regra de Nomenclatura MCP:** Todas as ferramentas utilizam exclusivamente `snake_case` (`[a-z0-9_]`, ex.: `brain_context_build`). Evita-se pontos (`.`) nos nomes de tools para garantir 100% de compatibilidade com clientes MCP e harnesses que restringem caracteres especiais.
 
 ---
 
-## 1. Catálogo Canônico de Ferramentas MCP (13 Tools Sem Sobreposição)
+## 1. Catálogo Documentado e Extensível de Ferramentas MCP
 
-Para evitar que modelos de IA escolham ferramentas redundantes ou desperdicem tokens com dezenas de schemas parecidos, o servidor MCP expõe **exatamente 13 ferramentas canônicas** em `snake_case` (Streamable HTTP no Hub via `apps/api`; `stdio` local via `apps/mcp-server`). Operações de listagem usam paginação *cursor-based* (`limit`, `cursor`); leituras de item único, criações e ações não são paginadas. Todas as tools e endpoints usam erros padrão (`BRAIN_ERR_UNAUTHORIZED`, `BRAIN_ERR_NOT_FOUND`, `BRAIN_ERR_CONFLICT`, `BRAIN_ERR_POLICY_DENIED`, `BRAIN_ERR_RATE_LIMITED`).
+O catálogo MCP é **extensível**; não existe um limite rígido de ferramentas. `protocols/mcp-tools/catalog.json` lista as ferramentas ativas, e esta seção documenta o contrato público de cada uma. O catálogo local atual tem 14 ferramentas em `snake_case` (Streamable HTTP no Hub via `apps/api`; `stdio` local via `apps/mcp-server`). O plugin Noema conectado nesta sessão anuncia 13 wrappers e ainda não expõe `brain_change_decide`; atualizar/republicar o registro desse conector é necessário para a paridade completa do plugin. Toda ferramenta nova ou alterada deve documentar objetivo, argumentos, retorno, escopo, autorização, efeitos persistidos, erros e paginação, além de atualizar testes de catálogo/paridade e testes de autorização para HTTP e stdio. Operações de listagem usam paginação *cursor-based* (`limit`, `cursor`); leituras de item único, criações e ações não são paginadas. Todas as tools e endpoints usam erros padrão (`BRAIN_ERR_UNAUTHORIZED`, `BRAIN_ERR_NOT_FOUND`, `BRAIN_ERR_CONFLICT`, `BRAIN_ERR_POLICY_DENIED`, `BRAIN_ERR_RATE_LIMITED`).
 
 ### Matriz Oficial de Operações: MCP × CLI × REST
-- **Contexto, Busca, Impacto, Validação, Handoff, Proposta e Delegação:** disponíveis em **MCP (13 tools) + CLI + REST**.
-- **Administração, Conectores, Auditoria, Sync Edge (`pull`/`push`) e Export `.brainpack`:** disponíveis exclusivamente em **CLI + REST** (não poluem o contexto MCP dos agentes).
+- **Contexto, Busca, Impacto, Validação, Handoff, Proposta, Decisão Humana e Delegação:** disponíveis via **MCP, CLI e/ou REST**, conforme a autorização do ator. A tool `brain_change_decide` executa a decisão humana pelo Approval Engine; agentes não podem aprovar nem decidir propostas.
+- **Administração, Conectores, Auditoria, Sync Edge (`pull`/`push`) e Export `.brainpack`:** ainda têm lacunas de paridade MCP. A meta é expor as mesmas operações via tools documentadas, sem uma exclusão permanente por serem administrativas; cada ação conserva autorização, escopo e auditoria da API/CLI.
 
-### Contratos de Entrada, Saída e Paginação das 13 Tools MCP
+### Paridade MCP das Ações Manuais
+O objetivo do produto é permitir que operações manuais disponíveis no Command Center, API ou CLI também possam ser chamadas via MCP. Uma ausência no catálogo atual é uma lacuna de implementação, não uma proibição da interface. A ferramenta deve aplicar o mesmo ator autenticado, tenant, projetos, políticas, autorização OPA/RBAC, validação de entrada, confirmação humana quando necessária e trilha de auditoria da operação manual equivalente. Não se adiciona uma rota de bypass.
+
+Lacunas conhecidas nos módulos priorizados, ainda não expostas como tools próprias (a menos que já cubertas por uma tool listada): resumo/onboarding operacional de projetos e ingestões; listagem, detalhe e cancelamento de execuções do Runner; listagem e histórico/versionamento do catálogo de conhecimento; visões corporativas agregadas. Ao implementar cada lacuna, adicionar o contrato ao catálogo e à tabela abaixo e cobrir paridade HTTP/stdio e permissões.
+
+### Contratos de Entrada, Saída e Paginação das 14 Ferramentas MCP Atuais
 Todos os campos listados como inputs são propriedades de nível superior no objeto de argumentos da tool. `handoffId` e `taskId` em `brain_resume_handoff` são alternativas exclusivas (`oneOf`).
 | Tool MCP | Inputs Obrigatórios (+ Opcionais) | Retorno Principal | Paginação |
 | :--- | :--- | :--- | :--- |
@@ -34,7 +39,7 @@ Todos os campos listados como inputs são propriedades de nível superior no obj
 | `brain_knowledge_get` | `projectId`, `id`, `version?`, `depth?`, `sessionId?` | `KnowledgeItem` da versão solicitada + `relations[]`; com sessão, registra evidência `read` | Não |
 | `brain_get_active_rules` | `projectId`, `query?`, `serviceId?`, `tags?`, `limit?`, `cursor?` (campos irmãos) | `rules[]`, `adrs[]`, `nextCursor?` | Sim |
 | `brain_find_related_code` | `projectId`, `targetId`, `limit?`, `cursor?` | `related[]` hidratado com metadados autorizados e listas `symbols[]`, `files[]`, `tests[]` classificadas por tipo/sourceUri; referências sem KnowledgeItem preservam apenas o hit do grafo; `nextCursor?` | Sim |
-| `brain_analyze_change_impact` | `projectId`, `targetIds[]` (mínimo 1), `limit?` | `confirmedImpacts[]`, `hypotheses[]`, `directImpacts[]`, `transitiveImpacts[]`, `criticalRulesImpacted[]`, `crossServiceImpacts[]`, `riskLevel` | Não |
+| `brain_analyze_change_impact` | `projectId`, `targetIds[]` (mínimo 1), `limit?` | `confirmedImpacts[]`, `hypotheses[]`, `directImpacts[]`, `transitiveImpacts[]`, `criticalRulesImpacted[]`, `crossServiceImpacts[]`, `riskLevel`. `directImpacts`/`transitiveImpacts` classificam por distância e podem incluir hipóteses; somente relações confirmadas alimentam regras críticas, blast radius cross-service e `riskLevel`. | Não |
 | `brain_validate_implementation` | `projectId`, `diffOrPaths[]` ou alias `paths[]` (ao menos um caminho; `limit?`) | `passed`, `checkedPaths[]`, `checkedRules`, `checkedImports`, `violations[]` (resultado limitado, sem cursor). Caminhos relativos são confinados ao workspace configurado. | Não |
 | `brain_create_handoff` | `projectId`, `taskId`, `nextSteps[]`, `plan?`, `branch?` | Objeto completo do handoff persistido | Não |
 | `brain_resume_handoff` | `projectId`, `handoffId?` ou `taskId?` (exatamente um obrigatório), `currentBranch?`, `currentCommitSha?` | Estado do handoff e `warnings[]` para divergência de branch/commit, working tree dirty e lease ativo | Não |
@@ -60,7 +65,8 @@ Todos os campos listados como inputs são propriedades de nível superior no obj
 | **10** | `brain_resume_handoff` | Leitura | Retoma tarefa iniciada em outra IDE/sessão, verificando divergências de branch/commit |
 | **11** | `brain_record_learning` | Escrita | Registra descoberta episódica ou feedback de utilidade do contexto (`Context Hit Rate`) |
 | **12** | `brain_change_propose` | Escrita | Submete proposta formal (abre PR/rascunho para aprovação humana) para criar ou alterar regra, ADR ou doc |
-| **13** | `brain_delegate_task` | Escrita | Enfileira uma tarefa rotineira ou agendada em background para o **Brain Runner** (`apps/agent-runner`) sem travar a IDE |
+| **13** | `brain_change_decide` | Escrita (Humano) | Aprova, rejeita ou solicita alterações (`approve` / `reject` / `request_changes`) em proposta pendente. Usa o Approval Engine; exige ator humano e permissão de aprovação para o domínio, e agentes são sempre negados. |
+| **14** | `brain_delegate_task` | Escrita | Enfileira uma tarefa rotineira ou agendada em background para o **Brain Runner** (`apps/agent-runner`) sem travar a IDE |
 
 ---
 
@@ -176,6 +182,7 @@ Para garantir interoperabilidade entre `apps/api`, `apps/mcp-server` (stdio), `a
 No Hub, endpoints chamados por usuários exigem token **OIDC (Bearer JWT)**; no modo Local-First, aceitam API Key local. Webhooks GitHub exigem HMAC e mapeamento de repositório para tenant/projeto/política; payloads sem assinatura ou escopo confiável são recusados. Callbacks HumanOps genéricos exigem bearer, HMAC e identidade externa mapeada por tenant/projeto/política; a rota nativa Slack valida a assinatura e timestamp Slack e encaminha internamente ao mesmo fluxo canônico. Decisões de aprovação deduplicam pelo identificador do evento no PostgreSQL; respostas do Runner deduplicam pela chave idempotente persistida na pergunta. Rotas com stores PostgreSQL usam contexto RLS; detalhes de disponibilidade e lacunas estão marcados abaixo.
 
 - `GET /v1/projects/:projectId/overview` — Visão geral e saúde do projeto
+- `POST /v1/projects/:projectId/ingest-document` — Recebe `{fileName, contentBase64, accessPolicyId?}` (PDF/DOCX/PPTX/XLSX/HTML/CSV, até 16 MiB), chama Docling pelo AI Worker com MarkItDown de fallback e bytes temporários, aplica Gitleaks no Markdown extraído, redaction PII configurada, OPA/política, persistência/auditoria e indexação. O item é sempre draft/external_reference/untrusted; caminhos locais não são aceitos.
 - `POST /v1/projects/:projectId/context` — Equivalente HTTP ao `brain_context_build`
 - `GET /v1/projects/:projectId/knowledge/:itemId?sessionId=...` registra evidência `read` somente se o item foi entregue naquela sessão. `POST /search/feedback` aceita `sessionId`/`itemIds` para evidência `citation`; edição exige `taskId` e lease ativo do ator. O Noema compara SHA-256 dos arquivos locais elegíveis no workspace entre o primeiro envio do Context Pack e o feedback; `editedPaths` opcional pode restringir os caminhos detectados, mas nunca cria evidência por si só. URIs remotas, arquivos indisponíveis no envio e caminhos fora do workspace não têm detecção automática. `hitRate` usa itens distintos do Context Pack como denominador; buscas diretas não entram. Caminhos sem mudança, baseline ou correspondência com fonte/tarefa retornam em `warnings[]` e não geram hits.
 - `POST /v1/projects/:projectId/search` — Busca híbrida paginada
@@ -183,6 +190,8 @@ No Hub, endpoints chamados por usuários exigem token **OIDC (Bearer JWT)**; no 
 - `GET /v1/projects/:projectId/proposals/:proposalId/history` — Eventos de criação, decisão, revisão e callback associados à proposta, limitados ao escopo autorizado de projeto/política.
 - `GET /v1/projects/:projectId/graph/:itemId/related` — Subgrafo de relações
 - `POST /v1/projects/:projectId/handoffs` e `GET /v1/projects/:projectId/handoffs/latest` — Criação e retomada de handoffs
+- `POST /v1/projects/:projectId/hooks/lifecycle` — Recebe eventos automáticos de ciclo de vida (`session_start`, `tool_use`, `pre_compact`, `session_end`) de IDEs/CLIs (`noema hook emit`), aplica scan Gitleaks fail-closed, registra memória/citações e cria handoff automático no encerramento de sessão.
+- `GET/PUT/DELETE /v1/profile/developer` — Lê, salva (com scan Gitleaks) e remove o perfil pessoal cross-project do desenvolvedor autenticado (`developer_profiles` com RLS por `tenant_id` + `actor_id`).
 - `POST /v1/projects/:projectId/change/impact` — Análise de impacto técnico e de negócio; retorna relações confirmadas/hipóteses, impactos diretos/transitivos, blast radius cross-service autorizado, regras críticas afetadas e `riskLevel` calculado.
 - `POST /v1/projects/:projectId/change/propose` — Submissão de proposta sujeita a aprovação; `relatedIds` opcional associa alvos existentes por arestas `IMPACTS`, validadas por OPA/RLS, para recuperar evidências de impacto e cobertura QA na revisão
 - `POST /v1/projects/:projectId/runner/tasks` e `GET /v1/projects/:projectId/runner/tasks/:taskId` — Delegação e status de jobs no *Brain Runner*
@@ -219,4 +228,4 @@ No Hub, endpoints chamados por usuários exigem token **OIDC (Bearer JWT)**; no 
 
 1. **Leitura:** valida `tenantId`, `projectId` e `accessPolicyId` do ator antes da consulta.
 2. **Escrita (`remember`, `consolidate`, `create_handoff`, `change.propose`):** exige identidade autenticada e grava evento obrigatório em `audit_logs`.
-3. **Promoção de Conhecimento Oficial:** nenhuma ferramenta MCP altera diretamente o status de uma regra ou decisão para `approved`. A aprovação é uma ação humana autenticada feita no Command Center ou pela API; callback por canal valida HMAC, identidade mapeada e idempotência. O Approval Engine valida autorização, registra a decisão, permite ao autor reenviar uma revisão com versão nova após `request_changes` e bloqueia decisões repetidas na mesma versão. Se Git é a fonte autoritativa, aprovação no painel/canal não substitui o merge do PR. O catálogo MCP continua limitado às 13 tools canônicas.
+3. **Promoção de Conhecimento Oficial:** a tool `brain_change_decide` permite que um revisor humano autenticado e autorizado aprove, rejeite ou solicite alterações via MCP; a mesma operação pode ser feita pelo Command Center ou API. A tool aplica as mesmas validações de identidade, projeto, política, papel, versão e idempotência do Approval Engine, persiste a decisão e audita o ator. Agentes e runners não podem decidir propostas. Callback por canal valida HMAC, identidade mapeada e idempotência. O Approval Engine valida autorização, registra a decisão, permite ao autor reenviar uma revisão com versão nova após `request_changes` e bloqueia decisões repetidas na mesma versão. Se Git é a fonte autoritativa, aprovação no painel/canal não substitui o merge do PR. O catálogo MCP é documentado e extensível; atualmente contém **14 tools canônicas** (`protocols/mcp-tools/catalog.json`).

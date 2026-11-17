@@ -31,6 +31,7 @@
     "@noema/ingestion": "*",
     "@noema/knowledge": "*",
     "@noema/mcp-server": "*",
+    "@noema/memory": "*",
     "@noema/observability": "*",
     "@noema/retrieval": "*",
     "@noema/task-engine": "*",

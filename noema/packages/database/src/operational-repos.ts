@@ -11,6 +11,7 @@ import { withTenantRls, type NoemaDb } from "./client.js";
 import {
   crossServiceContracts,
   auditLogs,
+  developerProfiles,
   handoffs,
   integrationEvents,
   knowledgeRelations,
@@ -20,16 +21,23 @@ import {
   approvalReminderEvents,
   approvalRequests,
   contextSessionItems,
+  customAccessPolicies,
   knowledgeItems,
   notificationPreferences,
   notificationOutbox,
+  projectAccessMembers,
   testExecutionResults,
   syncChanges,
   syncProjectLocks,
   policyEpochStates,
   gitIngestionHeads,
   projectRepositoryHeads,
-  taskLeases
+  taskLeases,
+  temporaryAccessGrants,
+  departmentFinopsQuotas,
+  integrationFallbackOwners,
+  integrationReconnectHistory,
+  lgpdShreddedSubjects
 } from "./schema.js";
 
 export type MemoryLayer = "working" | "episodic" | "semantic" | "procedural" | "organizational";
@@ -150,6 +158,175 @@ async function recordContextEvidenceInTransaction(
 
 export class PgOperationalRepository {
   constructor(private readonly db: NoemaDb) {}
+
+  private assertAccessAdminScope(ctx: AuthContext, projectId: string): void {
+    if (!ctx.allowedProjects.includes(projectId) || !ctx.allowedPolicies.includes("internal-project")) {
+      throw new BrainError("BRAIN_ERR_POLICY_DENIED", "Access administration is outside the authorized project or policy scope.", 403);
+    }
+  }
+
+  async listAccessMembers(ctx: AuthContext, projectId: string) {
+    this.assertAccessAdminScope(ctx, projectId);
+    return withTenantRls(this.db, ctx, async (tx) => tx.select({
+      actorId: projectAccessMembers.actorId,
+      roles: projectAccessMembers.roles,
+      allowedPolicies: projectAccessMembers.allowedPolicies,
+      updatedAt: projectAccessMembers.updatedAt,
+      syncedWithKeycloak: projectAccessMembers.syncedWithKeycloak
+    }).from(projectAccessMembers).where(and(
+      eq(projectAccessMembers.tenantId, ctx.tenantId),
+      eq(projectAccessMembers.projectId, projectId),
+      eq(projectAccessMembers.accessPolicyId, "internal-project")
+    )).orderBy(asc(projectAccessMembers.actorId)));
+  }
+
+  async saveAccessMember(
+    ctx: AuthContext,
+    projectId: string,
+    input: { actorId: string; roles: string[]; allowedPolicies: string[]; syncedWithKeycloak: boolean }
+  ) {
+    this.assertAccessAdminScope(ctx, projectId);
+    return withTenantRls(this.db, ctx, async (tx) => {
+      const [row] = await tx.insert(projectAccessMembers).values({
+        tenantId: ctx.tenantId,
+        projectId,
+        accessPolicyId: "internal-project",
+        actorId: input.actorId,
+        roles: [...new Set(input.roles)],
+        allowedPolicies: [...new Set(input.allowedPolicies)],
+        syncedWithKeycloak: input.syncedWithKeycloak,
+        updatedAt: new Date()
+      }).onConflictDoUpdate({
+        target: [projectAccessMembers.tenantId, projectAccessMembers.projectId, projectAccessMembers.actorId],
+        set: {
+          roles: [...new Set(input.roles)],
+          allowedPolicies: [...new Set(input.allowedPolicies)],
+          syncedWithKeycloak: input.syncedWithKeycloak,
+          updatedAt: new Date()
+        }
+      }).returning({
+        actorId: projectAccessMembers.actorId,
+        roles: projectAccessMembers.roles,
+        allowedPolicies: projectAccessMembers.allowedPolicies,
+        updatedAt: projectAccessMembers.updatedAt,
+        syncedWithKeycloak: projectAccessMembers.syncedWithKeycloak
+      });
+      if (!row) throw new BrainError("BRAIN_ERR_STORAGE_UNAVAILABLE", "Member access record was not persisted.", 503);
+      return row;
+    });
+  }
+
+  async listTemporaryAccessGrants(ctx: AuthContext, projectId: string, at = new Date()) {
+    this.assertAccessAdminScope(ctx, projectId);
+    return withTenantRls(this.db, ctx, async (tx) => tx.select({
+      grantId: temporaryAccessGrants.grantId,
+      projectId: temporaryAccessGrants.projectId,
+      actorId: temporaryAccessGrants.actorId,
+      roles: temporaryAccessGrants.roles,
+      policyIds: temporaryAccessGrants.policyIds,
+      expiresAt: temporaryAccessGrants.expiresAt,
+      grantedBy: temporaryAccessGrants.grantedBy,
+      createdAt: temporaryAccessGrants.createdAt
+    }).from(temporaryAccessGrants).where(and(
+      eq(temporaryAccessGrants.tenantId, ctx.tenantId),
+      eq(temporaryAccessGrants.projectId, projectId),
+      eq(temporaryAccessGrants.accessPolicyId, "internal-project"),
+      gt(temporaryAccessGrants.expiresAt, at)
+    )).orderBy(asc(temporaryAccessGrants.createdAt)));
+  }
+
+  async createTemporaryAccessGrant(ctx: AuthContext, input: {
+    grantId: string; projectId: string; actorId: string; roles: string[]; policyIds: string[]; expiresAt: Date; grantedBy: string;
+  }) {
+    this.assertAccessAdminScope(ctx, input.projectId);
+    return withTenantRls(this.db, ctx, async (tx) => {
+      const [row] = await tx.insert(temporaryAccessGrants).values({
+        grantId: input.grantId,
+        tenantId: ctx.tenantId,
+        projectId: input.projectId,
+        accessPolicyId: "internal-project",
+        actorId: input.actorId,
+        roles: [...new Set(input.roles)],
+        policyIds: [...new Set(input.policyIds)],
+        expiresAt: input.expiresAt,
+        grantedBy: input.grantedBy
+      }).returning({
+        grantId: temporaryAccessGrants.grantId,
+        projectId: temporaryAccessGrants.projectId,
+        actorId: temporaryAccessGrants.actorId,
+        roles: temporaryAccessGrants.roles,
+        policyIds: temporaryAccessGrants.policyIds,
+        expiresAt: temporaryAccessGrants.expiresAt,
+        grantedBy: temporaryAccessGrants.grantedBy,
+        createdAt: temporaryAccessGrants.createdAt
+      });
+      if (!row) throw new BrainError("BRAIN_ERR_STORAGE_UNAVAILABLE", "Temporary access grant was not persisted.", 503);
+      return row;
+    });
+  }
+
+  async revokeTemporaryAccessGrant(ctx: AuthContext, projectId: string, grantId: string): Promise<boolean> {
+    this.assertAccessAdminScope(ctx, projectId);
+    return withTenantRls(this.db, ctx, async (tx) => {
+      const deleted = await tx.delete(temporaryAccessGrants).where(and(
+        eq(temporaryAccessGrants.tenantId, ctx.tenantId),
+        eq(temporaryAccessGrants.projectId, projectId),
+        eq(temporaryAccessGrants.grantId, grantId),
+        eq(temporaryAccessGrants.accessPolicyId, "internal-project")
+      )).returning({ grantId: temporaryAccessGrants.grantId });
+      return deleted.length > 0;
+    });
+  }
+
+  async listCustomAccessPolicies(ctx: AuthContext, projectId: string) {
+    this.assertAccessAdminScope(ctx, projectId);
+    return withTenantRls(this.db, ctx, async (tx) => tx.select({
+      policyId: customAccessPolicies.policyId,
+      label: customAccessPolicies.label,
+      description: customAccessPolicies.description,
+      allowedRoles: customAccessPolicies.allowedRoles,
+      updatedAt: customAccessPolicies.updatedAt
+    }).from(customAccessPolicies).where(and(
+      eq(customAccessPolicies.tenantId, ctx.tenantId),
+      eq(customAccessPolicies.projectId, projectId),
+      eq(customAccessPolicies.accessPolicyId, "internal-project")
+    )).orderBy(asc(customAccessPolicies.policyId)));
+  }
+
+  async upsertCustomAccessPolicy(ctx: AuthContext, projectId: string, input: {
+    policyId: string; label: string; description: string; allowedRoles: string[];
+  }) {
+    this.assertAccessAdminScope(ctx, projectId);
+    return withTenantRls(this.db, ctx, async (tx) => {
+      const [row] = await tx.insert(customAccessPolicies).values({
+        tenantId: ctx.tenantId,
+        projectId,
+        accessPolicyId: "internal-project",
+        policyId: input.policyId,
+        label: input.label,
+        description: input.description,
+        allowedRoles: [...new Set(input.allowedRoles)],
+        updatedAt: new Date()
+      }).onConflictDoUpdate({
+        target: [customAccessPolicies.tenantId, customAccessPolicies.projectId, customAccessPolicies.policyId],
+        set: {
+          accessPolicyId: "internal-project",
+          label: input.label,
+          description: input.description,
+          allowedRoles: [...new Set(input.allowedRoles)],
+          updatedAt: new Date()
+        }
+      }).returning({
+        policyId: customAccessPolicies.policyId,
+        label: customAccessPolicies.label,
+        description: customAccessPolicies.description,
+        allowedRoles: customAccessPolicies.allowedRoles,
+        updatedAt: customAccessPolicies.updatedAt
+      });
+      if (!row) throw new BrainError("BRAIN_ERR_STORAGE_UNAVAILABLE", "Custom access policy was not persisted.", 503);
+      return row;
+    });
+  }
 
   async recordContextDelivery(
     ctx: AuthContext,
@@ -1020,7 +1197,14 @@ export class PgOperationalRepository {
     });
   }
 
-  async upsertLease(ctx: AuthContext, projectId: string, taskId: string, branch: string, ttlMs = 30 * 60_000): Promise<void> {
+  async upsertLease(
+    ctx: AuthContext,
+    projectId: string,
+    taskId: string,
+    branch: string,
+    ttlMs = 30 * 60_000,
+    targetFiles: string[] = []
+  ): Promise<void> {
     const expiresAt = new Date(Date.now() + ttlMs);
     await withTenantRls(this.db, ctx, async (tx) => {
       await tx
@@ -1031,12 +1215,42 @@ export class PgOperationalRepository {
           taskId,
           actorId: ctx.actorId,
           branch,
+          targetFiles,
           expiresAt
         })
         .onConflictDoUpdate({
           target: [taskLeases.tenantId, taskLeases.projectId, taskLeases.taskId],
-          set: { actorId: ctx.actorId, branch, expiresAt }
+          set: { actorId: ctx.actorId, branch, targetFiles, expiresAt }
         });
+    });
+  }
+
+  async findOverlappingFileLeases(
+    ctx: AuthContext,
+    projectId: string,
+    excludeTaskId: string,
+    targetFiles: string[]
+  ): Promise<Array<{ taskId: string; actorId: string; branch: string; overlappingFiles: string[] }>> {
+    if (targetFiles.length === 0) return [];
+    const targetSet = new Set(targetFiles);
+    return withTenantRls(this.db, ctx, async (tx) => {
+      const rows = await tx
+        .select()
+        .from(taskLeases)
+        .where(and(
+          eq(taskLeases.tenantId, ctx.tenantId),
+          eq(taskLeases.projectId, projectId),
+          gt(taskLeases.expiresAt, new Date())
+        ));
+      return rows
+        .filter((row) => row.taskId !== excludeTaskId && row.actorId !== ctx.actorId)
+        .map((row) => ({
+          taskId: row.taskId,
+          actorId: row.actorId,
+          branch: row.branch,
+          overlappingFiles: (row.targetFiles ?? []).filter((f) => targetSet.has(f))
+        }))
+        .filter((entry) => entry.overlappingFiles.length > 0);
     });
   }
 
@@ -1274,23 +1488,93 @@ export class PgOperationalRepository {
   }
 
   /**
-   * Memory Decay (Itens 9 e 23): remove Working/Episodic expirados e decai arestas is_inferred > 60 dias.
+   * Memory Decay (Itens 9 e 23): compacta Episodic expirados para Semantic, opcionalmente arquiva no cold storage e decai arestas is_inferred > 60 dias.
    */
-  async runMemoryDecay(ctx: AuthContext): Promise<{ expiredMemoryRemoved: number; decayedRelationsRemoved: number }> {
+  async runMemoryDecay(
+    ctx: AuthContext,
+    options?: { coldArchive?: (entries: Array<{ id: string; projectId: string; actorId: string | null; layer: string; content: string; createdAt: Date }>) => Promise<void> }
+  ): Promise<{ expiredMemoryRemoved: number; compactedSemanticCreated: number; decayedRelationsRemoved: number; retainedByAccessCount: number }> {
     return withTenantRls(this.db, ctx, async (tx) => {
       const now = new Date();
+      const nowIso = now.toISOString();
       const sixtyDaysAgo = new Date(now.getTime() - 60 * 24 * 60 * 60_000);
 
-      const expired = await tx
-        .delete(memoryEntries)
+      // Compact expired episodic memories into semantic summaries before deletion
+      const expiredRows = await tx
+        .select()
+        .from(memoryEntries)
         .where(and(
           eq(memoryEntries.tenantId, ctx.tenantId),
           inArray(memoryEntries.projectId, ctx.allowedProjects),
           inArray(memoryEntries.accessPolicyId, ctx.allowedPolicies),
-          lt(memoryEntries.expiresAt, now)
-        ))
-        .returning({ id: memoryEntries.id });
+          sql`${memoryEntries.expiresAt} IS NOT NULL AND (${memoryEntries.expiresAt} + make_interval(days => LEAST(90, GREATEST(0, ${memoryEntries.hitCount}) * 7))) < ${nowIso}`
+        ));
 
+      let compactedSemanticCreated = 0;
+      const episodicByGroup = new Map<string, typeof expiredRows>();
+      for (const row of expiredRows) {
+        if (row.layer !== "episodic") continue;
+        const groupKey = `${row.projectId}\u0000${row.accessPolicyId}`;
+        const list = episodicByGroup.get(groupKey) ?? [];
+        list.push(row);
+        episodicByGroup.set(groupKey, list);
+      }
+      for (const [groupKey, rows] of episodicByGroup.entries()) {
+        const [projectId, accessPolicyId] = groupKey.split("\u0000");
+        const summary = `Resumo consolidado de ${rows.length} memórias episódicas: ${rows.map((r) => r.content).join(" | ").slice(0, 4000)}`;
+        await tx.insert(memoryEntries).values({
+          tenantId: ctx.tenantId,
+          projectId: projectId!,
+          actorId: ctx.actorId,
+          layer: "semantic",
+          sessionId: null,
+          content: summary,
+          accessPolicyId: accessPolicyId!,
+          expiresAt: null
+        });
+        compactedSemanticCreated += 1;
+      }
+
+      if (expiredRows.length > 0 && options?.coldArchive) {
+        await options.coldArchive(
+          expiredRows.map((r) => ({
+            id: r.id,
+            projectId: r.projectId,
+            actorId: r.actorId,
+            layer: r.layer,
+            content: r.content,
+            createdAt: r.createdAt
+          }))
+        );
+      }
+
+      // Access-weighted retention: memories with hit_count > 0 receive a grace extension
+      // of 7 days per hit (capped at 90 days) before expiration.
+      const expired = expiredRows.length === 0
+        ? []
+        : await tx
+            .delete(memoryEntries)
+            .where(and(
+              eq(memoryEntries.tenantId, ctx.tenantId),
+              inArray(memoryEntries.projectId, ctx.allowedProjects),
+              inArray(memoryEntries.accessPolicyId, ctx.allowedPolicies),
+              sql`${memoryEntries.expiresAt} IS NOT NULL AND (${memoryEntries.expiresAt} + make_interval(days => LEAST(90, GREATEST(0, ${memoryEntries.hitCount}) * 7))) < ${nowIso}`
+            ))
+            .returning({ id: memoryEntries.id });
+
+      const retainedRows = await tx
+        .select({ count: sql<number>`count(*)::int` })
+        .from(memoryEntries)
+        .where(and(
+          eq(memoryEntries.tenantId, ctx.tenantId),
+          inArray(memoryEntries.projectId, ctx.allowedProjects),
+          inArray(memoryEntries.accessPolicyId, ctx.allowedPolicies),
+          lt(memoryEntries.expiresAt, now),
+          gt(memoryEntries.hitCount, 0)
+        ));
+
+      // Inferred relations whose connected knowledge items have Context Hit Rate hits
+      // decay slower (up to +90 days grace) than zero-hit relations.
       const decayed = await tx
         .delete(knowledgeRelations)
         .where(
@@ -1301,12 +1585,111 @@ export class PgOperationalRepository {
             inArray(knowledgeRelations.fromPolicyId, ctx.allowedPolicies),
             inArray(knowledgeRelations.toPolicyId, ctx.allowedPolicies),
             eq(knowledgeRelations.isInferred, true),
-            lt(knowledgeRelations.createdAt, sixtyDaysAgo)
+            lt(knowledgeRelations.createdAt, sixtyDaysAgo),
+            sql`NOT EXISTS (
+              SELECT 1 FROM knowledge_items ki
+              WHERE ki.tenant_id = ${knowledgeRelations.tenantId}
+                AND ((ki.project_id = ${knowledgeRelations.fromProjectId} AND ki.id = ${knowledgeRelations.fromItemId})
+                  OR (ki.project_id = ${knowledgeRelations.toProjectId} AND ki.id = ${knowledgeRelations.toItemId}))
+                AND ki.context_hit_count > 0
+                AND (${knowledgeRelations.createdAt} + interval '60 days' + make_interval(days => LEAST(90, ki.context_hit_count * 7))) >= ${nowIso}
+            )`
           )
         )
         .returning({ id: knowledgeRelations.id });
 
-      return { expiredMemoryRemoved: expired.length, decayedRelationsRemoved: decayed.length };
+      return {
+        expiredMemoryRemoved: expired.length,
+        compactedSemanticCreated,
+        decayedRelationsRemoved: decayed.length,
+        retainedByAccessCount: Number(retainedRows[0]?.count ?? 0)
+      };
+    });
+  }
+
+  async getDeveloperProfile(ctx: AuthContext) {
+    return withTenantRls(this.db, ctx, async (tx) => {
+      const rows = await tx
+        .select()
+        .from(developerProfiles)
+        .where(and(eq(developerProfiles.tenantId, ctx.tenantId), eq(developerProfiles.actorId, ctx.actorId)))
+        .limit(1);
+      const row = rows[0];
+      if (!row) return undefined;
+      return {
+        tenantId: row.tenantId,
+        actorId: row.actorId,
+        preferredPackageManager: row.preferredPackageManager ?? undefined,
+        preferredTestLayout: row.preferredTestLayout ?? undefined,
+        preferredArchitectureStyle: row.preferredArchitectureStyle ?? undefined,
+        codingConventions: row.codingConventions ?? [],
+        preferredHarness: row.preferredHarness ?? undefined,
+        optInCrossProject: row.optInCrossProject,
+        updatedAt: row.updatedAt.toISOString()
+      };
+    });
+  }
+
+  async upsertDeveloperProfile(
+    ctx: AuthContext,
+    input: {
+      preferredPackageManager?: string;
+      preferredTestLayout?: string;
+      preferredArchitectureStyle?: string;
+      codingConventions?: string[];
+      preferredHarness?: string;
+      optInCrossProject?: boolean;
+    }
+  ) {
+    return withTenantRls(this.db, ctx, async (tx) => {
+      const now = new Date();
+      const [row] = await tx
+        .insert(developerProfiles)
+        .values({
+          tenantId: ctx.tenantId,
+          actorId: ctx.actorId,
+          preferredPackageManager: input.preferredPackageManager ?? null,
+          preferredTestLayout: input.preferredTestLayout ?? null,
+          preferredArchitectureStyle: input.preferredArchitectureStyle ?? null,
+          codingConventions: input.codingConventions ?? [],
+          preferredHarness: input.preferredHarness ?? null,
+          optInCrossProject: input.optInCrossProject ?? true,
+          updatedAt: now
+        })
+        .onConflictDoUpdate({
+          target: [developerProfiles.tenantId, developerProfiles.actorId],
+          set: {
+            preferredPackageManager: input.preferredPackageManager ?? null,
+            preferredTestLayout: input.preferredTestLayout ?? null,
+            preferredArchitectureStyle: input.preferredArchitectureStyle ?? null,
+            codingConventions: input.codingConventions ?? [],
+            preferredHarness: input.preferredHarness ?? null,
+            optInCrossProject: input.optInCrossProject ?? true,
+            updatedAt: now
+          }
+        })
+        .returning();
+      return {
+        tenantId: row!.tenantId,
+        actorId: row!.actorId,
+        preferredPackageManager: row!.preferredPackageManager ?? undefined,
+        preferredTestLayout: row!.preferredTestLayout ?? undefined,
+        preferredArchitectureStyle: row!.preferredArchitectureStyle ?? undefined,
+        codingConventions: row!.codingConventions ?? [],
+        preferredHarness: row!.preferredHarness ?? undefined,
+        optInCrossProject: row!.optInCrossProject,
+        updatedAt: row!.updatedAt.toISOString()
+      };
+    });
+  }
+
+  async deleteDeveloperProfile(ctx: AuthContext): Promise<boolean> {
+    return withTenantRls(this.db, ctx, async (tx) => {
+      const deleted = await tx
+        .delete(developerProfiles)
+        .where(and(eq(developerProfiles.tenantId, ctx.tenantId), eq(developerProfiles.actorId, ctx.actorId)))
+        .returning({ id: developerProfiles.id });
+      return deleted.length > 0;
     });
   }
 
@@ -1327,6 +1710,183 @@ export class PgOperationalRepository {
         tenantId: ctx.tenantId,
         ...edge
       });
+    });
+  }
+
+  async listDepartmentFinopsQuotas(ctx: AuthContext, projectId: string) {
+    return withTenantRls(this.db, ctx, async (tx) => {
+      const rows = await tx
+        .select()
+        .from(departmentFinopsQuotas)
+        .where(and(eq(departmentFinopsQuotas.tenantId, ctx.tenantId), eq(departmentFinopsQuotas.projectId, projectId)))
+        .orderBy(asc(departmentFinopsQuotas.department));
+      return rows.map((row) => ({
+        department: row.department,
+        monthlyTokenLimit: row.monthlyTokenLimit,
+        monthlyUsdLimit: Number(row.monthlyUsdLimit),
+        downgradeModel: row.downgradeModel ?? undefined,
+        updatedAt: row.updatedAt.toISOString()
+      }));
+    });
+  }
+
+  async upsertDepartmentFinopsQuota(
+    ctx: AuthContext,
+    projectId: string,
+    input: { department: string; monthlyTokenLimit: number; monthlyUsdLimit: number; downgradeModel?: string }
+  ) {
+    return withTenantRls(this.db, ctx, async (tx) => {
+      const now = new Date();
+      const [row] = await tx
+        .insert(departmentFinopsQuotas)
+        .values({
+          tenantId: ctx.tenantId,
+          projectId,
+          department: input.department,
+          monthlyTokenLimit: input.monthlyTokenLimit,
+          monthlyUsdLimit: String(input.monthlyUsdLimit),
+          downgradeModel: input.downgradeModel ?? null,
+          accessPolicyId: "internal-project",
+          updatedBy: ctx.actorId,
+          updatedAt: now
+        })
+        .onConflictDoUpdate({
+          target: [departmentFinopsQuotas.tenantId, departmentFinopsQuotas.projectId, departmentFinopsQuotas.department],
+          set: {
+            monthlyTokenLimit: input.monthlyTokenLimit,
+            monthlyUsdLimit: String(input.monthlyUsdLimit),
+            downgradeModel: input.downgradeModel ?? null,
+            updatedBy: ctx.actorId,
+            updatedAt: now
+          }
+        })
+        .returning();
+      return {
+        department: row!.department,
+        monthlyTokenLimit: row!.monthlyTokenLimit,
+        monthlyUsdLimit: Number(row!.monthlyUsdLimit),
+        downgradeModel: row!.downgradeModel ?? undefined,
+        updatedAt: row!.updatedAt.toISOString()
+      };
+    });
+  }
+
+  async upsertIntegrationFallbackOwner(ctx: AuthContext, projectId: string, provider: string, fallbackOwner: string) {
+    return withTenantRls(this.db, ctx, async (tx) => {
+      const now = new Date();
+      const [row] = await tx
+        .insert(integrationFallbackOwners)
+        .values({
+          tenantId: ctx.tenantId,
+          projectId,
+          provider,
+          fallbackOwner,
+          accessPolicyId: "internal-project",
+          updatedBy: ctx.actorId,
+          updatedAt: now
+        })
+        .onConflictDoUpdate({
+          target: [integrationFallbackOwners.tenantId, integrationFallbackOwners.projectId, integrationFallbackOwners.provider],
+          set: {
+            fallbackOwner,
+            updatedBy: ctx.actorId,
+            updatedAt: now
+          }
+        })
+        .returning();
+      return {
+        provider: row!.provider,
+        fallbackOwner: row!.fallbackOwner,
+        updatedBy: row!.updatedBy,
+        updatedAt: row!.updatedAt.toISOString()
+      };
+    });
+  }
+
+  async listIntegrationFallbackOwners(ctx: AuthContext, projectId: string) {
+    return withTenantRls(this.db, ctx, async (tx) => {
+      const rows = await tx
+        .select()
+        .from(integrationFallbackOwners)
+        .where(and(eq(integrationFallbackOwners.tenantId, ctx.tenantId), eq(integrationFallbackOwners.projectId, projectId)));
+      return rows.map((row) => ({
+        provider: row.provider,
+        fallbackOwner: row.fallbackOwner,
+        updatedBy: row.updatedBy,
+        updatedAt: row.updatedAt.toISOString()
+      }));
+    });
+  }
+
+  async recordIntegrationReconnect(ctx: AuthContext, projectId: string, provider: string, status: string) {
+    return withTenantRls(this.db, ctx, async (tx) => {
+      const [row] = await tx
+        .insert(integrationReconnectHistory)
+        .values({
+          tenantId: ctx.tenantId,
+          projectId,
+          provider,
+          status,
+          actorId: ctx.actorId,
+          accessPolicyId: "internal-project"
+        })
+        .returning();
+      return {
+        provider: row!.provider,
+        status: row!.status,
+        actorId: row!.actorId,
+        lastReconnectAt: row!.lastReconnectAt.toISOString()
+      };
+    });
+  }
+
+  async listIntegrationReconnectHistory(ctx: AuthContext, projectId: string) {
+    return withTenantRls(this.db, ctx, async (tx) => {
+      const rows = await tx
+        .select()
+        .from(integrationReconnectHistory)
+        .where(and(eq(integrationReconnectHistory.tenantId, ctx.tenantId), eq(integrationReconnectHistory.projectId, projectId)))
+        .orderBy(desc(integrationReconnectHistory.lastReconnectAt))
+        .limit(50);
+      return rows.map((row) => ({
+        provider: row.provider,
+        status: row.status,
+        actorId: row.actorId,
+        lastReconnectAt: row.lastReconnectAt.toISOString()
+      }));
+    });
+  }
+
+  async recordLgpdShreddedSubject(ctx: AuthContext, projectId: string, subjectId: string): Promise<void> {
+    await withTenantRls(this.db, ctx, async (tx) => {
+      await tx
+        .insert(lgpdShreddedSubjects)
+        .values({
+          tenantId: ctx.tenantId,
+          projectId,
+          subjectId,
+          accessPolicyId: "internal-project",
+          shreddedBy: ctx.actorId
+        })
+        .onConflictDoUpdate({
+          target: [lgpdShreddedSubjects.tenantId, lgpdShreddedSubjects.projectId, lgpdShreddedSubjects.subjectId],
+          set: { shreddedBy: ctx.actorId, shreddedAt: new Date() }
+        });
+    });
+  }
+
+  async isLgpdSubjectShredded(ctx: AuthContext, projectId: string, subjectId: string): Promise<boolean> {
+    return withTenantRls(this.db, ctx, async (tx) => {
+      const rows = await tx
+        .select({ subjectId: lgpdShreddedSubjects.subjectId })
+        .from(lgpdShreddedSubjects)
+        .where(and(
+          eq(lgpdShreddedSubjects.tenantId, ctx.tenantId),
+          eq(lgpdShreddedSubjects.projectId, projectId),
+          eq(lgpdShreddedSubjects.subjectId, subjectId)
+        ))
+        .limit(1);
+      return rows.length > 0;
     });
   }
 }

@@ -507,6 +507,12 @@ export default function CommandCenterPage() {
   // Access & Audit Logs
   const [auditLogs, setAuditLogs] = useState<AuditLogView[] | null>(null);
   const [accessProfile, setAccessProfile] = useState<AccessProfileView | null>(null);
+  const [devPkgManager, setDevPkgManager] = useState("npm");
+  const [devTestLayout, setDevTestLayout] = useState("co-located");
+  const [devArchStyle, setDevArchStyle] = useState("layered");
+  const [devHarness, setDevHarness] = useState("antigravity");
+  const [devConventions, setDevConventions] = useState("");
+  const [devOptInCrossProject, setDevOptInCrossProject] = useState(true);
 
   // Project blueprinting
   const [scaffoldName, setScaffoldName] = useState("new-service");
@@ -918,6 +924,24 @@ export default function CommandCenterPage() {
         try {
           const profile = await apiFetch(`/v1/projects/${encodeURIComponent(projectId)}/access/profile`) as AccessProfileView;
           setAccessProfile(profile);
+          const dev = await apiFetch("/v1/profile/developer") as {
+            profile?: {
+              preferredPackageManager?: string;
+              preferredTestLayout?: string;
+              preferredArchitectureStyle?: string;
+              preferredHarness?: string;
+              codingConventions?: string[];
+              optInCrossProject?: boolean;
+            };
+          };
+          if (dev.profile) {
+            if (dev.profile.preferredPackageManager) setDevPkgManager(dev.profile.preferredPackageManager);
+            if (dev.profile.preferredTestLayout) setDevTestLayout(dev.profile.preferredTestLayout);
+            if (dev.profile.preferredArchitectureStyle) setDevArchStyle(dev.profile.preferredArchitectureStyle);
+            if (dev.profile.preferredHarness) setDevHarness(dev.profile.preferredHarness);
+            setDevConventions((dev.profile.codingConventions ?? []).join(", "));
+            setDevOptInCrossProject(dev.profile.optInCrossProject ?? true);
+          }
         } catch {
           // handled on manual click
         }
@@ -2005,7 +2029,7 @@ export default function CommandCenterPage() {
               </section>
             </>}
             <section style={{ ...cardStyle, display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
-              <span style={{ fontSize: 13 }}>Gateway MCP · 13 ferramentas · REST / MCP streamable / stdio</span>
+              <span style={{ fontSize: 13 }}>Gateway MCP · {gatewayInfo?.tools?.length ?? 14} ferramentas no catálogo · REST / MCP streamable / stdio</span>
               <button style={{ ...btnStyle, background: "#334155" }} onClick={async () => {
                 try {
                   const info = await apiFetch("/gateway") as GatewayInfoView;
@@ -2233,6 +2257,7 @@ export default function CommandCenterPage() {
         )}
 
         {workspace === "access" && (
+          <>
           <section style={cardStyle}>
             <div style={{ display: "flex", gap: 8, marginBottom: 12, alignItems: "center", flexWrap: "wrap" }}>
               <div style={{ flex: 1, minWidth: 240 }}>
@@ -2303,6 +2328,52 @@ export default function CommandCenterPage() {
               </table>
             </div>}
           </section>
+
+          <section style={cardStyle}>
+            <h2 style={{ margin: "0 0 6px", fontSize: 16 }}>Perfil Pessoal Cross-Project do Desenvolvedor</h2>
+            <p style={{ margin: "0 0 12px", color: "#9ca3af", fontSize: 12 }}>
+              Preferências pessoais que acompanham o ator autenticado entre repositórios (aplicadas abaixo das regras oficiais do projeto).
+            </p>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: 10, marginBottom: 12 }}>
+              <label style={{ display: "grid", gap: 4, fontSize: 12 }}>Gerenciador de pacotes<input style={inputStyle} value={devPkgManager} onChange={(e) => setDevPkgManager(e.target.value)} placeholder="npm, pnpm, uv, cargo" /></label>
+              <label style={{ display: "grid", gap: 4, fontSize: 12 }}>Layout de testes<input style={inputStyle} value={devTestLayout} onChange={(e) => setDevTestLayout(e.target.value)} placeholder="co-located, tests-dir" /></label>
+              <label style={{ display: "grid", gap: 4, fontSize: 12 }}>Estilo de arquitetura<input style={inputStyle} value={devArchStyle} onChange={(e) => setDevArchStyle(e.target.value)} placeholder="layered, hexagonal" /></label>
+              <label style={{ display: "grid", gap: 4, fontSize: 12 }}>IDE / Harness preferido<input style={inputStyle} value={devHarness} onChange={(e) => setDevHarness(e.target.value)} placeholder="antigravity, codex, cursor" /></label>
+            </div>
+            <label style={{ display: "grid", gap: 4, fontSize: 12, marginBottom: 10 }}>
+              Convenções pessoais (separadas por vírgula)
+              <input style={inputStyle} value={devConventions} onChange={(e) => setDevConventions(e.target.value)} placeholder="ex.: early-return, strict-typescript, no-default-export" />
+            </label>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+              <label style={{ fontSize: 12 }}>
+                <input type="checkbox" checked={devOptInCrossProject} onChange={(e) => setDevOptInCrossProject(e.target.checked)} /> Incluir automaticamente no Context Pack entre projetos
+              </label>
+              <button
+                style={btnStyle}
+                onClick={async () => {
+                  try {
+                    await apiFetch("/v1/profile/developer", {
+                      method: "PUT",
+                      body: JSON.stringify({
+                        preferredPackageManager: devPkgManager,
+                        preferredTestLayout: devTestLayout,
+                        preferredArchitectureStyle: devArchStyle,
+                        preferredHarness: devHarness,
+                        codingConventions: devConventions.split(",").map((s) => s.trim()).filter(Boolean),
+                        optInCrossProject: devOptInCrossProject
+                      })
+                    });
+                    setStatusMsg("Perfil pessoal cross-project salvo com sucesso.");
+                  } catch (err) {
+                    setStatusMsg(`Erro ao salvar perfil: ${err instanceof Error ? err.message : String(err)}`);
+                  }
+                }}
+              >
+                Salvar Perfil Pessoal
+              </button>
+            </div>
+          </section>
+          </>
         )}
 
         {workspace === "templates" && (

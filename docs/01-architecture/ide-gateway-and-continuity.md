@@ -89,10 +89,22 @@ Para que a continuidade funcione sem erros:
 
 ## 5. Compatibilidade Real entre Clientes MCP & Adoção Gradual no CI
 
-- **Tudo via 13 Tools Canônicas:** Como alguns clientes MCP ignoram `Resources` ou `Prompts` e enxergam apenas `Tools`, toda funcionalidade essencial do **Project Brain OS 2.0** é exposta pelas 13 `Tools` em `snake_case`.
+- **Tudo via Tools MCP Documentadas:** Como alguns clientes MCP ignoram `Resources` ou `Prompts` e enxergam apenas `Tools`, toda funcionalidade essencial do **Project Brain OS 2.0** deve ser exposta por tools documentadas em `snake_case`. O catálogo atual tem 14 tools e é extensível; qualquer ação manual ainda ausente é uma lacuna de paridade a implementar.
 - **Bridge `stdio` Universal (`brain mcp connect <url>`):** Para IDEs ou harnesses que só aceitam transporte `stdio` local e ainda não suportam `Streamable HTTP` remoto, a CLI atua como ponte local autenticada para o Hub remoto.
 - **Adoção Gradual no CI/CD Existente:** Os *Architecture* e *Business Rule Guardians* operam em 3 níveis progressivos configuráveis no `.project-brain.json` para não quebrar pipelines legados no dia 1:
   1. `audit` (apenas registra alertas no Command Center)
   2. `advisory` (comenta no PR sem bloquear merge)
   3. `enforced` (bloqueia apenas arquivos novos ou rotas críticas marcadas com `@brain-rule`)
+
+---
+
+## 6. Lifecycle Hooks Automáticos nas IDEs e CLIs (`noema hook`)
+
+Para evitar que a continuidade entre sessões dependa exclusivamente de o agente lembrar de chamar `brain_record_learning` ou `brain_create_handoff`:
+1. **`noema hook install`:** Gera `.noema/hooks.json` e o script `.noema/hooks/noema-lifecycle.sh` para acionar os eventos `session_start`, `tool_use`, `pre_compact` e `session_end` em IDEs e CLIs compatíveis.
+2. **`noema hook emit` → `POST /v1/projects/:projectId/hooks/lifecycle`:**
+   - Todo payload textual passa obrigatoriamente pelo scan de segredos (**Gitleaks**, falha fechada) antes de persistir qualquer dado.
+   - Em `session_start`: registra memória de trabalho, retorna o último handoff disponível e injeta o **Perfil Pessoal Cross-Project** do desenvolvedor autenticado (`developer_profiles`).
+   - Em `tool_use` / `pre_compact`: grava memória e, quando `usedItemIds` e `sessionId` são informados, registra automaticamente citações no ledger de *Context Hit Rate*.
+   - Em `session_end`: grava memória episódica e cria automaticamente um checkpoint em `handoffs` (e lease da tarefa) quando houver resumo ou `modifiedFiles`, permitindo retomada imediata em outra IDE.
 

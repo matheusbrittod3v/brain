@@ -190,6 +190,41 @@
       "when": 1794960065000,
       "tag": "0026_git_ingestion_heads",
       "breakpoints": true
+    },
+    {
+      "idx": 27,
+      "version": "7",
+      "when": 1794960066000,
+      "tag": "0027_developer_profiles",
+      "breakpoints": true
+    },
+    {
+      "idx": 28,
+      "version": "7",
+      "when": 1794960067000,
+      "tag": "0028_memory_entries_hit_count",
+      "breakpoints": true
+    },
+    {
+      "idx": 29,
+      "version": "7",
+      "when": 1794931549831,
+      "tag": "0029_access_control_persistence",
+      "breakpoints": true
+    },
+    {
+      "idx": 30,
+      "version": "7",
+      "when": 1794960068000,
+      "tag": "0030_operational_persistence_and_leases",
+      "breakpoints": true
+    },
+    {
+      "idx": 31,
+      "version": "7",
+      "when": 1794960068001,
+      "tag": "0031_access_control_persistence",
+      "breakpoints": true
     }
   ]
 }

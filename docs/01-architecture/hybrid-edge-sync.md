@@ -18,7 +18,7 @@ flowchart LR
 
     subgraph Gate["Portão de Sincronização (Sync & Security Gate)"]
         PULL["brain sync pull\nDelta + Filtro OPA"]
-        PUSH["brain sync push\nGitleaks + Presidio + Diff/PR"]
+        PUSH["brain sync push\nGitleaks + AI Worker PII (config) + Diff/PR"]
     end
 
     subgraph Hub["Nível 2: Enterprise Online Brain (Hub Central da Empresa)"]
@@ -38,7 +38,7 @@ flowchart LR
 ## 1. Os Dois Níveis da Arquitetura
 
 ### Nível 1 — Local Edge Brain (Offline na máquina do funcionário)
-Um cliente leve **Node.js/TypeScript (sem dependência de Python na máquina do usuário)** rodando via **CLI (`brain`), `brain ui`, MCP `stdio` e SQLite (`FTS5`)**. `sqlite-vec` e Ollama são opcionais; sem provedor de embeddings, a busca local usa FTS5. O `apps/ai-worker` Python roda no Hub apenas quando PDF/Office ou PII de SaaS exigirem essas ferramentas.
+Um cliente leve **Node.js/TypeScript (sem dependência de Python na máquina do usuário)** rodando via **CLI (`brain`), `brain ui`, MCP `stdio` e SQLite (`FTS5`)**. `sqlite-vec` e Ollama são opcionais; sem provedor de embeddings, a busca local usa FTS5. O `apps/ai-worker` Python roda no Hub quando `AI_WORKER_URL` ativa redaction PII em REST/Edge/Git/SaaS ou quando PDF/Office exigirem Docling.
 
 Ele mantém duas áreas estritamente separadas:
 1. **Snapshot Autorizado (Somente Leitura):** Cópia offline sincronizada contendo *apenas* os projetos, regras e documentos que o **cargo e o setor** daquele funcionário têm permissão para acessar.
@@ -62,7 +62,7 @@ O servidor principal usa **PostgreSQL 16 + `pgvector` + `pg-boss`**, com API e w
    - Nada sai da máquina nem polui o índice ou modelo central da empresa enquanto ainda for rascunho ou experimento.
 3. **Push Controlado para o Sistema Principal (`brain sync push`):**
    - Quando o funcionário volta online e decide compartilhar/publicar o que produziu, os itens passam por um **Portão de Entrada (Ingestion Gate)**:
-     - **Segurança Local & Remota:** `Gitleaks` + `Presidio` barram senhas, chaves e PII indevida antes mesmo do upload.
+     - **Segurança Local & Remota:** Gitleaks bloqueia segredos antes do upload. No Hub, quando `AI_WORKER_URL` está configurado, `/redact-pii` sanitiza título e conteúdo do `push`; sem essa configuração, PII não é sanitizada automaticamente.
      - **Governança por Cargo:** O que o funcionário criou offline **nunca** sobrescreve regras oficiais automaticamente — sobe como `draft` / proposta (`brain_change_propose`) para aprovação do responsável daquele setor, ou como memória episódica vinculada à tarefa.
      - **Detecção de Conflitos:** Se outro colega alterou a mesma regra online enquanto o usuário estava offline, o `brain sync push` não sobrescreve nem trava no terminal: envia o rascunho como uma **proposta de conflito (`status: draft`, `conflictWithVersion`)** e abre um diff/PR visual no **Project Command Center / GitHub** para resolução humana.
 

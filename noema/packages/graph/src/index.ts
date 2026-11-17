@@ -65,6 +65,8 @@ export interface GraphEdge {
   relationType: RelationType;
   isInferred: boolean;
   confidence: number;
+  evidenceUri?: string;
+  metadata?: Record<string, unknown>;
 }
 
 export interface TraversalHit {
@@ -90,7 +92,7 @@ export interface GraphTraversalRow {
 }
 
 export type GraphSqlTransactionRunner = {
-  (template: TemplateStringsArray, ...parameters: readonly string[]): PromiseLike<unknown>;
+  (template: TemplateStringsArray, ...parameters: readonly unknown[]): PromiseLike<unknown>;
 };
 
 export type GraphSqlClient<TTx extends GraphSqlTransactionRunner = GraphSqlTransactionRunner> =
@@ -222,6 +224,13 @@ export function validateGraphEdgeInput(edge: GraphEdge): GraphEdge {
   if (typeof edge.confidence !== "number" || !Number.isFinite(edge.confidence) || edge.confidence < 0 || edge.confidence > 1) {
     throw new Error("GraphEdge.confidence must be a finite number between 0 and 1.");
   }
+  if (edge.evidenceUri !== undefined && (typeof edge.evidenceUri !== "string" || edge.evidenceUri.length > 2048 || /[\0\r\n]/.test(edge.evidenceUri))) {
+    throw new Error("GraphEdge.evidenceUri must be a visible string up to 2048 characters.");
+  }
+  if (edge.metadata !== undefined && (!edge.metadata || typeof edge.metadata !== "object" || Array.isArray(edge.metadata))) {
+    throw new Error("GraphEdge.metadata must be an object.");
+  }
+  if (edge.metadata !== undefined) JSON.stringify(edge.metadata);
 
   return {
     tenantId,
@@ -233,7 +242,9 @@ export function validateGraphEdgeInput(edge: GraphEdge): GraphEdge {
     toPolicyId,
     relationType: edge.relationType,
     isInferred: edge.isInferred,
-    confidence: edge.confidence
+    confidence: edge.confidence,
+    ...(edge.evidenceUri !== undefined ? { evidenceUri: edge.evidenceUri } : {}),
+    ...(edge.metadata !== undefined ? { metadata: edge.metadata } : {})
   };
 }
 
@@ -556,7 +567,9 @@ export class PostgresGraphStore<
         to_policy_id,
         relation_type,
         is_inferred,
-        confidence
+        confidence,
+        evidence_uri,
+        metadata
       ) VALUES (
         ${validated.tenantId},
         ${validated.fromProjectId},
@@ -567,9 +580,50 @@ export class PostgresGraphStore<
         ${validated.toPolicyId},
         ${validated.relationType},
         ${isInferredParam}::boolean,
-        ${confidenceParam}::real
+        ${confidenceParam}::real,
+        NULLIF(${validated.evidenceUri ?? ""}, ''),
+        ${validated.metadata ?? {}}::jsonb
       )
       ON CONFLICT ON CONSTRAINT knowledge_relations_identity_uq DO NOTHING`;
+    });
+  }
+
+  async deleteScipEdges(input: { tenantId: string; projectId: string; evidenceUri: string; repository?: string }, ctx?: AuthContext | RlsSessionContext): Promise<void> {
+    const { context } = this.resolveEffectiveRlsContext(ctx);
+    if (input.tenantId !== context.tenantId || !context.allowedProjects.includes(input.projectId)) {
+      throw new Error("SCIP edge project is not authorized.");
+    }
+    await this.runInRlsTransaction(context, async (tx) => {
+      if (input.repository) {
+        await tx`DELETE FROM knowledge_relations WHERE tenant_id = ${input.tenantId} AND from_project_id = ${input.projectId} AND to_project_id = ${input.projectId} AND evidence_uri = ${input.evidenceUri} AND metadata->>'source' = 'scip' AND metadata->>'sourceRepository' = ${input.repository.toLowerCase()}`;
+      } else {
+        await tx`DELETE FROM knowledge_relations WHERE tenant_id = ${input.tenantId} AND from_project_id = ${input.projectId} AND to_project_id = ${input.projectId} AND evidence_uri = ${input.evidenceUri} AND metadata->>'source' = 'scip' AND metadata->>'sourceRepository' IS NULL`;
+      }
+    });
+  }
+
+  async replaceScipEdges(input: { tenantId: string; projectId: string; evidenceUri: string; repository?: string; edges: GraphEdge[] }, ctx?: AuthContext | RlsSessionContext): Promise<void> {
+    const { context } = this.resolveEffectiveRlsContext(ctx);
+    if (input.tenantId !== context.tenantId || !context.allowedProjects.includes(input.projectId)) {
+      throw new Error("SCIP edge project is not authorized.");
+    }
+    const validatedEdges = input.edges.map((edge) => validateGraphEdgeForRlsContext(edge, context));
+    for (const edge of validatedEdges) {
+      if (edge.tenantId !== input.tenantId || edge.fromProjectId !== input.projectId || edge.toProjectId !== input.projectId || edge.evidenceUri !== input.evidenceUri || edge.metadata?.source !== "scip") {
+        throw new Error("SCIP replacement edge does not match the requested scope.");
+      }
+    }
+    await this.runInRlsTransaction(context, async (tx) => {
+      if (input.repository) {
+        await tx`DELETE FROM knowledge_relations WHERE tenant_id = ${input.tenantId} AND from_project_id = ${input.projectId} AND to_project_id = ${input.projectId} AND evidence_uri = ${input.evidenceUri} AND metadata->>'source' = 'scip' AND metadata->>'sourceRepository' = ${input.repository.toLowerCase()}`;
+      } else {
+        await tx`DELETE FROM knowledge_relations WHERE tenant_id = ${input.tenantId} AND from_project_id = ${input.projectId} AND to_project_id = ${input.projectId} AND evidence_uri = ${input.evidenceUri} AND metadata->>'source' = 'scip' AND metadata->>'sourceRepository' IS NULL`;
+      }
+      for (const edge of validatedEdges) {
+        await tx`INSERT INTO knowledge_relations (tenant_id, from_project_id, to_project_id, from_item_id, to_item_id, from_policy_id, to_policy_id, relation_type, is_inferred, confidence, evidence_uri, metadata)
+          VALUES (${edge.tenantId}, ${edge.fromProjectId}, ${edge.toProjectId}, ${edge.fromItemId}, ${edge.toItemId}, ${edge.fromPolicyId}, ${edge.toPolicyId}, ${edge.relationType}, ${edge.isInferred ? "true" : "false"}::boolean, ${String(edge.confidence)}::real, NULLIF(${edge.evidenceUri ?? ""}, ''), ${edge.metadata ?? {}}::jsonb)
+          ON CONFLICT ON CONSTRAINT knowledge_relations_identity_uq DO NOTHING`;
+      }
     });
   }
 

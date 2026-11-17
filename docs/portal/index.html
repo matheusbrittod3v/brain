@@ -25,7 +25,7 @@
         <a href="#grafo" class="nav-link">Knowledge Graph</a>
         <a href="#continuidade" class="nav-link">Fluxo Multi-IDE</a>
         <a href="#dominios" class="nav-link">12 Domínios</a>
-        <a href="#mcp-runner" class="nav-link">13 Tools MCP & Runner</a>
+        <a href="#mcp-runner" class="nav-link">Catálogo MCP & Runner</a>
         <a href="#hibrido" class="nav-link">Edge Offline ↔ Hub</a>
         <a href="#estrutura" class="nav-link">Estrutura de Pastas</a>
         <a href="#perfis" class="nav-link">Perfis & Microsserviços</a>
@@ -64,7 +64,7 @@
             <div class="stats-grid">
               <div class="stat-card"><strong>6</strong><span>Pilares</span></div>
               <div class="stat-card"><strong>12</strong><span>Domínios</span></div>
-              <div class="stat-card"><strong>13</strong><span>Tools MCP</span></div>
+              <div class="stat-card"><strong>14</strong><span>Tools MCP atuais</span></div>
               <div class="stat-card"><strong>6</strong><span>Estágios</span></div>
             </div>
           </div>
@@ -172,7 +172,7 @@
           <div class="arch-layer" data-layer="gateway">
             <div class="layer-title">2. Universal Agent Gateway & Motores</div>
             <div class="chips">
-              <span>13 Tools MCP (brain_*)</span><span>Context Router</span><span>Hybrid Retrieval</span>
+              <span>14 Tools MCP atuais (catálogo extensível)</span><span>Context Router</span><span>Hybrid Retrieval</span>
               <span>Agent Handoff</span><span>Architecture & Rule Guardians</span><span>Brain Runner</span>
             </div>
           </div>
@@ -291,7 +291,7 @@ brain runner up --hybrid    # Usa provedores habilitados conforme a política</c
             <rect x="395" y="42" width="160" height="44" class="svg-box"/><text x="475" y="61" text-anchor="middle" font-size="11" font-weight="700" class="svg-text">brain sync pull</text><text x="475" y="77" text-anchor="middle" font-size="10" class="svg-muted">Delta + Filtro OPA</text>
 
             <line x1="345" y1="145" x2="600" y2="145" class="svg-line-amber" marker-end="url(#arrow)"/>
-            <rect x="380" y="122" width="190" height="46" class="svg-box-rose"/><text x="475" y="141" text-anchor="middle" font-size="11" font-weight="700" class="svg-text">brain sync push (Gate)</text><text x="475" y="157" text-anchor="middle" font-size="10" class="svg-muted">Gitleaks + Presidio + Diff/PR</text>
+            <rect x="380" y="122" width="190" height="46" class="svg-box-rose"/><text x="475" y="141" text-anchor="middle" font-size="11" font-weight="700" class="svg-text">brain sync push (Gate)</text><text x="475" y="157" text-anchor="middle" font-size="10" class="svg-muted">Gitleaks + AI Worker PII opcional + Diff/PR</text>
 
             <rect x="605" y="20" width="335" height="170" class="svg-box-accent"/>
             <text x="772" y="46" text-anchor="middle" font-size="13" font-weight="700" class="svg-text">Enterprise Online Brain (Hub)</text>
@@ -314,7 +314,7 @@ brain runner up --hybrid    # Usa provedores habilitados conforme a política</c
             <ul>
               <li>Cada funcionário só baixa no snapshot offline o que seu cargo/setor pode ver.</li>
               <li><strong>Policy Revocation:</strong> se perder permissão no Keycloak/OPA, o próximo sync apaga do disco local.</li>
-              <li><strong>Ingestion Gate:</strong> Gitleaks + Presidio barram segredos e PII antes de subir no <code>push</code>.</li>
+              <li><strong>Ingestion Gate:</strong> Gitleaks bloqueia segredos; PII passa pelo AI Worker quando <code>AI_WORKER_URL</code> está configurado.</li>
             </ul>
           </div>
         </div>
@@ -347,7 +347,7 @@ brain runner up --hybrid    # Usa provedores habilitados conforme a política</c
             <rect x="40" y="10" width="880" height="28" class="svg-box-accent"/><text x="480" y="29" text-anchor="middle" font-size="11.5" font-weight="600" class="svg-text">Camada 5 · Interfaces: apps/api · apps/mcp-server · apps/cli · apps/web · apps/agent-runner · IDE Extensions</text>
             <rect x="75" y="45" width="810" height="28" class="svg-box"/><text x="480" y="64" text-anchor="middle" font-size="11.5" font-weight="600" class="svg-text">Camada 4 · Aplicação: context-engine · context-optimizer · agent-handoff · Guardians · knowledge-health</text>
             <rect x="110" y="80" width="740" height="28" class="svg-box"/><text x="480" y="99" text-anchor="middle" font-size="11.5" font-weight="600" class="svg-text">Camada 3 · Inteligência: retrieval · graph · memory · temporal-knowledge · impact-analysis · approval-engine</text>
-            <rect x="145" y="115" width="670" height="28" class="svg-box"/><text x="480" y="134" text-anchor="middle" font-size="11.5" font-weight="600" class="svg-text">Camada 2 · Ingestão: ingestion (Gitleaks/Presidio/Docling) · code-intelligence (SCIP/AST) · autodiscovery · connectors</text>
+            <rect x="145" y="115" width="670" height="28" class="svg-box"/><text x="480" y="134" text-anchor="middle" font-size="11.5" font-weight="600" class="svg-text">Camada 2 · Ingestão: Gitleaks · AI Worker PII opcional · Docling · code-intelligence (SCIP/AST) · autodiscovery · connectors</text>
             <rect x="180" y="150" width="600" height="28" class="svg-box-green"/><text x="480" y="169" text-anchor="middle" font-size="11.5" font-weight="600" class="svg-text">Camada 1 · Fundação & Segurança: auth (Keycloak/OPA) · audit-engine · observability · rules-engine · knowledge</text>
             <rect x="215" y="185" width="530" height="28" class="svg-box-amber"/><text x="480" y="204" text-anchor="middle" font-size="11.5" font-weight="700" class="svg-text">Camada 0 · Contratos Puros (Zero Deps Internas): protocols/ · packages/core</text>
           </svg>

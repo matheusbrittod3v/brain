@@ -42,6 +42,26 @@ describe("impact-analysis", () => {
     assert.equal(report.riskLevel, "medium");
   });
 
+  it("does not treat inferred graph relations as confirmed impacts or critical rule coverage", async () => {
+    const graph = makeGraph({
+      "svc-a": [
+        { itemId: "rule-pci", projectId: "checkout", hops: 1, via: "CO_ACCESSED_WITH", isInferred: true },
+        { itemId: "svc-b", projectId: "checkout", hops: 2, via: "CO_ACCESSED_WITH", isInferred: true }
+      ]
+    });
+
+    const report = await analyzeDistributedImpact(ctx, graph, "checkout", ["svc-a"], {
+      rules: [{ id: "rule-pci", title: "PCI Audit", priority: "critical", status: "approved" }]
+    });
+
+    assert.equal(report.hypotheses.length, 2);
+    assert.equal(report.confirmedImpacts.length, 0);
+    assert.equal(report.directImpacts.length, 1);
+    assert.equal(report.transitiveImpacts.length, 1);
+    assert.equal(report.criticalRulesImpacted.length, 0);
+    assert.equal(report.riskLevel, "low");
+  });
+
   it("combines cross-service blast radius and critical business rules into riskLevel", async () => {
     const graph = makeGraph({
       "POST /v1/invoices": [

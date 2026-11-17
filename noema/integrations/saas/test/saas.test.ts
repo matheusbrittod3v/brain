@@ -4,6 +4,7 @@ import { createHmac } from "node:crypto";
 import {
   dispatchChannelNotification,
   mapSaasRecordToKnowledgeItem,
+  parseChannelActionPayload,
   verifySlackRequestSignature,
   verifyChannelWebhookSignature
 } from "../src/index.js";
@@ -154,3 +155,91 @@ test("verifies Slack signed requests with a short replay window", () => {
   assert.equal(verifySlackRequestSignature(rawBody, timestamp, "v0=bad", secret, 1_700_000_010), false);
 });
 
+
+test("dispatches native Adaptive Cards (Teams), ADF (Jira), ClickUp, and Email payloads and parses callbacks", async () => {
+  const sent: Record<string, Record<string, unknown>> = {};
+  for (const channel of ["teams", "jira", "clickup", "email"] as const) {
+    await dispatchChannelNotification(
+      {
+        channel,
+        webhookUrl: `https://hooks.example/${channel}`,
+        projectId: "noema",
+        proposalId: "PROP-9",
+        proposalVersion: 2,
+        title: "Aprovar ADR-010",
+        reviewUrl: "http://localhost:3000/proposals/PROP-9"
+      },
+      async (_url, init) => {
+        sent[channel] = JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>;
+        return new Response("ok", { status: 200 });
+      }
+    );
+  }
+
+  // Teams Adaptive Card
+  const teamsCard = sent.teams as { attachments?: Array<{ contentType?: string; content?: { type?: string; actions?: Array<{ type?: string }> } }> };
+  assert.equal(teamsCard.attachments?.[0]?.contentType, "application/vnd.microsoft.card.adaptive");
+  assert.equal(teamsCard.attachments?.[0]?.content?.type, "AdaptiveCard");
+  assert.equal(teamsCard.attachments?.[0]?.content?.actions?.some((a) => a.type === "Action.Execute"), true);
+
+  // Jira ADF
+  const jiraPayload = sent.jira as { body?: { type?: string; version?: number }; properties?: Array<{ key?: string }> };
+  assert.equal(jiraPayload.body?.type, "doc");
+  assert.equal(jiraPayload.body?.version, 1);
+  assert.equal(jiraPayload.properties?.[0]?.key, "noema.humanops");
+
+  // ClickUp
+  assert.equal(typeof (sent.clickup as { comment_text?: string }).comment_text, "string");
+  assert.equal((sent.clickup as { notify_all?: boolean }).notify_all, true);
+
+  // Email
+  assert.match(String((sent.email as { subject?: string }).subject), /Aprovar ADR-010/);
+  assert.equal(Array.isArray((sent.email as { actionLinks?: unknown[] }).actionLinks), true);
+
+  // Native callback parsing
+  const parsedTeams = parseChannelActionPayload("teams", {
+    id: "evt-teams-1",
+    from: { id: "aad-user-1" },
+    action: {
+      verb: "noema_approve",
+      data: { projectId: "noema", proposalId: "PROP-9", proposalVersion: 2 }
+    }
+  });
+  assert.deepEqual(parsedTeams, {
+    decision: "approve",
+    projectId: "noema",
+    proposalId: "PROP-9",
+    proposalVersion: 2,
+    externalUserId: "aad-user-1",
+    externalEventId: "evt-teams-1"
+  });
+
+  const parsedJira = parseChannelActionPayload("jira", {
+    webhookEvent: "comment_created",
+    timestamp: 1700000100,
+    action: "noema_reject",
+    user: { accountId: "jira-acc-7" },
+    issue: { properties: { "noema.humanops": { projectId: "noema", proposalId: "PROP-9", proposalVersion: 2 } } },
+    comment: { body: "Falta cobertura de testes" }
+  });
+  assert.equal(parsedJira?.decision, "reject");
+  assert.equal(parsedJira?.externalUserId, "jira-acc-7");
+  assert.equal(parsedJira?.comment, "Falta cobertura de testes");
+});
+
+test("maps clickup, github-projects, database schemas, and cloud infra providers with fail-closed ACL", () => {
+  for (const provider of ["clickup", "github-projects", "postgresql", "supabase", "mysql", "aws", "gcp", "azure"] as const) {
+    const item = mapSaasRecordToKnowledgeItem({
+      provider,
+      externalId: `${provider}-1`,
+      tenantId: "acme",
+      projectId: "core",
+      title: `Item from ${provider}`,
+      body: "Resource metadata",
+      url: `https://example.com/${provider}/1`,
+      isPrivateChannelOrSpace: true
+    });
+    assert.equal(item.accessPolicyId, "restricted-security");
+    assert.equal(item.trustLevel, "untrusted");
+  }
+});

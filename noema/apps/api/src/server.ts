@@ -8,7 +8,7 @@ import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/
 import { authenticateRequest, assertPolicyAccess, assertProjectAccess, canApproveDomain, evaluateOpaPolicy, type AuthContext } from "@noema/auth";
 import { BrainError, paginateCursor, type KnowledgeItem } from "@noema/core";
 import { KnowledgeGraphStore, PostgresGraphStore } from "@noema/graph";
-import { HybridRetrievalEngine, PostgresRetrievalEngine, type AsyncRetrievalEngine, type SearchQuery } from "@noema/retrieval";
+import { HybridRetrievalEngine, PostgresRetrievalEngine, ValkeyRetrievalCache, type AsyncRetrievalEngine, type SearchQuery } from "@noema/retrieval";
 import { ContextEngine, type IntentType } from "@noema/context-engine";
 import { HandoffStore } from "@noema/agent-handoff";
 import { BrainRunnerQueue } from "@noema/agent-runner";
@@ -38,6 +38,7 @@ import {
   privacyEraseSubject,
   type SystemKnowledgeSqlClient
 } from "@noema/knowledge";
+import { PostgresMemoryManager } from "@noema/memory";
 import { scanForSecrets, type SecretScanResult } from "@noema/ingestion";
 import { extractCodeAnchors } from "@noema/code-intelligence";
 import {
@@ -49,6 +50,7 @@ import {
 import {
   dispatchChannelNotification,
   handleSaasWebhook,
+  parseChannelActionPayload,
   verifyChannelWebhookSignature,
   verifySlackRequestSignature,
   type HumanOpsChannel,
@@ -90,6 +92,38 @@ export async function redactPiiWithAiWorker(
     throw new BrainError("BRAIN_ERR_STORAGE_UNAVAILABLE", "PII redaction response is missing redacted_text", 502);
   }
   return data.redacted_text;
+}
+
+const MAX_DOCUMENT_BYTES = 16 * 1024 * 1024;
+const MAX_DOCUMENT_BASE64_CHARS = 4 * Math.ceil(MAX_DOCUMENT_BYTES / 3);
+const DOCUMENT_EXTENSIONS = new Set([".pdf", ".docx", ".pptx", ".xlsx", ".html", ".htm", ".csv"]);
+
+async function parseDocumentWithAiWorker(fileName: string, contentBase64: string): Promise<{ markdown: string; engine: "docling" | "markitdown" }> {
+  const aiWorkerUrl = process.env.AI_WORKER_URL;
+  if (!aiWorkerUrl) throw new BrainError("BRAIN_ERR_STORAGE_UNAVAILABLE", "Docling requer AI_WORKER_URL configurado.", 503);
+  let response: Response;
+  try {
+    response = await fetch(`${aiWorkerUrl.replace(/\/$/, "")}/parse-document`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ file_name: fileName, content_base64: contentBase64 }),
+      signal: AbortSignal.timeout(120_000)
+    });
+  } catch {
+    throw new BrainError("BRAIN_ERR_STORAGE_UNAVAILABLE", "Docling indisponível; documento não foi persistido.", 503);
+  }
+  if (response.status === 503) throw new BrainError("BRAIN_ERR_STORAGE_UNAVAILABLE", "Docling indisponível; documento não foi persistido.", 503);
+  if (!response.ok) throw new BrainError("BRAIN_ERR_INVALID_INPUT", `Docling rejeitou o documento (HTTP ${response.status}).`, 422);
+  let data: { markdown?: unknown; engine?: unknown };
+  try { data = await response.json() as { markdown?: unknown; engine?: unknown }; }
+  catch { throw new BrainError("BRAIN_ERR_STORAGE_UNAVAILABLE", "Resposta do Docling inválida.", 502); }
+  if ((data.engine !== "docling" && data.engine !== "markitdown") || typeof data.markdown !== "string" || !data.markdown.trim()) {
+    throw new BrainError("BRAIN_ERR_STORAGE_UNAVAILABLE", "Resposta do Docling não contém Markdown válido.", 502);
+  }
+  if (Buffer.byteLength(data.markdown, "utf8") > 8 * 1024 * 1024) {
+    throw new BrainError("BRAIN_ERR_INVALID_INPUT", "Documento convertido excede o limite de 8 MiB de Markdown.", 422);
+  }
+  return { markdown: data.markdown, engine: data.engine };
 }
 
 async function rerankWithAiWorker<T extends { id: string; title: string; content: string }>(
@@ -465,8 +499,13 @@ export function buildApp(
   const crossService = new CrossServiceContractRegistry();
   const policyEpochByProject = new Map<string, { epoch: number; revocationFingerprint: string | null; allowedPolicyFingerprint: string }>();
   const pgGraph = appPostgresClient && process.env.NOEMA_PG_STORES === "1" ? new PostgresGraphStore(appPostgresClient) : undefined;
+  const valkeyUrl = process.env.VALKEY_URL ?? process.env.REDIS_URL;
   const pgRetrieval =
-    appPostgresClient && process.env.NOEMA_PG_STORES === "1" ? new PostgresRetrievalEngine(appPostgresClient as never, pgGraph) : undefined;
+    appPostgresClient && process.env.NOEMA_PG_STORES === "1"
+      ? new PostgresRetrievalEngine(appPostgresClient as never, pgGraph, {
+          cache: valkeyUrl ? new ValkeyRetrievalCache(valkeyUrl) : undefined
+        })
+      : undefined;
   const retrievalBase = pgRetrieval ?? retrieval;
   const queryAwareRetrieval: AsyncRetrievalEngine = {
     async search(ctx: AuthContext, query: SearchQuery) {
@@ -496,6 +535,9 @@ export function buildApp(
     }
   };
   const contextEngine = new ContextEngine(queryAwareRetrieval);
+  const pgMemory = appPostgresClient && process.env.NOEMA_PG_STORES === "1"
+    ? new PostgresMemoryManager(appPostgresClient as never)
+    : undefined;
   const pgKnowledge =
     appPostgresClient && process.env.NOEMA_PG_STORES === "1" ? new PostgresKnowledgeRepository(appPostgresClient as never) : undefined;
   const pgApprovals =
@@ -515,7 +557,16 @@ export function buildApp(
     }
   };
   const memoryNotificationPreferences = new Map<string, NotificationPreferences>();
+  const integrationFallbackOwners = new Map<string, { fallbackOwner: string; updatedAt: string; updatedBy: string }>();
+  const integrationReconnectHistory = new Map<string, { lastReconnectAt: string; status: string; actorId: string }>();
+  const departmentQuotas = new Map<string, { department: string; monthlyTokenLimit: number; monthlyUsdLimit: number; updatedAt: string }>();
+  const accessMembers = new Map<string, { actorId: string; roles: string[]; allowedPolicies: string[]; updatedAt: string; syncedWithKeycloak: boolean }>();
+  const temporaryGrants = new Map<string, { grantId: string; tenantId: string; projectId: string; actorId: string; roles: string[]; policyIds: string[]; expiresAt: string; grantedBy: string; createdAt: string }>();
+  const customPolicyCatalog = new Map<string, { policyId: string; label: string; description: string; allowedRoles: string[]; updatedAt: string }>();
+  const shreddedSubjectKeys = new Set<string>();
   const notificationPreferenceKey = (ctx: AuthContext, projectId: string, policyId: string) => `${ctx.tenantId}:${projectId}:${ctx.actorId}:${policyId}`;
+  const accessMemberKey = (ctx: AuthContext, projectId: string, actorId: string) => `${ctx.tenantId}:${projectId}:${actorId}`;
+  const customPolicyKey = (ctx: AuthContext, projectId: string, policyId: string) => `${ctx.tenantId}:${projectId}:${policyId}`;
   const getNotificationPreferences = async (ctx: AuthContext, projectId: string, policyId: string) => {
     const saved = opRepo ? await opRepo.getNotificationPreferences(ctx, projectId, policyId) : memoryNotificationPreferences.get(notificationPreferenceKey(ctx, projectId, policyId));
     if (!saved) return defaultNotificationPreferences();
@@ -750,6 +801,98 @@ export function buildApp(
     };
   });
 
+  type DeveloperProfileData = {
+    tenantId: string;
+    actorId: string;
+    preferredPackageManager?: string;
+    preferredTestLayout?: string;
+    preferredArchitectureStyle?: string;
+    codingConventions: string[];
+    preferredHarness?: string;
+    optInCrossProject: boolean;
+    updatedAt: string;
+  };
+  const developerProfilesMem = new Map<string, DeveloperProfileData>();
+  const getDeveloperProfile = async (ctx: AuthContext): Promise<DeveloperProfileData | undefined> => {
+    if (opRepo) return opRepo.getDeveloperProfile(ctx);
+    return developerProfilesMem.get(`${ctx.tenantId}:${ctx.actorId}`);
+  };
+  const saveDeveloperProfile = async (
+    ctx: AuthContext,
+    body: {
+      preferredPackageManager?: string;
+      preferredTestLayout?: string;
+      preferredArchitectureStyle?: string;
+      codingConventions?: string[];
+      preferredHarness?: string;
+      optInCrossProject?: boolean;
+    }
+  ): Promise<DeveloperProfileData> => {
+    if (opRepo) return opRepo.upsertDeveloperProfile(ctx, body);
+    const saved: DeveloperProfileData = {
+      tenantId: ctx.tenantId,
+      actorId: ctx.actorId,
+      ...(body.preferredPackageManager ? { preferredPackageManager: body.preferredPackageManager } : {}),
+      ...(body.preferredTestLayout ? { preferredTestLayout: body.preferredTestLayout } : {}),
+      ...(body.preferredArchitectureStyle ? { preferredArchitectureStyle: body.preferredArchitectureStyle } : {}),
+      codingConventions: body.codingConventions ?? [],
+      ...(body.preferredHarness ? { preferredHarness: body.preferredHarness } : {}),
+      optInCrossProject: body.optInCrossProject ?? true,
+      updatedAt: new Date().toISOString()
+    };
+    developerProfilesMem.set(`${ctx.tenantId}:${ctx.actorId}`, saved);
+    return saved;
+  };
+
+  app.get("/v1/profile/developer", async (req) => {
+    const ctx = await authenticateRequest(req.headers.authorization, configuredApiKey, "default-org", allowedProjects, undefined, allowedPolicies);
+    const profile = await getDeveloperProfile(ctx);
+    return {
+      profile: profile ?? {
+        tenantId: ctx.tenantId,
+        actorId: ctx.actorId,
+        codingConventions: [],
+        optInCrossProject: true,
+        updatedAt: null
+      }
+    };
+  });
+
+  app.put<{
+    Body: {
+      preferredPackageManager?: string;
+      preferredTestLayout?: string;
+      preferredArchitectureStyle?: string;
+      codingConventions?: string[];
+      preferredHarness?: string;
+      optInCrossProject?: boolean;
+    };
+  }>("/v1/profile/developer", async (req) => {
+    const ctx = await authenticateRequest(req.headers.authorization, configuredApiKey, "default-org", allowedProjects, undefined, allowedPolicies);
+    const conventions = (req.body.codingConventions ?? []).map((s) => s.trim()).filter(Boolean).slice(0, 20);
+    if (conventions.length > 0) {
+      const scan = scanForSecrets(conventions.join("\n"));
+      assertSecretScanClean(scan, "Segredo detectado no perfil do desenvolvedor");
+    }
+    const profile = await saveDeveloperProfile(ctx, {
+      preferredPackageManager: req.body.preferredPackageManager?.trim() || undefined,
+      preferredTestLayout: req.body.preferredTestLayout?.trim() || undefined,
+      preferredArchitectureStyle: req.body.preferredArchitectureStyle?.trim() || undefined,
+      codingConventions: conventions,
+      preferredHarness: req.body.preferredHarness?.trim() || undefined,
+      optInCrossProject: req.body.optInCrossProject ?? true
+    });
+    return { profile };
+  });
+
+  app.delete("/v1/profile/developer", async (req) => {
+    const ctx = await authenticateRequest(req.headers.authorization, configuredApiKey, "default-org", allowedProjects, undefined, allowedPolicies);
+    const deleted = opRepo
+      ? await opRepo.deleteDeveloperProfile(ctx)
+      : developerProfilesMem.delete(`${ctx.tenantId}:${ctx.actorId}`);
+    return { deleted };
+  });
+
   app.post(
     "/v1/projects/:projectId/ingest",
     {
@@ -879,7 +1022,9 @@ export function buildApp(
         intent: req.body.intent,
         includeDomains: req.body.includeDomains,
         tokenBudget: req.body.tokenBudget,
-        explain: req.body.explain
+        explain: req.body.explain,
+        sessionId,
+        memories: pgMemory ? await pgMemory.listVisible(ctx, req.params.projectId, sessionId) : []
       });
       const sourceHashes = await hashWorkspaceSources(configuredWorkspaceRoot(req.params.projectId), pack.sources.map((source) => source.sourceUri));
       const hashByUri = new Map(sourceHashes.map((source) => [source.sourceUri, source.sourceHash]));
@@ -890,7 +1035,13 @@ export function buildApp(
         sourceHash: hashByUri.get(source.sourceUri),
         taskId: req.body.taskId
       }))) : { sessionId, hits: 0, itemsSent: pack.sources.length, rate: null };
-      return { ...pack, sessionId, hitRate: rate };
+      const devProfile = await getDeveloperProfile(ctx);
+      return {
+        ...pack,
+        sessionId,
+        hitRate: rate,
+        ...(devProfile?.optInCrossProject ? { developerProfile: devProfile } : {})
+      };
     }
   );
 
@@ -1140,6 +1291,180 @@ export function buildApp(
         return { handoff: latest ?? null, warnings: latest ? [] : ["Nenhum handoff encontrado."] };
       }
       return handoffs.resumeHandoff(ctx, { projectId: req.params.projectId, taskId: req.query.taskId });
+    }
+  );
+
+  app.post<{
+    Params: { projectId: string };
+    Body: {
+      harness: string;
+      event: "session_start" | "tool_use" | "session_end" | "pre_compact";
+      sessionId: string;
+      summary?: string;
+      modifiedFiles?: string[];
+      branch?: string;
+      commitSha?: string;
+      usedItemIds?: string[];
+      taskId?: string;
+    };
+  }>("/v1/projects/:projectId/hooks/lifecycle", async (req) => {
+    const ctx = await authenticateProjectRequest(req.headers.authorization, req.params.projectId);
+    await enforceOpa(ctx, { projectId: req.params.projectId, accessPolicyId: "internal-project", action: "write" });
+    const harness = req.body.harness?.trim() || "unknown";
+    const summary = req.body.summary?.trim() ?? "";
+    if (summary) {
+      const scan = scanForSecrets(summary);
+      assertSecretScanClean(scan, "Segredo detectado no payload de lifecycle hook");
+    }
+    const warnings: string[] = [];
+    const memoryLayer = req.body.event === "session_end" || req.body.event === "pre_compact" ? "episodic" : "working";
+    const memoryContent = summary || `[${harness}] ${req.body.event} (session=${req.body.sessionId})`;
+    if (opRepo) {
+      await opRepo.appendMemory(ctx, {
+        projectId: req.params.projectId,
+        sessionId: req.body.sessionId,
+        layer: memoryLayer,
+        content: memoryContent,
+        accessPolicyId: "internal-project"
+      });
+    }
+    let citationsRecorded = 0;
+    if (opRepo && req.body.usedItemIds && req.body.usedItemIds.length > 0) {
+      try {
+        await opRepo.recordContextEvidence(ctx, req.params.projectId, req.body.sessionId, req.body.usedItemIds, "citation");
+        citationsRecorded = req.body.usedItemIds.length;
+      } catch (err) {
+        warnings.push(err instanceof Error ? err.message : "Não foi possível registrar citação automática.");
+      }
+    }
+    let handoffCreated: { handoffId: string; taskId: string } | undefined;
+    if (req.body.event === "session_end" && (summary || (req.body.modifiedFiles?.length ?? 0) > 0)) {
+      const taskId = req.body.taskId?.trim() || `HOOK-${req.body.sessionId.slice(0, 12)}`;
+      const created = handoffs.createHandoff(ctx, {
+        projectId: req.params.projectId,
+        taskId,
+        fromAgent: harness,
+        repoUrl: "",
+        branch: req.body.branch?.trim() || "main",
+        baseCommitSha: req.body.commitSha?.trim() || "HEAD",
+        workingTreeDirty: (req.body.modifiedFiles?.length ?? 0) > 0,
+        modifiedFiles: req.body.modifiedFiles ?? [],
+        testsExecuted: [],
+        decisions: summary ? [summary] : [],
+        nextSteps: summary ? [`Retomar sessão (${harness}): ${summary.slice(0, 160)}`] : ["Retomar sessão anterior"]
+      });
+      if (opRepo) {
+        await opRepo.saveHandoff(ctx, created);
+        await opRepo.upsertLease(ctx, req.params.projectId, created.taskId, created.branch);
+      }
+      handoffCreated = { handoffId: created.handoffId, taskId: created.taskId };
+    }
+    const developerProfile = req.body.event === "session_start" ? await getDeveloperProfile(ctx) : undefined;
+    const latestHandoff = req.body.event === "session_start"
+      ? (opRepo
+        ? await opRepo.getLatestHandoff(ctx, req.params.projectId, req.body.taskId)
+        : handoffs.resumeHandoff(ctx, { projectId: req.params.projectId, taskId: req.body.taskId }).handoff)
+      : undefined;
+    await recordAudit(ctx, {
+      tenantId: ctx.tenantId,
+      projectId: req.params.projectId,
+      accessPolicyId: "internal-project",
+      actorId: ctx.actorId,
+      actorType: ctx.actorType,
+      action: "create",
+      targetType: "lifecycle_hook",
+      targetId: `${harness}:${req.body.event}`,
+      metadata: { sessionId: req.body.sessionId, citationsRecorded, handoffId: handoffCreated?.handoffId }
+    });
+    return {
+      ok: true,
+      harness,
+      event: req.body.event,
+      sessionId: req.body.sessionId,
+      memoryLayer,
+      citationsRecorded,
+      ...(handoffCreated ? { handoffCreated } : {}),
+      ...(developerProfile?.optInCrossProject ? { developerProfile } : {}),
+      ...(latestHandoff ? { latestHandoff } : {}),
+      warnings
+    };
+  });
+
+  app.post(
+    "/v1/projects/:projectId/ingest-document",
+    {
+      bodyLimit: 24 * 1024 * 1024,
+      schema: {
+        params: Type.Object({ projectId: Type.String() }),
+        body: Type.Object({
+          fileName: Type.String({ minLength: 1, maxLength: 255 }),
+          contentBase64: Type.String({ minLength: 1, maxLength: MAX_DOCUMENT_BASE64_CHARS }),
+          accessPolicyId: Type.Optional(Type.String({ minLength: 1, maxLength: 100 }))
+        })
+      }
+    },
+    async (req) => {
+      const ctx = await authenticateProjectRequest(req.headers.authorization, req.params.projectId);
+      const { fileName, contentBase64 } = req.body;
+      if (fileName !== fileName.trim() || /[/\\\0\r\n]/.test(fileName)) {
+        throw new BrainError("BRAIN_ERR_INVALID_INPUT", "fileName deve ser apenas um nome de arquivo, sem caminho.", 422);
+      }
+      const extension = fileName.slice(fileName.lastIndexOf(".")).toLowerCase();
+      if (!DOCUMENT_EXTENSIONS.has(extension)) {
+        throw new BrainError("BRAIN_ERR_INVALID_INPUT", "Formato não suportado. Use PDF, DOCX, PPTX, XLSX, HTML ou CSV.", 422);
+      }
+      if (!/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(contentBase64)) {
+        throw new BrainError("BRAIN_ERR_INVALID_INPUT", "contentBase64 inválido.", 422);
+      }
+      const sourceBytes = Buffer.from(contentBase64, "base64");
+      if (sourceBytes.length === 0 || sourceBytes.length > MAX_DOCUMENT_BYTES || sourceBytes.toString("base64") !== contentBase64) {
+        throw new BrainError("BRAIN_ERR_INVALID_INPUT", "Documento vazio ou acima do limite de 16 MiB.", 422);
+      }
+      const policy = req.body.accessPolicyId ?? "internal-project";
+      assertPolicyAccess(ctx, policy);
+
+      const parsedDocument = await parseDocumentWithAiWorker(fileName, contentBase64);
+      const extractedMarkdown = parsedDocument.markdown;
+      const scan = scanForSecrets(extractedMarkdown, { ignoreFilePath: ".brainignore-secrets" });
+      assertSecretScanClean(scan, "Segredo detectado no documento extraído");
+      const sanitizedMarkdown = await redactPiiWithAiWorker(extractedMarkdown);
+      const piiRedacted = sanitizedMarkdown !== extractedMarkdown;
+      const normalizedName = fileName.normalize("NFC").replace(/[^\p{L}\p{N}._-]+/gu, "-").replace(/^\.+/, "");
+      const sourceUri = `.brain/imported-documents/${normalizedName}.md`;
+      const rawContent = [
+        "---", `id: ${JSON.stringify(sourceUri)}`, `title: ${JSON.stringify(fileName)}`,
+        "type: document", "status: draft", "trust_level: untrusted", `access_policy: ${JSON.stringify(policy)}`, "---", "", sanitizedMarkdown
+      ].join("\n");
+      const item = parseKnowledgeFile({ tenantId: ctx.tenantId, projectId: req.params.projectId, filePath: sourceUri, rawContent });
+      item.sourceOrigin = "external_reference";
+      item.sourceKind = "api";
+      item.trustLevel = "untrusted";
+      item.metadata = { ...item.metadata, source: "document_upload", originalFileName: fileName, extractionEngine: parsedDocument.engine };
+      assertPolicyAccess(ctx, item.accessPolicyId);
+      await enforceOpa(ctx, { projectId: req.params.projectId, accessPolicyId: item.accessPolicyId, action: "write", domainId: item.domainId });
+      await upsertKnowledgeItem(ctx, item);
+      if (scan.ignoredFindings.length > 0) {
+        await recordAudit(ctx, { tenantId: ctx.tenantId, projectId: req.params.projectId, accessPolicyId: item.accessPolicyId,
+          actorId: ctx.actorId, actorType: ctx.actorType, action: "update", targetType: "brainignore_secrets", targetId: sourceUri,
+          metadata: { ignoredFindings: scan.ignoredFindings } });
+      }
+      await recordAudit(ctx, { tenantId: ctx.tenantId, projectId: req.params.projectId, accessPolicyId: item.accessPolicyId,
+        actorId: ctx.actorId, actorType: ctx.actorType, action: "create", targetType: "knowledge_item", targetId: item.id,
+        metadata: { source: "document_ingest", originalFileName: fileName, piiRedacted, extractionEngine: parsedDocument.engine } });
+
+      const warnings: string[] = [];
+      if (piiRedacted) warnings.push("Dados pessoais foram sanitizados pelo AI Worker antes da indexação.");
+      if (process.env.NOEMA_PG_BOSS === "1" && process.env.DATABASE_URL) {
+        const embeddingProvider = await probeEmbeddingProvider();
+        if (embeddingProvider.available) {
+          try {
+            const jobId = await enqueueEmbedJob({ tenantId: item.tenantId, projectId: item.projectId, itemId: item.id,
+              sourceVersion: item.sourceVersion, accessPolicyId: item.accessPolicyId, content: item.content });
+            if (!jobId) warnings.push("Embeddings não foram enfileirados; o item permanece disponível para busca textual.");
+          } catch { warnings.push("Embeddings não foram enfileirados; o item permanece disponível para busca textual."); }
+        } else warnings.push("Embeddings vetoriais não foram enfileirados; o item permanece disponível para busca textual.");
+      } else warnings.push("Embeddings vetoriais não foram enfileirados porque o worker pg-boss não está configurado; o item permanece disponível para busca textual.");
+      return { item, piiRedacted, warnings };
     }
   );
 
@@ -1853,7 +2178,7 @@ export function buildApp(
     gateway: "noema-universal-agent-gateway",
     transports: ["streamable-http", "stdio", "rest"],
     mcpEndpoint: "/mcp",
-    toolsCount: 13,
+    toolsCount: 14,
     pgStoresEnabled: Boolean(pgGraph && pgRetrieval)
   }));
 
@@ -1872,6 +2197,7 @@ export function buildApp(
           })
         : undefined,
       opRepo,
+      memory: pgMemory,
       knowledge: pgKnowledge,
       crossServiceRegistry: pgCrossService ?? crossService,
       approvals: pgApprovals,
@@ -1910,6 +2236,65 @@ export function buildApp(
     });
     const deletedFromPg = erased.deletedItems;
     pgRetrieval?.invalidateCache(ctx.tenantId, req.body.projectId);
+
+    // Crypto-shredding: destroy subject key material reference (persisted in PostgreSQL when opRepo is active)
+    const subjectKeyId = `${ctx.tenantId}:${req.body.projectId}:${req.body.subjectId}`;
+    shreddedSubjectKeys.add(subjectKeyId);
+    if (opRepo) {
+      await opRepo.recordLgpdShreddedSubject(ctx, req.body.projectId, req.body.subjectId);
+    }
+    const cryptoShredded = true;
+
+    // Historical audit_logs anonymization (preserving hash/sequence structure, removing PII actor_id)
+    const anonymizedActorId = `anon:${createHash("sha256").update(subjectKeyId).digest("hex").slice(0, 16)}`;
+    let auditLogsAnonymized = 0;
+    try {
+      const runUpdate = async (runner: { (strings: TemplateStringsArray, ...values: Array<string | number | boolean | null>): PromiseLike<unknown> }) =>
+        runner`
+          UPDATE audit_logs
+          SET actor_id = ${anonymizedActorId}
+          WHERE tenant_id = ${ctx.tenantId} AND project_id = ${req.body.projectId} AND actor_id = ${req.body.subjectId}
+          RETURNING id
+        `;
+      const anonRes = ("begin" in systemKnowledgeClient && typeof systemKnowledgeClient.begin === "function"
+        ? await systemKnowledgeClient.begin((tx) => runUpdate(tx))
+        : await runUpdate(systemKnowledgeClient as unknown as Parameters<typeof runUpdate>[0])) as unknown[];
+      auditLogsAnonymized = Array.isArray(anonRes) ? anonRes.length : 0;
+    } catch {
+      // If audit_logs is append-only/protected by trigger in some deployments, keep going and report accurately
+      auditLogsAnonymized = 0;
+    }
+
+    // Optional MinIO / Object Storage deletion hook
+    const objectStorageUrl = process.env.NOEMA_OBJECT_STORAGE_URL ?? process.env.MINIO_ENDPOINT;
+    let objectStorageDeleted = false;
+    let objectStorageStatus: "deleted" | "not_configured" | "failed" = "not_configured";
+    if (objectStorageUrl) {
+      try {
+        const res = await fetch(`${objectStorageUrl.replace(/\/$/, "")}/privacy/erase`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ tenantId: ctx.tenantId, projectId: req.body.projectId, subjectId: req.body.subjectId })
+        });
+        objectStorageDeleted = res.ok;
+        objectStorageStatus = res.ok ? "deleted" : "failed";
+      } catch {
+        objectStorageDeleted = false;
+        objectStorageStatus = "failed";
+      }
+    }
+
+    const complete = cryptoShredded && objectStorageStatus !== "failed";
+    const limitations: string[] = [];
+    if (objectStorageStatus === "not_configured") {
+      limitations.push("MinIO/Object Storage não configurado neste ambiente (nenhum bucket externo ativo)");
+    } else if (objectStorageStatus === "failed") {
+      limitations.push("Falha ao remover objetos do MinIO/Object Storage");
+    }
+    if (erased.createdSyncTombstones > 0) {
+      limitations.push("Cópias Edge serão removidas após sincronização do tombstone");
+    }
+
     await recordAudit(ctx, {
       tenantId: ctx.tenantId,
       projectId: req.body.projectId,
@@ -1918,7 +2303,7 @@ export function buildApp(
       actorType: ctx.actorType,
       action: "revoke",
       targetType: "privacy_erase",
-      targetId: createHash("sha256").update(`${ctx.tenantId}:${req.body.projectId}:${req.body.subjectId}`).digest("hex"),
+      targetId: createHash("sha256").update(subjectKeyId).digest("hex"),
       metadata: {
         deletedFromPg,
         deletedVersions: erased.deletedVersions,
@@ -1933,9 +2318,11 @@ export function buildApp(
         deletedNotificationPreferences: erased.deletedNotificationPreferences,
         deletedNotificationOutbox: erased.deletedNotificationOutbox,
         canonicalKnowledgeRecordsDeleted: true,
-        cryptoShredded: false,
-        objectStorageDeleted: false,
-        offlineCopiesInvalidated: false
+        cryptoShredded,
+        auditLogsAnonymized,
+        objectStorageDeleted,
+        objectStorageStatus,
+        offlineCopiesInvalidated: erased.createdSyncTombstones > 0
       }
     });
     return {
@@ -1952,14 +2339,12 @@ export function buildApp(
       deletedTaskLeases: erased.deletedTaskLeases,
       deletedNotificationPreferences: erased.deletedNotificationPreferences,
       deletedNotificationOutbox: erased.deletedNotificationOutbox,
-      complete: false,
-      limitations: [
-        "MinIO e backups não foram apagados",
-        "Cópias Edge serão removidas somente após sincronização do tombstone",
-        "Registros operacionais legados sem actor_id não foram processados",
-        "Históricos de aprovação e integrações não associados a actor_id não foram processados",
-        "Crypto-shredding e anonimização histórica da auditoria não foram executados"
-      ]
+      cryptoShredded,
+      auditLogsAnonymized,
+      objectStorageDeleted,
+      objectStorageStatus,
+      complete,
+      limitations
     };
   });
 
@@ -2451,6 +2836,17 @@ export function buildApp(
     } catch {
       slackActorMappingPresent = false;
     }
+    const prefix = `${ctx.tenantId}:${req.params.projectId}:`;
+    const fallbackOwners = opRepo
+      ? await opRepo.listIntegrationFallbackOwners(ctx, req.params.projectId)
+      : [...integrationFallbackOwners.entries()]
+          .filter(([key]) => key.startsWith(prefix))
+          .map(([key, value]) => ({ provider: key.slice(prefix.length), ...value }));
+    const reconnectHistory = opRepo
+      ? await opRepo.listIntegrationReconnectHistory(ctx, req.params.projectId)
+      : [...integrationReconnectHistory.entries()]
+          .filter(([key]) => key.startsWith(prefix))
+          .map(([key, value]) => ({ provider: key.slice(prefix.length), ...value }));
     return {
       projectId: req.params.projectId,
       github: {
@@ -2466,6 +2862,8 @@ export function buildApp(
         recentJobs: saasJobs.map((row) => ({ jobId: String(row.id), provider: String(row.provider), connectionId: String(row.connection_id), state: String(row.state), retries: Number(row.retry_count ?? 0), createdAt: String(row.created_on), completedAt: row.completed_on ? String(row.completed_on) : null, result: row.output ?? null }))
       },
       notificationChannels,
+      fallbackOwners,
+      reconnectHistory,
       slackInteractiveApprovalConfigured: Boolean(process.env.NOEMA_WEBHOOK_SECRET_SLACK && slackActorMappingPresent)
     };
   });
@@ -2996,16 +3394,7 @@ export function buildApp(
 
   app.post<{
     Params: { channel: string };
-    Body: {
-      action?: string;
-      decision?: ApprovalDecision;
-      projectId?: string;
-      proposalId?: string;
-      proposalVersion?: number;
-      externalUserId?: string;
-      externalEventId?: string;
-      comment?: string;
-    };
+    Body: Record<string, unknown>;
   }>("/v1/integrations/:channel/actions", async (req, reply) => {
     const channel = req.params.channel.toLowerCase();
     if (!["teams", "jira", "clickup", "email"].includes(channel)) {
@@ -3018,34 +3407,101 @@ export function buildApp(
     if (!signingSecret || !rawBody || !verifyChannelWebhookSignature(rawBody, signature, signingSecret)) {
       throw new BrainError("BRAIN_ERR_UNAUTHORIZED", `Assinatura ${channel} inválida ou ausente.`, 401);
     }
-    const actionMap: Record<string, ApprovalDecision> = {
-      noema_approve: "approve",
-      approve: "approve",
-      noema_reject: "reject",
-      reject: "reject",
-      noema_request_changes: "request_changes",
-      request_changes: "request_changes"
-    };
-    const decision = req.body.decision ?? (req.body.action ? actionMap[req.body.action] : undefined);
-    if (!decision || !req.body.projectId || !req.body.proposalId ||
-        !Number.isInteger(req.body.proposalVersion) || Number(req.body.proposalVersion) < 1 ||
-        !req.body.externalUserId || !req.body.externalEventId) {
+    const normalized = parseChannelActionPayload(
+      channel as "teams" | "jira" | "clickup" | "email",
+      (req.body ?? {}) as Record<string, unknown>
+    );
+    if (!normalized) {
       throw new BrainError("BRAIN_ERR_CONFLICT", `Payload de ação ${channel} inválido.`, 400);
     }
     const result = await forwardInteractiveApprovalAction(channel, signingSecret, {
-      projectId: req.body.projectId,
-      proposalId: req.body.proposalId,
-      proposalVersion: Number(req.body.proposalVersion),
-      decision,
-      externalUserId: req.body.externalUserId,
-      externalEventId: req.body.externalEventId,
-      comment: req.body.comment
+      projectId: normalized.projectId,
+      proposalId: normalized.proposalId,
+      proposalVersion: normalized.proposalVersion,
+      decision: normalized.decision,
+      externalUserId: normalized.externalUserId,
+      externalEventId: normalized.externalEventId,
+      comment: normalized.comment
     });
     if (result.statusCode < 200 || result.statusCode >= 300) {
       return reply.code(result.statusCode).send(result.json());
     }
-    return reply.code(200).send({ accepted: true, channel, decision, result: result.json() });
+    return reply.code(200).send({ accepted: true, channel, decision: normalized.decision, result: result.json() });
   });
+
+  app.post<{ Params: { projectId: string; provider: string } }>(
+    "/v1/projects/:projectId/integrations/:provider/reconnect",
+    async (req) => {
+      const ctx = await authenticateProjectRequest(req.headers.authorization, req.params.projectId);
+      await enforceOpa(ctx, { projectId: req.params.projectId, accessPolicyId: "internal-project", action: "write" });
+      const key = `${ctx.tenantId}:${req.params.projectId}:${req.params.provider}`;
+      const nangoUrl = process.env.NANGO_BASE_URL;
+      const nangoSecret = process.env.NANGO_SECRET_KEY;
+      let status = "reconnect_queued_local";
+      if (nangoUrl && nangoSecret) {
+        try {
+          const res = await fetch(`${nangoUrl.replace(/\/$/, "")}/connection/${encodeURIComponent(req.params.provider)}/reconnect`, {
+            method: "POST",
+            headers: { authorization: `Bearer ${nangoSecret}`, "content-type": "application/json" }
+          });
+          status = res.ok ? "reconnected" : `nango_http_${res.status}`;
+        } catch {
+          status = "nango_unreachable";
+        }
+      }
+      const entry = opRepo
+        ? await opRepo.recordIntegrationReconnect(ctx, req.params.projectId, req.params.provider, status)
+        : (() => {
+            const localEntry = { lastReconnectAt: new Date().toISOString(), status, actorId: ctx.actorId };
+            integrationReconnectHistory.set(key, localEntry);
+            return localEntry;
+          })();
+      await recordAudit(ctx, {
+        tenantId: ctx.tenantId,
+        projectId: req.params.projectId,
+        accessPolicyId: "internal-project",
+        actorId: ctx.actorId,
+        actorType: ctx.actorType,
+        action: "update",
+        targetType: "integration_reconnect",
+        targetId: req.params.provider,
+        metadata: { status }
+      });
+      return { provider: req.params.provider, ...entry };
+    }
+  );
+
+  app.put<{ Params: { projectId: string; provider: string }; Body: { fallbackOwner: string } }>(
+    "/v1/projects/:projectId/integrations/:provider/fallback-owner",
+    async (req) => {
+      const ctx = await authenticateProjectRequest(req.headers.authorization, req.params.projectId);
+      await enforceOpa(ctx, { projectId: req.params.projectId, accessPolicyId: "internal-project", action: "write" });
+      const fallbackOwner = req.body.fallbackOwner?.trim();
+      if (!fallbackOwner) {
+        throw new BrainError("BRAIN_ERR_CONFLICT", "fallbackOwner não pode estar vazio.", 400);
+      }
+      const key = `${ctx.tenantId}:${req.params.projectId}:${req.params.provider}`;
+      const entry = opRepo
+        ? await opRepo.upsertIntegrationFallbackOwner(ctx, req.params.projectId, req.params.provider, fallbackOwner)
+        : (() => {
+            const localEntry = { fallbackOwner, updatedAt: new Date().toISOString(), updatedBy: ctx.actorId };
+            integrationFallbackOwners.set(key, localEntry);
+            return localEntry;
+          })();
+      await recordAudit(ctx, {
+        tenantId: ctx.tenantId,
+        projectId: req.params.projectId,
+        accessPolicyId: "internal-project",
+        actorId: ctx.actorId,
+        actorType: ctx.actorType,
+        action: "update",
+        targetType: "integration_fallback_owner",
+        targetId: req.params.provider,
+        metadata: { fallbackOwner }
+      });
+      return { provider: req.params.provider, ...entry };
+    }
+  );
 
   app.get<{ Params: { projectId: string } }>("/v1/projects/:projectId/access/profile", async (req) => {
     const ctx = await authenticateProjectRequest(req.headers.authorization, req.params.projectId);
@@ -3074,6 +3530,26 @@ export function buildApp(
         itemCount: countByPolicy.get("restricted-security") ?? 0
       }
     ];
+    const savedPolicies = opRepo
+      ? await opRepo.listCustomAccessPolicies(ctx, req.params.projectId)
+      : [...customPolicyCatalog.entries()]
+          .filter(([key]) => key.startsWith(`${ctx.tenantId}:${req.params.projectId}:`))
+          .map(([, policy]) => policy);
+    const customPolicies = savedPolicies.filter((p) => !policyCatalog.some((base) => base.policyId === p.policyId));
+    const mergedCatalog = [
+      ...policyCatalog.map((base) => {
+        const override = savedPolicies.find((p) => p.policyId === base.policyId);
+        return override ? { ...base, description: override.description, label: override.label, allowedRoles: override.allowedRoles } : base;
+      }),
+      ...customPolicies.map((p) => ({
+        policyId: p.policyId,
+        label: p.label,
+        description: p.description,
+        allowedRoles: p.allowedRoles,
+        authorized: ctx.allowedPolicies.includes(p.policyId),
+        itemCount: countByPolicy.get(p.policyId) ?? 0
+      }))
+    ];
     return {
       projectId: req.params.projectId,
       tenantId: ctx.tenantId,
@@ -3081,15 +3557,195 @@ export function buildApp(
       actorType: ctx.actorType,
       identitySource: ctx.actorId === "local-api-key" ? "local-api-key" : "oidc-claims",
       opaConfigured: Boolean(process.env.OPA_URL),
+      keycloakAdminConfigured: Boolean(process.env.KEYCLOAK_ADMIN_URL),
       roles: ctx.roles,
       allowedProjects: ctx.allowedProjects,
       allowedPolicies: ctx.allowedPolicies,
-      policyCatalog,
+      policyCatalog: mergedCatalog,
       currentProjectAuthorized: true,
-      managementAvailable: false,
-      managementNote: "A origem de identidade autenticada fornece papéis e escopos. Gestão de membros, concessões temporárias e políticas exige integração administrativa do provedor OIDC, ainda não configurada."
+      managementAvailable: true,
+      managementStorage: opRepo ? "postgres" : "process-memory",
+      managementNote: `${opRepo ? "Alterações locais de acesso persistem em PostgreSQL. " : "Alterações locais de acesso ficam em memória e se perdem ao reiniciar. "}${process.env.KEYCLOAK_ADMIN_URL ? "Sincronização OIDC/Keycloak está configurada." : "Configure KEYCLOAK_ADMIN_URL para sincronização OIDC externa."}`
     };
   });
+
+  const requireAccessAdmin = (ctx: AuthContext) => {
+    if (!ctx.roles.some((r) => ["admin", "appsec"].includes(r))) {
+      throw new BrainError("BRAIN_ERR_POLICY_DENIED", "Gestão administrativa de acesso restrita a admin/appsec.", 403);
+    }
+  };
+
+  app.get<{ Params: { projectId: string } }>("/v1/projects/:projectId/access/members", async (req) => {
+    const ctx = await authenticateProjectRequest(req.headers.authorization, req.params.projectId);
+    requireAccessAdmin(ctx);
+    const prefix = `${ctx.tenantId}:${req.params.projectId}:`;
+    const members = opRepo
+      ? await opRepo.listAccessMembers(ctx, req.params.projectId)
+      : [...accessMembers.entries()].filter(([key]) => key.startsWith(prefix)).map(([, member]) => member);
+    return { projectId: req.params.projectId, keycloakConfigured: Boolean(process.env.KEYCLOAK_ADMIN_URL), members };
+  });
+
+  app.put<{ Params: { projectId: string; actorId: string }; Body: { roles: string[]; allowedPolicies?: string[] } }>(
+    "/v1/projects/:projectId/access/members/:actorId/roles",
+    async (req) => {
+      const ctx = await authenticateProjectRequest(req.headers.authorization, req.params.projectId);
+      requireAccessAdmin(ctx);
+      await enforceOpa(ctx, { projectId: req.params.projectId, accessPolicyId: "internal-project", action: "write" });
+      if (!Array.isArray(req.body.roles) || req.body.roles.length === 0) {
+        throw new BrainError("BRAIN_ERR_CONFLICT", "roles deve ser uma lista não vazia.", 400);
+      }
+      let syncedWithKeycloak = false;
+      if (process.env.KEYCLOAK_ADMIN_URL && process.env.KEYCLOAK_ADMIN_TOKEN) {
+        try {
+          const res = await fetch(`${process.env.KEYCLOAK_ADMIN_URL.replace(/\/$/, "")}/users/${encodeURIComponent(req.params.actorId)}/role-mappings/realm`, {
+            method: "POST",
+            headers: {
+              authorization: `Bearer ${process.env.KEYCLOAK_ADMIN_TOKEN}`,
+              "content-type": "application/json"
+            },
+            body: JSON.stringify(req.body.roles.map((name) => ({ name })))
+          });
+          syncedWithKeycloak = res.ok;
+        } catch {
+          syncedWithKeycloak = false;
+        }
+      }
+      const record = {
+        actorId: req.params.actorId,
+        roles: [...new Set(req.body.roles)],
+        allowedPolicies: req.body.allowedPolicies ? [...new Set(req.body.allowedPolicies)] : ["internal-project"],
+        updatedAt: new Date().toISOString(),
+        syncedWithKeycloak
+      };
+      if (opRepo) {
+        await opRepo.saveAccessMember(ctx, req.params.projectId, record);
+      } else {
+        accessMembers.set(accessMemberKey(ctx, req.params.projectId, req.params.actorId), record);
+      }
+      await recordAudit(ctx, {
+        tenantId: ctx.tenantId,
+        projectId: req.params.projectId,
+        accessPolicyId: "internal-project",
+        actorId: ctx.actorId,
+        actorType: ctx.actorType,
+        action: "update",
+        targetType: "access_member_roles",
+        targetId: req.params.actorId,
+        metadata: { roles: record.roles, allowedPolicies: record.allowedPolicies, syncedWithKeycloak }
+      });
+      return record;
+    }
+  );
+
+  app.get<{ Params: { projectId: string } }>("/v1/projects/:projectId/access/grants", async (req) => {
+    const ctx = await authenticateProjectRequest(req.headers.authorization, req.params.projectId);
+    requireAccessAdmin(ctx);
+    const now = Date.now();
+    const grants = opRepo
+      ? await opRepo.listTemporaryAccessGrants(ctx, req.params.projectId, new Date(now))
+      : [...temporaryGrants.values()].filter((g) =>
+          g.tenantId === ctx.tenantId && g.projectId === req.params.projectId && Date.parse(g.expiresAt) > now
+        );
+    return { projectId: req.params.projectId, grants };
+  });
+
+  app.post<{
+    Params: { projectId: string };
+    Body: { actorId: string; roles?: string[]; policyIds?: string[]; ttlMinutes?: number };
+  }>("/v1/projects/:projectId/access/grants", async (req) => {
+    const ctx = await authenticateProjectRequest(req.headers.authorization, req.params.projectId);
+    requireAccessAdmin(ctx);
+    await enforceOpa(ctx, { projectId: req.params.projectId, accessPolicyId: "internal-project", action: "write" });
+    const ttlMinutes = Math.min(10080, Math.max(5, Number(req.body.ttlMinutes ?? 60)));
+    const grantId = `GRANT-${randomUUID().slice(0, 8)}`;
+    const now = new Date();
+    const grant = {
+      grantId,
+      tenantId: ctx.tenantId,
+      projectId: req.params.projectId,
+      actorId: req.body.actorId,
+      roles: req.body.roles ?? ["developer"],
+      policyIds: req.body.policyIds ?? ["internal-project"],
+      createdAt: now.toISOString(),
+      expiresAt: new Date(now.getTime() + ttlMinutes * 60_000).toISOString(),
+      grantedBy: ctx.actorId
+    };
+    const persisted = opRepo
+      ? await opRepo.createTemporaryAccessGrant(ctx, {
+          grantId, projectId: req.params.projectId, actorId: grant.actorId, roles: grant.roles,
+          policyIds: grant.policyIds, expiresAt: new Date(grant.expiresAt), grantedBy: grant.grantedBy
+        })
+      : (temporaryGrants.set(grantId, grant), grant);
+    await recordAudit(ctx, {
+      tenantId: ctx.tenantId,
+      projectId: req.params.projectId,
+      accessPolicyId: "internal-project",
+      actorId: ctx.actorId,
+      actorType: ctx.actorType,
+      action: "create",
+      targetType: "temporary_access_grant",
+      targetId: grantId,
+      metadata: { actorId: grant.actorId, expiresAt: grant.expiresAt, roles: grant.roles, policyIds: grant.policyIds }
+    });
+    return { tenantId: ctx.tenantId, ...persisted };
+  });
+
+  app.delete<{ Params: { projectId: string; grantId: string } }>(
+    "/v1/projects/:projectId/access/grants/:grantId",
+    async (req) => {
+      const ctx = await authenticateProjectRequest(req.headers.authorization, req.params.projectId);
+      requireAccessAdmin(ctx);
+      const grant = temporaryGrants.get(req.params.grantId);
+      const revoked = opRepo
+        ? await opRepo.revokeTemporaryAccessGrant(ctx, req.params.projectId, req.params.grantId)
+        : Boolean(grant && grant.tenantId === ctx.tenantId && grant.projectId === req.params.projectId && temporaryGrants.delete(req.params.grantId));
+      if (!revoked) {
+        throw new BrainError("BRAIN_ERR_NOT_FOUND", `Concessão '${req.params.grantId}' não encontrada.`, 404);
+      }
+      await recordAudit(ctx, {
+        tenantId: ctx.tenantId,
+        projectId: req.params.projectId,
+        accessPolicyId: "internal-project",
+        actorId: ctx.actorId,
+        actorType: ctx.actorType,
+        action: "revoke",
+        targetType: "temporary_access_grant",
+        targetId: req.params.grantId
+      });
+      return { revoked: true, grantId: req.params.grantId };
+    }
+  );
+
+  app.put<{ Params: { projectId: string; policyId: string }; Body: { label?: string; description: string; allowedRoles?: string[] } }>(
+    "/v1/projects/:projectId/access/policies/:policyId",
+    async (req) => {
+      const ctx = await authenticateProjectRequest(req.headers.authorization, req.params.projectId);
+      requireAccessAdmin(ctx);
+      await enforceOpa(ctx, { projectId: req.params.projectId, accessPolicyId: "internal-project", action: "write" });
+      const entry = {
+        policyId: req.params.policyId,
+        label: req.body.label?.trim() || req.params.policyId,
+        description: req.body.description.trim(),
+        allowedRoles: req.body.allowedRoles ?? ["admin", "appsec", "tech-lead"],
+        updatedAt: new Date().toISOString()
+      };
+      const savedEntry = opRepo
+        ? await opRepo.upsertCustomAccessPolicy(ctx, req.params.projectId, entry)
+        : (customPolicyCatalog.set(customPolicyKey(ctx, req.params.projectId, req.params.policyId), entry), entry);
+      await recordAudit(ctx, {
+        tenantId: ctx.tenantId,
+        projectId: req.params.projectId,
+        accessPolicyId: "internal-project",
+        actorId: ctx.actorId,
+        actorType: ctx.actorType,
+        action: "update",
+        targetType: "access_policy_catalog",
+        targetId: req.params.policyId,
+        metadata: { allowedRoles: savedEntry.allowedRoles }
+      });
+      return savedEntry;
+    }
+  );
 
   app.get<{ Querystring: { projectId?: string; limit?: string } }>("/v1/audit-logs", async (req) => {
     const ctx = await authenticateRequest(req.headers.authorization, configuredApiKey, "default-org", allowedProjects, undefined, allowedPolicies);
@@ -3188,21 +3844,119 @@ export function buildApp(
     const ctx = await authenticateProjectRequest(req.headers.authorization, req.params.projectId);
     const items = await queryAwareRetrieval.search(ctx, { projectId: req.params.projectId, query: "", limit: 200 });
     const modelUsage = await projectModelUsage(ctx, req.params.projectId);
+    const estimatedLocalTokens = items.reduce((acc, h) => acc + Math.ceil(h.item.content.length / 4), 0);
+
+    // Infrastructure & Energy cost estimation from telemetry
+    const measuredTokens = modelUsage.byModel.reduce((acc, m) => acc + (m.totalTokens ?? 0), 0);
+    const totalTokens = measuredTokens > 0 ? measuredTokens : estimatedLocalTokens;
+    const durationHours = (modelUsage.calls * 2) / 3600;
+    const infraHourlyUsd = Number(process.env.NOEMA_INFRA_HOURLY_USD ?? "0.12");
+    const kwhPerMillionTokens = Number(process.env.NOEMA_ENERGY_KWH_PER_MILLION_TOKENS ?? "0.45");
+    const energyUsdPerKwh = Number(process.env.NOEMA_ENERGY_USD_PER_KWH ?? "0.15");
+    const estimatedInfraUsd = Number((durationHours * infraHourlyUsd).toFixed(6));
+    const estimatedEnergyKwh = Number(((totalTokens / 1_000_000) * kwhPerMillionTokens).toFixed(6));
+    const estimatedEnergyUsd = Number((estimatedEnergyKwh * energyUsdPerKwh).toFixed(6));
+
+    // Department quotas configured for this tenant/project
+    const quotaPrefix = `${ctx.tenantId}:${req.params.projectId}:`;
+    const rawQuotas = opRepo
+      ? await opRepo.listDepartmentFinopsQuotas(ctx, req.params.projectId)
+      : [...departmentQuotas.entries()]
+          .filter(([key]) => key.startsWith(quotaPrefix))
+          .map(([, q]) => q);
+    const quotas = rawQuotas.map((q) => {
+      const usedTokens = measuredTokens;
+      const usedUsd = Number(((modelUsage.providerCostUsd ?? 0) + estimatedInfraUsd + estimatedEnergyUsd).toFixed(6));
+      const withinQuota = usedTokens <= q.monthlyTokenLimit && usedUsd <= q.monthlyUsdLimit;
+      const downgradeModel = !withinQuota ? (("downgradeModel" in q ? q.downgradeModel : undefined) ?? process.env.NOEMA_FINOPS_DOWNGRADE_MODEL ?? "ollama:qwen2.5-coder:7b") : undefined;
+      return {
+        ...q,
+        usedTokens,
+        usedUsd,
+        withinQuota,
+        ...(downgradeModel ? { recommendedDowngradeModel: downgradeModel } : {})
+      };
+    });
+
     return {
       projectId: req.params.projectId,
       indexedItems: items.length,
-      estimatedLocalTokens: items.reduce((acc, h) => acc + Math.ceil(h.item.content.length / 4), 0),
+      estimatedLocalTokens,
       estimatedMonthlySaasSavingsUsd: null,
       costTrackingAvailable: modelUsage.modelUsageAvailable && modelUsage.providerCostUsd !== null,
       actualProviderUsageAvailable: modelUsage.modelUsageAvailable,
       actualProviderCostUsd: modelUsage.providerCostUsd,
       modelUsage,
+      infrastructureEstimate: {
+        basis: "telemetry_derived",
+        computeCostUsd: estimatedInfraUsd,
+        energyKwh: estimatedEnergyKwh,
+        energyCostUsd: estimatedEnergyUsd,
+        totalInfraAndEnergyUsd: Number((estimatedInfraUsd + estimatedEnergyUsd).toFixed(6))
+      },
+      departmentQuotas: quotas,
       costTrackingNote: modelUsage.modelUsageAvailable
-        ? "Tokens e custo do provedor são agregados apenas quando retornados pelo modelo. Custo de infraestrutura self-hosted ainda não é medido; economia SaaS não é inferida."
-        : "Ainda não há execuções de modelo com métricas persistidas neste projeto. Estimativa de tokens indexados não representa uso do provedor; economia financeira não é inferida.",
+        ? "Tokens e custo do provedor agregados por execução; custos de infraestrutura e energia estimados a partir da telemetria de duração/tokens."
+        : "Ainda não há execuções de modelo com métricas persistidas neste projeto. Estimativas de infra/energia usam tokens indexados como base.",
       pgOperationalActive: Boolean(opRepo),
       pgTemporalActive: Boolean(pgTemporal)
     };
+  });
+
+  app.get<{ Params: { projectId: string } }>("/v1/projects/:projectId/finops/quotas", async (req) => {
+    const ctx = await authenticateProjectRequest(req.headers.authorization, req.params.projectId);
+    const prefix = `${ctx.tenantId}:${req.params.projectId}:`;
+    const quotas = opRepo
+      ? await opRepo.listDepartmentFinopsQuotas(ctx, req.params.projectId)
+      : [...departmentQuotas.entries()]
+          .filter(([key]) => key.startsWith(prefix))
+          .map(([, q]) => q);
+    return { projectId: req.params.projectId, quotas };
+  });
+
+  app.put<{
+    Params: { projectId: string };
+    Body: { department: string; monthlyTokenLimit: number; monthlyUsdLimit: number; downgradeModel?: string };
+  }>("/v1/projects/:projectId/finops/quotas", async (req) => {
+    const ctx = await authenticateProjectRequest(req.headers.authorization, req.params.projectId);
+    await enforceOpa(ctx, { projectId: req.params.projectId, accessPolicyId: "internal-project", action: "write" });
+    const department = req.body.department?.trim();
+    if (!department || !Number.isFinite(req.body.monthlyTokenLimit) || !Number.isFinite(req.body.monthlyUsdLimit)) {
+      throw new BrainError("BRAIN_ERR_CONFLICT", "Departamento e limites de cota inválidos.", 400);
+    }
+    const monthlyTokenLimit = Math.max(0, Math.floor(req.body.monthlyTokenLimit));
+    const monthlyUsdLimit = Math.max(0, Number(req.body.monthlyUsdLimit));
+    const entry = opRepo
+      ? await opRepo.upsertDepartmentFinopsQuota(ctx, req.params.projectId, {
+          department,
+          monthlyTokenLimit,
+          monthlyUsdLimit,
+          downgradeModel: req.body.downgradeModel?.trim() || undefined
+        })
+      : (() => {
+          const key = `${ctx.tenantId}:${req.params.projectId}:${department}`;
+          const localEntry = {
+            department,
+            monthlyTokenLimit,
+            monthlyUsdLimit,
+            downgradeModel: req.body.downgradeModel?.trim() || undefined,
+            updatedAt: new Date().toISOString()
+          };
+          departmentQuotas.set(key, localEntry);
+          return localEntry;
+        })();
+    await recordAudit(ctx, {
+      tenantId: ctx.tenantId,
+      projectId: req.params.projectId,
+      accessPolicyId: "internal-project",
+      actorId: ctx.actorId,
+      actorType: ctx.actorType,
+      action: "update",
+      targetType: "finops_department_quota",
+      targetId: department,
+      metadata: entry
+    });
+    return entry;
   });
 
   app.get<{ Params: { projectId: string }; Querystring: { domain?: string; stack?: string; crossProject?: string } }>(

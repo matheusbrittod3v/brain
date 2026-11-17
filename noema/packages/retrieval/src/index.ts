@@ -298,5 +298,6 @@ export {
   createPostgresRetrievalEngine,
   createPostgresRetrievalEngineForTesting
 } from "./sql-retrieval.js";
+export { ValkeyRetrievalCache } from "./valkey-cache.js";
 
 

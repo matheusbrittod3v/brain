@@ -12,21 +12,21 @@ const context = {
   allowedProjects: ["allowed-project"], allowedPolicies: ["public-org", "internal-project"]
 };
 
-async function openMcp(runtime) {
-  const server = createNoemaMcpServer(runtime, context, "internal-project");
+async function openMcp(runtime, customCtx = context) {
+  const server = createNoemaMcpServer(runtime, customCtx, "internal-project");
   const client = new Client({ name: "mcp-contract-test", version: "1.0.0" }, { capabilities: {} });
   const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
   await Promise.all([client.connect(clientTransport), server.connect(serverTransport)]);
   return { client, server };
 }
 
-test("stdio MCP catalog exposes exactly the canonical 13 tools", async () => {
+test("stdio MCP catalog exposes the 14 currently documented tools", async () => {
   const catalog = JSON.parse(readFileSync(fileURLToPath(new URL("../../../protocols/mcp-tools/catalog.json", import.meta.url)), "utf8"));
   const { client, server } = await openMcp(createNoemaRuntime(new InMemoryAuditLogger()));
   try {
     const listed = await client.listTools();
     assert.deepEqual(listed.tools.map((tool) => tool.name), catalog);
-    assert.equal(listed.tools.length, 13);
+    assert.equal(listed.tools.length, 14);
   } finally {
     await Promise.all([client.close(), server.close()]);
   }
@@ -248,5 +248,54 @@ test("brain_delegate_task creates a recurring schedule when cron is supplied", a
     assert.deepEqual(payload, { scheduleId: "schedule-1", status: "scheduled", cron: "0 9 * * 1" });
   } finally {
     await Promise.all([client.close(), server.close()]);
+  }
+});
+
+test("brain_change_decide blocks agent self-approval and lets authorized human approve draft", async () => {
+  const runtime = createNoemaRuntime(new InMemoryAuditLogger());
+  const agentMcp = await openMcp(runtime);
+  const humanCtx = {
+    tenantId: "tenant-a",
+    actorId: "human-1",
+    actorType: "human",
+    roles: ["tech-lead"],
+    allowedProjects: ["allowed-project"],
+    allowedPolicies: ["public-org", "internal-project"]
+  };
+  const humanMcp = await openMcp(runtime, humanCtx);
+  try {
+    const proposeRes = await agentMcp.client.callTool({
+      name: "brain_change_propose",
+      arguments: { projectId: "allowed-project", title: "Onboarding guide", content: "Monorepo map." }
+    });
+    assert.notEqual(proposeRes.isError, true);
+    const { proposalId } = JSON.parse(proposeRes.content[0].text);
+
+    const deniedRes = await agentMcp.client.callTool({
+      name: "brain_change_decide",
+      arguments: { projectId: "allowed-project", proposalId, decision: "approve" }
+    });
+    assert.equal(deniedRes.isError, true);
+
+    const decideRes = await humanMcp.client.callTool({
+      name: "brain_change_decide",
+      arguments: { projectId: "allowed-project", proposalId, decision: "approve", note: "Revisado via MCP" }
+    });
+    assert.notEqual(decideRes.isError, true);
+    const decided = JSON.parse(decideRes.content[0].text);
+    assert.equal(decided.proposalId, proposalId);
+    assert.equal(decided.status, "approved");
+    assert.equal(decided.itemStatus, "approved");
+    assert.equal(decided.reviewNote, "Revisado via MCP");
+
+    const storedRes = await humanMcp.client.callTool({
+      name: "brain_knowledge_get",
+      arguments: { projectId: "allowed-project", id: proposalId }
+    });
+    assert.notEqual(storedRes.isError, true);
+    const stored = JSON.parse(storedRes.content[0].text);
+    assert.equal(stored.item?.status, "approved");
+  } finally {
+    await Promise.all([agentMcp.client.close(), agentMcp.server.close(), humanMcp.client.close(), humanMcp.server.close()]);
   }
 });

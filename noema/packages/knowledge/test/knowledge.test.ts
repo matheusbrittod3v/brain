@@ -6,6 +6,23 @@ test("normalizes Windows paths to POSIX", () => {
   assert.equal(normalizePosixPath(".brain\\01-business\\BR-001.yaml"), ".brain/01-business/BR-001.yaml");
 });
 
+test("parses explicit discovery confidence, inference, and trust metadata", () => {
+  const item = parseKnowledgeFile({
+    tenantId: "acme",
+    projectId: "billing",
+    filePath: ".brain/03-architecture/inferred-api.md",
+    rawContent: [
+      "---", "id: DRAFT-API-BILLING", "type: api_contract", "title: Inferred API", "status: draft",
+      "access_policy: internal-project", "confidence: 0.65", "is_inferred: true", "trust_level: untrusted", "---", "",
+      "This API surface needs review."
+    ].join("\n")
+  });
+  assert.equal(item.confidence, 0.65);
+  assert.equal(item.isInferred, true);
+  assert.equal(item.trustLevel, "untrusted");
+  assert.equal(item.status, "draft");
+});
+
 test("parses YAML business rule into KnowledgeItem", () => {
   const raw = `
 id: BR-SUB-014

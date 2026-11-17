@@ -11,7 +11,10 @@ import {
   resolveCliAuthToken,
   runDoctor,
   runHandoffCreate,
+  runHookEmit,
+  runHookInstall,
   runInit,
+  runInitWithScip,
   runLocalTaskEnqueue,
   runLocalTaskList,
   runRunnerUp,
@@ -22,16 +25,105 @@ import {
   selectRunnerProfile
 } from "../src/commands.js";
 
-test("noema init and doctor work on existing repository", () => {
+test("noema init and doctor work on existing repository", async () => {
   const dir = mkdtempSync(join(tmpdir(), "noema-init-"));
   try {
     writeFileSync(join(dir, ".env.example"), "PORT=3000\nSECRET_MISSING=1\n");
-    const initRes = runInit(dir, "demo-proj");
+    mkdirSync(join(dir, "src"), { recursive: true });
+    writeFileSync(join(dir, "src/billing.ts"), "// @brain-rule BR-001\nexport function validateInvoice() {}\napp.get(\"/invoices\", () => {});\n");
+    writeFileSync(join(dir, "schema.sql"), "CREATE TABLE invoices (id TEXT);\n");
+    const initRes = await runInit(dir, "demo-proj");
     assert.equal(initRes.projectId, "demo-proj");
     assert.ok(existsSync(join(dir, ".brain/00-overview/vision.md")));
+    assert.ok(existsSync(join(dir, ".brain/00-overview/project-summary.md")));
+    assert.ok(existsSync(join(dir, ".brain/01-business/inferred-rules.md")));
+    assert.ok(existsSync(join(dir, ".brain/03-architecture/api-surface.md")));
+    assert.ok(existsSync(join(dir, ".brain/03-architecture/db-schemas.md")));
+    assert.ok(initRes.autodiscovery.symbolCount > 0);
+    assert.ok(initRes.draftsCreated.length > 0);
 
     const doc = runDoctor(dir, { PORT: "3000" });
     assert.deepEqual(doc.missingEnvVars, ["SECRET_MISSING"]);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("brain init applies Tree-sitter symbol extraction to Python drafts", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "noema-init-tree-sitter-"));
+  try {
+    mkdirSync(join(dir, "src"), { recursive: true });
+    writeFileSync(join(dir, "src/billing.py"), [
+      'description = """',
+      "def fake_invoice():",
+      "    return None",
+      '"""',
+      "",
+      "def calculate_invoice(total: float) -> float:",
+      "    return total",
+      ""
+    ].join("\n"));
+    const result = await runInit(dir, "tree-sitter-demo");
+    assert.equal(result.autodiscovery.symbolCount, 1);
+    assert.deepEqual(result.autodiscovery.treeSitter.activeLanguages, ["python"]);
+    assert.deepEqual(result.autodiscovery.treeSitter.fallbackFiles, []);
+    const businessDraft = readFileSync(join(dir, ".brain/01-business/inferred-rules.md"), "utf8");
+    assert.match(businessDraft, /calculate_invoice/);
+    assert.doesNotMatch(businessDraft, /fake_invoice/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("brain init reports test and infrastructure discovery in its output and draft", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "noema-init-test-infra-"));
+  try {
+    mkdirSync(join(dir, "tests"), { recursive: true });
+    mkdirSync(join(dir, ".github/workflows"), { recursive: true });
+    writeFileSync(join(dir, "tests/payment.spec.ts"), "test(\"payment\", () => {});\n");
+    writeFileSync(join(dir, "Dockerfile"), "FROM node:22\n");
+    writeFileSync(join(dir, ".github/workflows/ci.yml"), "name: CI\n");
+    const result = await runInit(dir, "test-infra-demo");
+    assert.equal(result.autodiscovery.testFileCount, 1);
+    assert.equal(result.autodiscovery.infrastructureFileCount, 2);
+    assert.ok(existsSync(join(dir, ".brain/05-code/test-and-infrastructure-map.md")));
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("brain init never overwrites generated or user-edited project files", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "noema-init-preserve-"));
+  try {
+    writeFileSync(join(dir, "package.json"), JSON.stringify({ name: "demo" }));
+    await runInit(dir, "demo");
+    const draftPath = join(dir, ".brain/00-overview/project-summary.md");
+    writeFileSync(draftPath, "# Human edit\n", "utf8");
+    writeFileSync(join(dir, ".project-brain.json"), "{\"projectId\":\"human-edit\"}\n", "utf8");
+    const second = await runInit(dir, "demo");
+    assert.equal(readFileSync(draftPath, "utf8"), "# Human edit\n");
+    assert.equal(readFileSync(join(dir, ".project-brain.json"), "utf8"), "{\"projectId\":\"human-edit\"}\n");
+    assert.ok(second.draftsSkipped.includes(".brain/00-overview/project-summary.md"));
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("brain init --scip runs the available language indexer before materializing drafts", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "noema-init-scip-"));
+  let indexedLanguage = "";
+  try {
+    writeFileSync(join(dir, "pyproject.toml"), "[project]\nname='demo'\n");
+    mkdirSync(join(dir, "src"), { recursive: true });
+    writeFileSync(join(dir, "src/main.py"), "def calculate_invoice():\n    return 1\n");
+    const result = await runInitWithScip(dir, "demo", async (root, language) => {
+      indexedLanguage = language;
+      writeFileSync(join(root, "index.scip"), "{\"metadata\":{\"toolInfo\":\"scip-python 1\",\"projectRoot\":\"file:///demo\"},\"documents\":[{\"relativePath\":\"src/main.py\",\"language\":\"python\",\"occurrences\":[{\"symbol\":\"scip-python python demo 1 `src.main`/calculate_invoice().\",\"range\":[0,4,22],\"role\":\"definition\"}]}]}", "utf8");
+      return { command: "scip-python", outputFile: join(root, "index.scip") };
+    });
+    assert.equal(indexedLanguage, "python");
+    assert.equal(result.autodiscovery.scipState, "available");
+    assert.ok(existsSync(join(dir, ".brain/05-code/scip-symbol-map.md")));
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
@@ -104,10 +196,13 @@ test("EdgeDatabase indexes FTS5 and revokes policies locally", () => {
       accessPolicyId: "confidential-business",
       contentHash: "h1"
     });
+    db.upsertItem({ id: "BR-2", projectId: "sub", title: "Outro", content: "Conteúdo restante", accessPolicyId: "public-org", contentHash: "h2" });
+    db.upsertEdge("BR-1", "BR-2", "RELATED_TO");
     assert.equal(db.searchFts("cancelamento").length, 1);
     const removed = db.revokePolicies(["confidential-business"]);
     assert.equal(removed, 1);
     assert.equal(db.searchFts("cancelamento").length, 0);
+    assert.equal(db.getRelatedItems("BR-1").length, 0, "policy revocation must remove graph relations touching revoked content");
     db.close();
   } finally {
     rmSync(dir, { recursive: true, force: true });
@@ -285,14 +380,54 @@ test("runValidate evaluates local architecture and business rule compliance", ()
   }
 });
 
-test("runRunnerUp supports --provider and --hybrid flags", async () => {
-  await assert.rejects(() => runRunnerUp({ provider: "anthropic" }), /ainda não/i);
-  await assert.rejects(() => runRunnerUp({ hybrid: true, provider: "openai" }), /ainda não/i);
-  const ollama = await runRunnerUp({ provider: "ollama" }, async () =>
-    new Response(JSON.stringify({ models: [{ name: "qwen2.5-coder:3b" }] }), { status: 200 })
-  );
-  assert.equal(ollama.mode, "local");
-  assert.equal(ollama.status, "ready");
+test("runRunnerUp supports --provider (ollama, fm, openai, anthropic) and --hybrid flags", async () => {
+  const prevOpenAi = process.env.OPENAI_API_KEY;
+  const prevAnthropic = process.env.ANTHROPIC_API_KEY;
+  try {
+    delete process.env.OPENAI_API_KEY;
+    delete process.env.ANTHROPIC_API_KEY;
+    await assert.rejects(() => runRunnerUp({ provider: "anthropic" }), /ANTHROPIC_API_KEY/i);
+    await assert.rejects(() => runRunnerUp({ hybrid: true }), /OPENAI_API_KEY/i);
+
+    process.env.OPENAI_API_KEY = "sk-test-key";
+    process.env.ANTHROPIC_API_KEY = "sk-ant-test-key";
+
+    const openai = await runRunnerUp({ provider: "openai" });
+    assert.equal(openai.mode, "cloud");
+    assert.equal(openai.provider, "openai");
+    assert.equal(openai.status, "ready");
+
+    const anthropic = await runRunnerUp({ provider: "anthropic" });
+    assert.equal(anthropic.mode, "cloud");
+    assert.equal(anthropic.provider, "anthropic");
+    assert.equal(anthropic.status, "ready");
+
+    const hybridFallback = await runRunnerUp({ hybrid: true, cloudProvider: "openai" }, async () =>
+      new Response("down", { status: 503 })
+    );
+    assert.equal(hybridFallback.mode, "hybrid");
+    assert.equal(hybridFallback.status, "cloud_fallback_ready");
+    assert.equal("cloudProvider" in hybridFallback ? hybridFallback.cloudProvider : undefined, "openai");
+
+    const ollama = await runRunnerUp({ provider: "ollama" }, async () =>
+      new Response(JSON.stringify({ models: [{ name: "qwen2.5-coder:3b" }] }), { status: 200 })
+    );
+    assert.equal(ollama.mode, "local");
+    assert.equal(ollama.status, "ready");
+
+    const fm = await runRunnerUp({
+      provider: "fm",
+      appleFmCheck: async () => ({ available: true, macOsVersion: "27.0.1", model: "apple-foundation-model:macos-27.0.1" })
+    });
+    assert.equal(fm.mode, "local");
+    assert.equal(fm.provider, "apple-fm");
+    assert.equal(fm.status, "ready");
+  } finally {
+    if (prevOpenAi === undefined) delete process.env.OPENAI_API_KEY;
+    else process.env.OPENAI_API_KEY = prevOpenAi;
+    if (prevAnthropic === undefined) delete process.env.ANTHROPIC_API_KEY;
+    else process.env.ANTHROPIC_API_KEY = prevAnthropic;
+  }
 });
 
 test("local task commands validate input and list persisted tasks", () => {
@@ -489,6 +624,69 @@ test("runScaffold generates CI Guardians workflow and applies ADR precedents", (
     const precedents = readFileSync(join(dir, "pay-service/.brain/03-architecture/decisions/ADR-PRECEDENTS.md"), "utf8");
     assert.match(precedents, /ADR-007/);
   } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("runHookInstall and runHookEmit install lifecycle scripts and emit events", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "noema-hooks-test-"));
+  try {
+    const installed = runHookInstall(dir, { harness: "claude-code", projectId: "billing" });
+    assert.equal(installed.installed, true);
+    const cfg = JSON.parse(readFileSync(join(dir, ".noema/hooks.json"), "utf8")) as { projectId: string; harness: string };
+    assert.equal(cfg.projectId, "billing");
+    assert.equal(cfg.harness, "claude-code");
+
+    let calledUrl = "";
+    const emitted = await runHookEmit(
+      {
+        hubUrl: "http://localhost:3333",
+        apiKey: "k",
+        projectId: "billing",
+        harness: "claude-code",
+        event: "session_end",
+        sessionId: "s-1",
+        summary: "Done"
+      },
+      async (url) => {
+        calledUrl = String(url);
+        return new Response(JSON.stringify({ ok: true }), { status: 200 });
+      }
+    );
+    assert.equal(emitted.status, 200);
+    assert.equal(calledUrl, "http://localhost:3333/v1/projects/billing/hooks/lifecycle");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("runSyncPush blocks staged drafts containing secrets locally before upload", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "noema-sync-push-secret-"));
+  const prevDisable = process.env.NOEMA_DISABLE_GITLEAKS;
+  process.env.NOEMA_DISABLE_GITLEAKS = "1";
+  try {
+    const db = new EdgeDatabase(join(dir, "edge.db"));
+    db.stageDraft(
+      "DRAFT-SEC-1",
+      "Config note",
+      "Use token ghp_abcdefghijklmnopqrstuvwxyz0123456789 for access"
+    );
+    let fetchCalled = false;
+    await assert.rejects(
+      () => runSyncPush(
+        { hubUrl: "http://localhost:3333", apiKey: "k", projectId: "billing", db },
+        async () => {
+          fetchCalled = true;
+          return new Response(JSON.stringify({ acceptedCount: 1 }), { status: 200 });
+        }
+      ),
+      /secret-scan|Gitleaks/i
+    );
+    assert.equal(fetchCalled, false);
+    db.close();
+  } finally {
+    if (prevDisable === undefined) delete process.env.NOEMA_DISABLE_GITLEAKS;
+    else process.env.NOEMA_DISABLE_GITLEAKS = prevDisable;
     rmSync(dir, { recursive: true, force: true });
   }
 });

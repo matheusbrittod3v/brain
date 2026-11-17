@@ -34,9 +34,9 @@ Um *Second Brain* empresarial concentra código-fonte, regras comerciais, contra
 
 ## 3. Exclusão de Segredos e Sanitização na Ingestão
 
-Antes de persistir qualquer arquivo ou chunk no `Ingestion Worker` (`packages/ingestion`):
-- **Scanner de Segredos:** Bloqueia ou mascara chaves de API, tokens JWT, senhas, chaves privadas PEM, strings de conexão e arquivos `.env`.
-- **Detecção de PII:** Aplica mascaramento configurável em dados pessoais vindos de CRM, tickets ou logs de suporte antes da indexação vetorial.
+Antes de persistir qualquer arquivo ou chunk no fluxo de ingestão:
+- **Scanner de Segredos:** Gitleaks bloqueia conteúdo com chaves de API, tokens JWT, senhas, chaves privadas PEM, strings de conexão e arquivos `.env`; a falha do scanner bloqueia a gravação.
+- **Detecção de PII:** Quando `AI_WORKER_URL` está configurado, a API e os workers chamam `/redact-pii` para sanitizar títulos e conteúdo de ingestão REST/Edge, Git e SaaS antes do parse, persistência ou embeddings. Falha ou resposta inválida bloqueia o conteúdo afetado. Sem essa configuração, a sanitização PII fica desativada. Presidio é usado quando instalado; o fallback cobre email e CPF, portanto não equivale a cobertura completa LGPD.
 
 ---
 
@@ -72,7 +72,7 @@ Mitigações obrigatórias:
 
 ## 6. Guardrails em 3 Camadas (Ingestão, Execução e Saída)
 
-1. **Guardrails de Ingestão:** `Gitleaks` + `Presidio` bloqueiam segredos e PII antes do índice; documentos externos recebem `trustLevel: "untrusted"`.
+1. **Guardrails de Ingestão:** Gitleaks bloqueia segredos; sanitização PII depende de `AI_WORKER_URL` e bloqueia a persistência quando configurada, mas indisponível. Documentos externos recebem `trustLevel: "untrusted"`.
 2. **Guardrails de Execução (Agentes & Brain Runner):**
    - *Command Denylist/Allowlist:* bloqueio de comandos destrutivos (`rm -rf`, `DROP TABLE`, `git push --force`) em sessões autônomas.
    - Limites rígidos de `max_steps`, `token_budget` e `timeout` por tarefa, além de modo `draft-only` para subagentes em background.
@@ -95,6 +95,6 @@ Mitigações obrigatórias:
 Quando o funcionário utiliza o **Local Edge Brain** offline ([hybrid-edge-sync.md](../01-architecture/hybrid-edge-sync.md)):
 1. **Snapshot Filtrado por Cargo/Setor (`pull`):** O servidor aplica o OPA antes de empacotar qualquer delta para o SQLite local; dados fora do escopo do cargo nunca chegam ao disco do colaborador.
 2. **Expiração & Revogação Remota (*Policy Revocation*):** O *offline lease* dura **24h (máximo 7 dias)** e o refresh token no keychain exige conexão online com o Keycloak/Hub para renovar (nunca renova offline). Expirado o prazo, o SQLCipher bloqueia o banco local; ao reconectar, o próximo `brain sync pull` remove automaticamente todos os itens revogados.
-3. **Ingestion Gate no `push`:** Nenhum rascunho offline sobe para o Hub central sem passar por `Gitleaks` + `Presidio` e sem respeitar o fluxo de aprovação (`draft` / `brain_change_propose`) correspondente ao cargo do autor.
+3. **Ingestion Gate no `push`:** Nenhum rascunho offline sobe para o Hub central sem passar por Gitleaks e sem respeitar o fluxo de aprovação (`draft` / `brain_change_propose`) correspondente ao cargo do autor. Com `AI_WORKER_URL` configurado, título e conteúdo também passam por `/redact-pii`; sem ele, PII não é sanitizada automaticamente.
 4. **Paridade de Login e Permissões no Painel Offline (`brain ui`):** O dashboard local exige `OfflineLease` válido ou credencial local do usuário e aplica as mesmas restrições de `tenantId`, `actorId`, `allowedProjects` e `allowedPolicies` sobre o snapshot local, refletindo o escopo de visibilidade do usuário mesmo sem conexão.
 

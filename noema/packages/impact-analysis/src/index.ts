@@ -202,25 +202,26 @@ export async function analyzeDistributedImpact(
   const hypotheses = all.filter((h) => h.isInferred);
   const directImpacts = all.filter((h) => h.hops <= 1);
   const transitiveImpacts = all.filter((h) => h.hops > 1);
+  const confirmedTransitiveImpacts = confirmedImpacts.filter((h) => h.hops > 1);
 
   const crossServiceImpacts = options.crossServiceRegistry
     ? await resolveCrossServiceImpacts(
         ctx,
         projectId,
         targetIds,
-        all,
+        confirmedImpacts,
         options.crossServiceRegistry,
         options.contractIds
       )
     : [];
 
   const criticalRulesImpacted = options.rules
-    ? resolveCriticalImpactedRules(targetIds, all, options.rules)
+    ? resolveCriticalImpactedRules(targetIds, confirmedImpacts, options.rules)
     : [];
 
   const riskLevel = computeRiskLevel(
     confirmedImpacts,
-    transitiveImpacts,
+    confirmedTransitiveImpacts,
     crossServiceImpacts,
     criticalRulesImpacted
   );

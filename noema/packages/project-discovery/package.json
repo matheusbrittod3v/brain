@@ -10,12 +10,12 @@
     "test": "node --test dist/test/*.test.js"
   },
   "dependencies": {
+    "@noema/code-intelligence": "*",
     "@noema/core": "*",
-    "@noema/code-intelligence": "*"
+    "ignore": "^7.0.16"
   },
   "devDependencies": {
     "@types/node": "^22.10.0",
     "typescript": "^5.7.2"
   }
 }
-

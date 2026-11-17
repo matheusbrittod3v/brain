@@ -1,0 +1,18 @@
+id: BR-NOEMA-003
+type: business_rule
+title: Scan Obrigatório de Segredos (Gitleaks Fail-Closed)
+status: approved
+access_policy: internal-project
+trust_level: verified
+priority: critical
+tags: [security, gitleaks, ingestion]
+description: >
+  Todo conteúdo ingerido via API, CLI, GitHub, conectores SaaS, Edge sync push,
+  lifecycle hooks ou registro de serviços deve passar pelo scan de segredos (Gitleaks)
+  antes de ser persistido. Se um segredo for detectado ou o scanner estiver indisponível,
+  a gravação deve ser bloqueada (fail-closed).
+conditions:
+  - Ingestão de arquivos, propostas, handoffs ou perfis
+effects:
+  - Bloqueio HTTP 422 em segredo detectado e HTTP 503 se Gitleaks estiver indisponível
+

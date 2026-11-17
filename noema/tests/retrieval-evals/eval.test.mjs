@@ -119,3 +119,90 @@ test("retrieval evals: 100+ golden queries recall and zero-leakage", () => {
   assert.equal(forbiddenLeaks, 0, "restricted sources must never appear in emitted Context Packs");
   console.log(JSON.stringify({ event: "retrieval_eval_summary", queryCount: queries.length, uniqueQueries, uniqueExpectedSets, recallAtK, knownRelevantSourceRate, forbiddenLeaks }));
 });
+
+test("retrieval evals: multi-project exhaustive Precision@K, MRR, and Promptfoo/Ragas record export", () => {
+  const graph = new KnowledgeGraphStore();
+  const retrieval = new HybridRetrievalEngine(graph);
+  const engine = new ContextEngine(retrieval);
+  const now = new Date().toISOString();
+
+  const items = [
+    { id: "PAY-1", projectId: "payments", title: "Gateway retry policy", content: "Idempotent retry with exponential backoff for PIX payments.", policy: "internal-project" },
+    { id: "PAY-2", projectId: "payments", title: "Webhook HMAC verification", content: "Verify X-Signature-256 HMAC on PIX settlement webhooks.", policy: "internal-project" },
+    { id: "PAY-SEC", projectId: "payments", title: "Merchant private key", content: "Private HSM key for PIX settlement.", policy: "restricted-security" },
+    { id: "AUTH-1", projectId: "identity", title: "OIDC PKCE flow", content: "Authorization code flow with PKCE S256 for web clients.", policy: "internal-project" },
+    { id: "AUTH-2", projectId: "identity", title: "Session token rotation", content: "Refresh token rotation with reuse detection in OIDC.", policy: "internal-project" }
+  ];
+
+  for (const item of items) {
+    retrieval.upsertItem({
+      id: item.id,
+      tenantId: "acme",
+      projectId: item.projectId,
+      domainId: 2,
+      type: "business_rule",
+      title: item.title,
+      content: item.content,
+      status: "approved",
+      sourceId: "git",
+      sourceOrigin: "internal",
+      sourceKind: "git",
+      sourceVersion: "v1",
+      sourceUri: `.brain/${item.id}.yaml`,
+      version: 1,
+      contentHash: `h-${item.id}`,
+      confidence: 1.0,
+      trustLevel: "verified",
+      isInferred: false,
+      tags: [],
+      relatedIds: [],
+      accessPolicyId: item.policy,
+      createdAt: now,
+      updatedAt: now
+    });
+  }
+
+  const multiProjectCases = [
+    { projectId: "payments", query: "PIX retry backoff", relevantIds: ["PAY-1"], forbiddenIds: ["PAY-SEC", "AUTH-1"] },
+    { projectId: "payments", query: "HMAC webhook signature PIX", relevantIds: ["PAY-2"], forbiddenIds: ["PAY-SEC", "AUTH-2"] },
+    { projectId: "identity", query: "OIDC PKCE S256", relevantIds: ["AUTH-1"], forbiddenIds: ["PAY-1", "PAY-SEC"] },
+    { projectId: "identity", query: "refresh token rotation OIDC", relevantIds: ["AUTH-2"], forbiddenIds: ["PAY-2", "PAY-SEC"] }
+  ];
+
+  const ctx = {
+    tenantId: "acme",
+    actorId: "eval-multi",
+    actorType: "human",
+    roles: ["developer"],
+    allowedProjects: ["payments", "identity"],
+    allowedPolicies: ["internal-project"]
+  };
+
+  let precisionAt1Sum = 0;
+  let mrrSum = 0;
+  const promptfooRecords = [];
+  for (const tc of multiProjectCases) {
+    const pack = engine.buildContextPack(ctx, { projectId: tc.projectId, task: tc.query });
+    const returnedIds = pack.sources.map((s) => s.id);
+    assert.ok(returnedIds.length > 0);
+    if (tc.relevantIds.includes(returnedIds[0])) precisionAt1Sum += 1;
+    const firstRank = returnedIds.findIndex((id) => tc.relevantIds.includes(id));
+    assert.ok(firstRank >= 0, `expected relevant item for ${tc.query}`);
+    mrrSum += 1 / (firstRank + 1);
+    for (const forbidden of tc.forbiddenIds) {
+      assert.equal(returnedIds.includes(forbidden), false, `cross-project/policy leak: ${forbidden}`);
+    }
+    promptfooRecords.push({
+      vars: { projectId: tc.projectId, query: tc.query },
+      contexts: pack.sources.map((s) => s.content),
+      expectedIds: tc.relevantIds
+    });
+  }
+
+  const precisionAt1 = precisionAt1Sum / multiProjectCases.length;
+  const mrr = mrrSum / multiProjectCases.length;
+  assert.equal(precisionAt1, 1);
+  assert.equal(mrr, 1);
+  assert.equal(promptfooRecords.length, 4);
+  console.log(JSON.stringify({ event: "multi_project_eval_summary", cases: multiProjectCases.length, precisionAt1, mrr }));
+});

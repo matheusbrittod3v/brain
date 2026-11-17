@@ -4,6 +4,8 @@ import type { KnowledgeItem } from "@noema/core";
 export type SaasProvider =
   | "jira"
   | "linear"
+  | "clickup"
+  | "github-projects"
   | "notion"
   | "confluence"
   | "figma"
@@ -16,11 +18,19 @@ export type SaasProvider =
   | "bitbucket"
   | "google-drive"
   | "grafana"
-  | "teams";
+  | "teams"
+  | "postgresql"
+  | "supabase"
+  | "mysql"
+  | "aws"
+  | "gcp"
+  | "azure";
 
 const PROVIDER_DEFAULTS: Record<SaasProvider, { domainId: number; type: KnowledgeItem["type"] }> = {
   jira: { domainId: 6, type: "task" },
   linear: { domainId: 6, type: "task" },
+  clickup: { domainId: 6, type: "task" },
+  "github-projects": { domainId: 6, type: "task" },
   notion: { domainId: 2, type: "document" },
   confluence: { domainId: 2, type: "document" },
   figma: { domainId: 2, type: "document" },
@@ -33,7 +43,13 @@ const PROVIDER_DEFAULTS: Record<SaasProvider, { domainId: number; type: Knowledg
   slack: { domainId: 7, type: "document" },
   teams: { domainId: 7, type: "document" },
   gitlab: { domainId: 4, type: "integration" },
-  bitbucket: { domainId: 4, type: "integration" }
+  bitbucket: { domainId: 4, type: "integration" },
+  postgresql: { domainId: 4, type: "integration" },
+  supabase: { domainId: 4, type: "integration" },
+  mysql: { domainId: 4, type: "integration" },
+  aws: { domainId: 8, type: "integration" },
+  gcp: { domainId: 8, type: "integration" },
+  azure: { domainId: 8, type: "integration" }
 };
 
 export interface ExternalSaasRecord {
@@ -212,47 +228,122 @@ export async function dispatchChannelNotification(
         }
       : input.channel === "teams"
         ? {
-            "@type": "MessageCard",
-            summary: input.title,
-            text,
-            ...(hasProposalVersion
-              ? {
-                  potentialAction: actionChoices.map((choice) => ({
-                    "@type": "HttpPOST",
-                    name: choice.label,
-                    body: JSON.stringify({
+            type: "message",
+            attachments: [
+              {
+                contentType: "application/vnd.microsoft.card.adaptive",
+                contentUrl: null,
+                content: {
+                  $schema: "http://adaptivecards.io/schemas/adaptive-card.json",
+                  type: "AdaptiveCard",
+                  version: "1.4",
+                  body: [
+                    { type: "TextBlock", text: input.title, weight: "Bolder", size: "Medium", wrap: true },
+                    { type: "TextBlock", text, wrap: true },
+                    {
+                      type: "FactSet",
+                      facts: [
+                        { title: "Projeto", value: input.projectId },
+                        { title: "Proposta", value: input.proposalId },
+                        ...(hasProposalVersion ? [{ title: "Versão", value: String(input.proposalVersion) }] : [])
+                      ]
+                    }
+                  ],
+                  actions: [
+                    { type: "Action.OpenUrl", title: "Abrir no Command Center", url: input.reviewUrl },
+                    ...(hasProposalVersion
+                      ? actionChoices.map((choice) => ({
+                          type: "Action.Execute",
+                          title: choice.label,
+                          verb: choice.id,
+                          data: {
+                            action: choice.id,
+                            decision: choice.decision,
+                            projectId: input.projectId,
+                            proposalId: input.proposalId,
+                            proposalVersion: input.proposalVersion
+                          }
+                        }))
+                      : [])
+                  ]
+                }
+              }
+            ]
+          }
+        : input.channel === "jira"
+          ? {
+              body: {
+                type: "doc",
+                version: 1,
+                content: [
+                  {
+                    type: "paragraph",
+                    content: [{ type: "text", text }]
+                  },
+                  {
+                    type: "paragraph",
+                    content: [
+                      {
+                        type: "text",
+                        text: `Revisar no Noema: ${input.reviewUrl}`,
+                        marks: [{ type: "link", attrs: { href: input.reviewUrl } }]
+                      }
+                    ]
+                  }
+                ]
+              },
+              properties: [
+                {
+                  key: "noema.humanops",
+                  value: {
+                    projectId: input.projectId,
+                    proposalId: input.proposalId,
+                    proposalVersion: input.proposalVersion,
+                    idempotencyKey,
+                    actions: actionChoices.map((choice) => ({
                       action: choice.id,
                       decision: choice.decision,
-                      projectId: input.projectId,
-                      proposalId: input.proposalId,
-                      proposalVersion: input.proposalVersion
-                    })
-                  }))
+                      label: choice.label
+                    }))
+                  }
                 }
-              : {})
-          }
-        : {
-            projectId: input.projectId,
-            ...(input.questionId ? { taskId: input.taskId, questionId: input.questionId, question: input.question } : { proposalId: input.proposalId, proposalVersion: input.proposalVersion }),
-            title: input.title,
-            reviewUrl: input.reviewUrl,
-            message: text,
-            idempotencyKey,
-            ...(hasProposalVersion
-              ? {
+              ]
+            }
+          : input.channel === "clickup"
+            ? {
+                comment_text: `${text}\n\n[Abrir no Command Center](${input.reviewUrl})`,
+                notify_all: true,
+                noemaHumanOps: {
+                  projectId: input.projectId,
+                  proposalId: input.proposalId,
+                  proposalVersion: input.proposalVersion,
+                  idempotencyKey,
                   actions: actionChoices.map((choice) => ({
                     action: choice.id,
                     decision: choice.decision,
-                    label: choice.label,
-                    payload: {
-                      projectId: input.projectId,
-                      proposalId: input.proposalId,
-                      proposalVersion: input.proposalVersion
-                    }
+                    label: choice.label
                   }))
                 }
-              : {})
-          };
+              }
+            : {
+                subject: `[Noema HumanOps] ${input.title}`,
+                text: `${text}\n\nRevisar: ${input.reviewUrl}`,
+                html: `<p>${text.replace(/</g, "&lt;")}</p><p><a href="${input.reviewUrl}">Abrir no Command Center</a></p>`,
+                headers: {
+                  "X-Noema-Idempotency-Key": idempotencyKey
+                },
+                actionLinks: actionChoices.map((choice) => ({
+                  action: choice.id,
+                  decision: choice.decision,
+                  label: choice.label,
+                  url: `${input.reviewUrl}?decision=${choice.decision}`
+                })),
+                metadata: {
+                  projectId: input.projectId,
+                  proposalId: input.proposalId,
+                  proposalVersion: input.proposalVersion
+                }
+              };
 
   const res = await fetchFn(input.webhookUrl, {
     method: "POST",
@@ -263,5 +354,96 @@ export async function dispatchChannelNotification(
     body: JSON.stringify(body)
   });
   return { delivered: res.ok, channel: input.channel, statusCode: res.status };
+}
+
+export interface NormalizedChannelAction {
+  decision: "approve" | "reject" | "request_changes";
+  projectId: string;
+  proposalId: string;
+  proposalVersion: number;
+  externalUserId: string;
+  externalEventId: string;
+  comment?: string;
+}
+
+const CHANNEL_ACTION_MAP: Record<string, "approve" | "reject" | "request_changes"> = {
+  noema_approve: "approve",
+  approve: "approve",
+  noema_reject: "reject",
+  reject: "reject",
+  noema_request_changes: "request_changes",
+  request_changes: "request_changes"
+};
+
+/** Normalizes native Teams Adaptive Card, Jira ADF, ClickUp, and Email webhook payloads into a HumanOps decision. */
+export function parseChannelActionPayload(
+  channel: Exclude<HumanOpsChannel, "slack">,
+  body: Record<string, unknown>
+): NormalizedChannelAction | undefined {
+  const asRec = (v: unknown): Record<string, unknown> | undefined =>
+    v && typeof v === "object" && !Array.isArray(v) ? (v as Record<string, unknown>) : undefined;
+
+  let rawAction = typeof body.action === "string" ? body.action : undefined;
+  let rawDecision = typeof body.decision === "string" ? body.decision : undefined;
+  let projectId = typeof body.projectId === "string" ? body.projectId : undefined;
+  let proposalId = typeof body.proposalId === "string" ? body.proposalId : undefined;
+  let proposalVersion = typeof body.proposalVersion === "number" ? body.proposalVersion : undefined;
+  let externalUserId = typeof body.externalUserId === "string" ? body.externalUserId : undefined;
+  let externalEventId = typeof body.externalEventId === "string" ? body.externalEventId : undefined;
+  let comment = typeof body.comment === "string" ? body.comment : undefined;
+
+  if (channel === "teams") {
+    const actionObj = asRec(body.action);
+    const data = asRec(actionObj?.data) ?? asRec(body.value);
+    const from = asRec(body.from);
+    rawAction = rawAction ?? (typeof actionObj?.verb === "string" ? actionObj.verb : typeof data?.action === "string" ? data.action : undefined);
+    rawDecision = rawDecision ?? (typeof data?.decision === "string" ? data.decision : undefined);
+    projectId = projectId ?? (typeof data?.projectId === "string" ? data.projectId : undefined);
+    proposalId = proposalId ?? (typeof data?.proposalId === "string" ? data.proposalId : undefined);
+    proposalVersion = proposalVersion ?? (typeof data?.proposalVersion === "number" ? data.proposalVersion : undefined);
+    externalUserId = externalUserId ?? (typeof from?.id === "string" ? from.id : undefined);
+    externalEventId = externalEventId ?? (typeof body.id === "string" ? body.id : undefined);
+  } else if (channel === "jira") {
+    const user = asRec(body.user);
+    const issue = asRec(body.issue);
+    const props = asRec(issue?.properties);
+    const noemaProp = asRec(props?.["noema.humanops"]);
+    const commentObj = asRec(body.comment);
+    projectId = projectId ?? (typeof noemaProp?.projectId === "string" ? noemaProp.projectId : undefined);
+    proposalId = proposalId ?? (typeof noemaProp?.proposalId === "string" ? noemaProp.proposalId : undefined);
+    proposalVersion = proposalVersion ?? (typeof noemaProp?.proposalVersion === "number" ? noemaProp.proposalVersion : undefined);
+    externalUserId = externalUserId ?? (typeof user?.accountId === "string" ? user.accountId : undefined);
+    externalEventId = externalEventId ?? (typeof body.webhookEvent === "string" && typeof body.timestamp === "number" ? `${body.webhookEvent}:${body.timestamp}` : undefined);
+    comment = comment ?? (typeof commentObj?.body === "string" ? commentObj.body : undefined);
+  } else if (channel === "clickup") {
+    const user = asRec(body.user);
+    const meta = asRec(body.noemaHumanOps) ?? asRec(body.data);
+    projectId = projectId ?? (typeof meta?.projectId === "string" ? meta.projectId : undefined);
+    proposalId = proposalId ?? (typeof meta?.proposalId === "string" ? meta.proposalId : undefined);
+    proposalVersion = proposalVersion ?? (typeof meta?.proposalVersion === "number" ? meta.proposalVersion : undefined);
+    externalUserId = externalUserId ?? (user?.id !== undefined ? String(user.id) : undefined);
+    externalEventId = externalEventId ?? (typeof body.webhook_id === "string" ? `${body.webhook_id}:${String(body.event ?? "action")}` : undefined);
+  } else if (channel === "email") {
+    const meta = asRec(body.metadata);
+    projectId = projectId ?? (typeof meta?.projectId === "string" ? meta.projectId : undefined);
+    proposalId = proposalId ?? (typeof meta?.proposalId === "string" ? meta.proposalId : undefined);
+    proposalVersion = proposalVersion ?? (typeof meta?.proposalVersion === "number" ? meta.proposalVersion : undefined);
+    externalUserId = externalUserId ?? (typeof body.recipient === "string" ? body.recipient : undefined);
+    externalEventId = externalEventId ?? (typeof body.messageId === "string" ? body.messageId : undefined);
+  }
+
+  const decision = (rawDecision ? CHANNEL_ACTION_MAP[rawDecision] : undefined) ?? (rawAction ? CHANNEL_ACTION_MAP[rawAction] : undefined);
+  if (!decision || !projectId || !proposalId || !Number.isInteger(proposalVersion) || Number(proposalVersion) < 1 || !externalUserId || !externalEventId) {
+    return undefined;
+  }
+  return {
+    decision,
+    projectId,
+    proposalId,
+    proposalVersion: Number(proposalVersion),
+    externalUserId,
+    externalEventId,
+    ...(comment ? { comment } : {})
+  };
 }
 

@@ -30,6 +30,7 @@
     "@noema/graph": "*",
     "@noema/impact-analysis": "*",
     "@noema/knowledge": "*",
+    "@noema/memory": "*",
     "@noema/retrieval": "*",
     "@noema/workspace-detection": "*",
     "zod": "^4.6.7"

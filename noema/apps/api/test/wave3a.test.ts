@@ -267,9 +267,10 @@ test("API PG mode reads runner tasks from Postgres and calls privacyEraseSubject
     assert.equal(eraseRes.json().deletedRunnerTasks, 0);
     assert.equal(eraseRes.json().deletedNotificationPreferences, 0);
     assert.equal(eraseRes.json().deletedNotificationOutbox, 0);
-    assert.equal(eraseRes.json().complete, false);
-    assert.equal(eraseRes.json().limitations.length, 5);
-    assert.equal(deletedQueries.length, 12);
+    assert.equal(eraseRes.json().cryptoShredded, true);
+    assert.equal(eraseRes.json().complete, true);
+    assert.equal(eraseRes.json().limitations.length, 2);
+    assert.equal(deletedQueries.length, 13);
     assert.match((deletedQueries[0] as { sql: string }).sql, /ANY\(tags\)/);
     assert.ok(deletedQueries.some((query) => (query as { sql: string }).sql.includes("INSERT INTO sync_project_locks")));
   } finally {
@@ -952,6 +953,195 @@ test("cross-project scaffold recommendations, service registration, access polic
     const livingBody = livingRes.json();
     assert.ok(livingBody.drafts.length >= 1);
     assert.equal(livingBody.submittedCount, livingBody.drafts.length);
+  } finally {
+    await app.close();
+  }
+});
+
+test("developer cross-project profile and IDE/CLI lifecycle hooks work end-to-end", async () => {
+  const audit = new InMemoryAuditLogger();
+  const app = buildApp("test-key", ["sub", "billing-core"], audit);
+  const headers = { authorization: "Bearer test-key" };
+  try {
+    // 1. Save cross-project developer profile
+    const putRes = await app.inject({
+      method: "PUT",
+      url: "/v1/profile/developer",
+      headers,
+      payload: {
+        preferredPackageManager: "pnpm",
+        preferredTestLayout: "co-located",
+        preferredArchitectureStyle: "layered",
+        preferredHarness: "antigravity",
+        codingConventions: ["early-return", "strict-typescript"],
+        optInCrossProject: true
+      }
+    });
+    assert.equal(putRes.statusCode, 200);
+    assert.equal(putRes.json().profile.preferredPackageManager, "pnpm");
+
+    // 2. Context Pack includes developerProfile across projects
+    const ctxRes = await app.inject({
+      method: "POST",
+      url: "/v1/projects/billing-core/context",
+      headers,
+      payload: { task: "Implementar novo endpoint" }
+    });
+    assert.equal(ctxRes.statusCode, 200);
+    assert.equal(ctxRes.json().developerProfile?.preferredPackageManager, "pnpm");
+
+    // 3. Lifecycle hook session_end creates automatic handoff
+    const endRes = await app.inject({
+      method: "POST",
+      url: "/v1/projects/sub/hooks/lifecycle",
+      headers,
+      payload: {
+        harness: "claude-code",
+        event: "session_end",
+        sessionId: "sess-hook-1",
+        summary: "Implementado endpoint de estorno; faltam testes E2E.",
+        modifiedFiles: ["src/refund.ts"],
+        branch: "feat/refund"
+      }
+    });
+    assert.equal(endRes.statusCode, 200);
+    assert.ok(endRes.json().handoffCreated?.handoffId);
+
+    // 4. Lifecycle hook session_start in another harness returns developerProfile + latestHandoff
+    const startRes = await app.inject({
+      method: "POST",
+      url: "/v1/projects/sub/hooks/lifecycle",
+      headers,
+      payload: {
+        harness: "codex",
+        event: "session_start",
+        sessionId: "sess-hook-2",
+        taskId: endRes.json().handoffCreated.taskId
+      }
+    });
+    assert.equal(startRes.statusCode, 200);
+    assert.equal(startRes.json().developerProfile?.preferredHarness, "antigravity");
+    assert.equal(startRes.json().latestHandoff?.fromAgent, "claude-code");
+
+    // 5. Delete profile
+    const delRes = await app.inject({ method: "DELETE", url: "/v1/profile/developer", headers });
+    assert.equal(delRes.statusCode, 200);
+    assert.equal(delRes.json().deleted, true);
+  } finally {
+    await app.close();
+  }
+});
+
+test("Access admin (members/grants/policies), integration reconnect/fallback-owner, and FinOps quotas work end-to-end", async () => {
+  const app = buildApp("test-secret-key", ["sub", "other"], new InMemoryAuditLogger());
+  const headers = { authorization: "Bearer test-secret-key" };
+  try {
+    // Access profile reports managementAvailable: true
+    const profileRes = await app.inject({ method: "GET", url: "/v1/projects/sub/access/profile", headers });
+    assert.equal(profileRes.statusCode, 200);
+    assert.equal(profileRes.json().managementAvailable, true);
+
+    // Member role assignment
+    const roleRes = await app.inject({
+      method: "PUT",
+      url: "/v1/projects/sub/access/members/alice/roles",
+      headers,
+      payload: { roles: ["tech-lead", "reviewer"], allowedPolicies: ["internal-project", "public-org"] }
+    });
+    assert.equal(roleRes.statusCode, 200);
+    assert.deepEqual(roleRes.json().roles, ["tech-lead", "reviewer"]);
+
+    const membersRes = await app.inject({ method: "GET", url: "/v1/projects/sub/access/members", headers });
+    assert.equal(membersRes.statusCode, 200);
+    assert.equal(membersRes.json().members.length, 1);
+
+    // Temporary grant create + list + revoke
+    const grantRes = await app.inject({
+      method: "POST",
+      url: "/v1/projects/sub/access/grants",
+      headers,
+      payload: { actorId: "contractor-1", roles: ["developer"], policyIds: ["internal-project"], ttlMinutes: 30 }
+    });
+    assert.equal(grantRes.statusCode, 200);
+    const grantId = grantRes.json().grantId as string;
+
+    const grantsList = await app.inject({ method: "GET", url: "/v1/projects/sub/access/grants", headers });
+    assert.equal(grantsList.statusCode, 200);
+    assert.equal(grantsList.json().grants.length, 1);
+
+    // A grant ID from a different project must not be listed or revoked here.
+    {
+      const otherGrantRes = await app.inject({
+        method: "POST",
+        url: "/v1/projects/other/access/grants",
+        headers,
+        payload: { actorId: "contractor-2", roles: ["developer"], policyIds: ["internal-project"], ttlMinutes: 30 }
+      });
+      assert.equal(otherGrantRes.statusCode, 200);
+      const otherGrantId = otherGrantRes.json().grantId as string;
+
+      const crossProjectRevoke = await app.inject({
+        method: "DELETE",
+        url: `/v1/projects/sub/access/grants/${otherGrantId}`,
+        headers
+      });
+      assert.equal(crossProjectRevoke.statusCode, 404);
+
+      const otherProjectList = await app.inject({
+        method: "GET",
+        url: "/v1/projects/other/access/grants",
+        headers
+      });
+      assert.equal(otherProjectList.json().grants.length, 1);
+    }
+
+    const revokeGrant = await app.inject({ method: "DELETE", url: `/v1/projects/sub/access/grants/${grantId}`, headers });
+    assert.equal(revokeGrant.statusCode, 200);
+    assert.equal(revokeGrant.json().revoked, true);
+
+    // Policy catalog edit
+    const policyRes = await app.inject({
+      method: "PUT",
+      url: "/v1/projects/sub/access/policies/restricted-security",
+      headers,
+      payload: { label: "Security Critical", description: "Somente AppSec e Admin", allowedRoles: ["appsec", "admin"] }
+    });
+    assert.equal(policyRes.statusCode, 200);
+    assert.equal(policyRes.json().label, "Security Critical");
+
+    // Integration reconnect + fallback owner
+    const ownerRes = await app.inject({
+      method: "PUT",
+      url: "/v1/projects/sub/integrations/jira/fallback-owner",
+      headers,
+      payload: { fallbackOwner: "sre-oncall@acme.dev" }
+    });
+    assert.equal(ownerRes.statusCode, 200);
+    assert.equal(ownerRes.json().fallbackOwner, "sre-oncall@acme.dev");
+
+    const reconnectRes = await app.inject({
+      method: "POST",
+      url: "/v1/projects/sub/integrations/jira/reconnect",
+      headers
+    });
+    assert.equal(reconnectRes.statusCode, 200);
+    assert.equal(reconnectRes.json().provider, "jira");
+
+    // FinOps department quota + infra/energy estimate
+    const quotaRes = await app.inject({
+      method: "PUT",
+      url: "/v1/projects/sub/finops/quotas",
+      headers,
+      payload: { department: "platform-eng", monthlyTokenLimit: 500000, monthlyUsdLimit: 120 }
+    });
+    assert.equal(quotaRes.statusCode, 200);
+    assert.equal(quotaRes.json().department, "platform-eng");
+
+    const finopsRes = await app.inject({ method: "GET", url: "/v1/projects/sub/finops", headers });
+    assert.equal(finopsRes.statusCode, 200);
+    assert.equal(finopsRes.json().infrastructureEstimate.basis, "telemetry_derived");
+    assert.equal(finopsRes.json().departmentQuotas.length, 1);
+    assert.equal(finopsRes.json().departmentQuotas[0].withinQuota, true);
   } finally {
     await app.close();
   }

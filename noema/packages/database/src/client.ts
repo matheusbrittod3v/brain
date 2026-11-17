@@ -139,6 +139,7 @@ export async function withTenantRls<T>(
   return db.transaction(async (tx) => {
     await tx.execute(sql`SELECT
       set_config('app.current_tenant_id', ${resolved.tenantId}, true),
+      set_config('app.current_actor_id', ${ctx.actorId}, true),
       set_config('app.allowed_projects', ${resolved.allowedProjectsCsv}, true),
       set_config('app.allowed_policies', ${resolved.allowedPoliciesCsv}, true)`);
     return fn(tx as unknown as NoemaDb);

@@ -44,6 +44,7 @@ export interface ContextPack {
     services: Array<{ id: string; title: string; sourceUri: string }>;
     tests: string[];
     tasks: Array<{ id: string; title: string; status: string }>;
+    memories: Array<{ id: string; layer: string; content: string; createdAt: string }>;
     federatedContracts?: Array<{ contractId: string; fromService: string; toProjectId: string; relation: string; schemaVersion: string }>;
   };
   warnings: string[];
@@ -61,6 +62,8 @@ export interface BuildContextPackOptions {
   explain?: boolean;
   activeLeases?: string[];
   federatedContracts?: Array<{ contractId: string; fromService: string; toProjectId: string; relation: string; schemaVersion: string }>;
+  sessionId?: string;
+  memories?: Array<{ id: string; layer: string; content: string; createdAt: string; sessionId?: string; confidence: number; isInferred: boolean }>;
 }
 
 export interface SyncRetrievalEngineContract {
@@ -197,6 +200,7 @@ function assembleContextPackFromHits(
   const warnings: string[] = [];
   const conflicts: ContextPack["conflicts"] = [];
   const explainList: NonNullable<ContextPack["explain"]> = [];
+  const memories: ContextPack["context"]["memories"] = [];
 
   if (classification.fallbackApplied) {
     warnings.push(
@@ -213,6 +217,14 @@ function assembleContextPackFromHits(
 
   const seenById = new Map<string, { sourceKind: string; contentHash: string }>();
   const effectiveBudget = Math.floor(budget * 0.9);
+  const taskTerms = new Set(opts.task.toLowerCase().match(/[\p{L}\p{N}]{3,}/gu) ?? []);
+  const relevantMemories = (opts.memories ?? []).filter((memory) => {
+    if (!["episodic", "semantic", "procedural"].includes(memory.layer)) return false;
+    const contentTerms = new Set(memory.content.toLowerCase().match(/[\p{L}\p{N}]{3,}/gu) ?? []);
+    return [...taskTerms].some((term) => contentTerms.has(term));
+  }).sort((a, b) => b.createdAt.localeCompare(a.createdAt)).slice(0, 5);
+  const memoryBudget = relevantMemories.length > 0 ? Math.floor(effectiveBudget * 0.2) : 0;
+  const knowledgeBudget = effectiveBudget - memoryBudget;
   let usedTokens = 0;
   for (const hit of hits) {
     const item = hit.item;
@@ -237,7 +249,7 @@ function assembleContextPackFromHits(
     let injectionDetected = formatted.injectionDetected;
     let cost = countTokens(`${item.id} ${item.title} ${snippet}`);
 
-    if (usedTokens + cost > effectiveBudget) {
+    if (usedTokens + cost > knowledgeBudget) {
       const compactRaw = item.summary
         ? `${item.summary.slice(0, 120)} (Ver ${item.sourceUri})`
         : `Ver ${item.sourceUri}`;
@@ -245,11 +257,11 @@ function assembleContextPackFromHits(
       snippet = formatted.text;
       injectionDetected = injectionDetected || formatted.injectionDetected;
       cost = countTokens(`${item.id} ${item.title} ${snippet}`);
-      if (usedTokens + cost > effectiveBudget) {
+      if (usedTokens + cost > knowledgeBudget) {
         const minimalFormatted = formatSnippetForTrust(`Ver ${item.sourceUri}`, item.trustLevel);
         snippet = minimalFormatted.text;
         cost = countTokens(`${item.id} ${item.title} ${snippet}`);
-        if (usedTokens + cost > effectiveBudget) continue;
+        if (usedTokens + cost > knowledgeBudget) continue;
       }
     }
     usedTokens += cost;
@@ -294,6 +306,17 @@ function assembleContextPackFromHits(
     }
   }
 
+  let memoryTokens = 0;
+  for (const memory of relevantMemories) {
+    const formatted = formatSnippetForTrust(memory.content, "untrusted");
+    const cost = countTokens(`${memory.id} ${formatted.text}`);
+    if (memoryTokens + cost > memoryBudget) continue;
+    memories.push({ id: memory.id, layer: memory.layer, content: formatted.text, createdAt: memory.createdAt });
+    memoryTokens += cost;
+    warnings.push(`Memória ${memory.layer === "episodic" ? "Episodic" : memory.layer} incluída como referência; validar antes de tratar como fato aprovado.`);
+  }
+  usedTokens += memoryTokens;
+
   if (businessRules.length === 0) {
     warnings.push("Nenhuma regra de negócio vinculada encontrada para esta tarefa.");
   }
@@ -311,6 +334,7 @@ function assembleContextPackFromHits(
       services,
       tests,
       tasks,
+      memories,
       ...(opts.federatedContracts?.length ? { federatedContracts: opts.federatedContracts } : {})
     },
     warnings,
