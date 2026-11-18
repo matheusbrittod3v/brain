@@ -8,6 +8,8 @@ import { Ollama } from "ollama";
 import type { AuthContext } from "@noema/auth";
 import { BrainError } from "@noema/core";
 
+export * from "./vercel-ai.js";
+
 const execFileAsync = promisify(execFile);
 
 export interface RunnerTask {

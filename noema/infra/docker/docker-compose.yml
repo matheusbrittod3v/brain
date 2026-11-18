@@ -36,41 +36,6 @@ services:
     volumes:
       - miniodata:/data
 
-  opa:
-    image: openpolicyagent/opa:1.1.0
-    profiles: ["full"]
-    command: ["run", "--server", "--addr=0.0.0.0:8181", "/policies/noema.rego"]
-    volumes:
-      - ../opa/noema.rego:/policies/noema.rego:ro
-    ports:
-      - "8181:8181"
-
-  keycloak:
-    image: quay.io/keycloak/keycloak:26.0
-    profiles: ["full"]
-    command: ["start-dev"]
-    environment:
-      KEYCLOAK_ADMIN: admin
-      KEYCLOAK_ADMIN_PASSWORD: admin_dev_password
-    ports:
-      - "8080:8080"
-
-  nango:
-    image: nangohq/nango-server:0.55.0
-    profiles: ["full"]
-    ports:
-      - "3003:8080"
-    depends_on:
-      postgres:
-        condition: service_healthy
-
-  ai-worker:
-    build:
-      context: ../../apps/ai-worker
-    profiles: ["full"]
-    ports:
-      - "8000:8000"
-
   temporal:
     image: temporalio/auto-setup:1.25
     profiles: ["full"]

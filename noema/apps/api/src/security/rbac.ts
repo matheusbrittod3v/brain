@@ -41,6 +41,31 @@ export function requiredPermissionForRoute(method: string, routeUrl: string): Sy
   return null;
 }
 
+const PUBLIC_AUTH_ROUTES = new Set([
+  "GET /v1/auth/config",
+  "POST /v1/auth/register",
+  "POST /v1/auth/login",
+  "POST /v1/auth/verify-email",
+  "POST /v1/auth/oauth/device/code",
+  "GET /v1/auth/oauth/session/:userCode",
+  "POST /v1/auth/oauth/token"
+]);
+
+const SIGNED_WEBHOOK_ROUTES = new Set([
+  "POST /v1/integrations/slack/actions",
+  "POST /v1/integrations/:channel/actions"
+]);
+
+function routeHasOwnPublicProtection(method: string, routeUrl: string, params: unknown): boolean {
+  const key = `${method.toUpperCase()} ${routeUrl}`;
+  if (PUBLIC_AUTH_ROUTES.has(key) || SIGNED_WEBHOOK_ROUTES.has(key)) return true;
+
+  // GitHub verifies its raw-body HMAC inside the route. Other ingestion providers
+  // must also present an authenticated API credential.
+  const provider = (params as { provider?: string } | undefined)?.provider?.toLowerCase();
+  return key === "POST /v1/ingestion/webhooks/:provider" && provider === "github";
+}
+
 export function registerRbacGuard(
   app: FastifyInstance,
   deps: {
@@ -52,8 +77,8 @@ export function registerRbacGuard(
 ) {
   app.addHook("preHandler", async (req) => {
     const routeUrl = req.routeOptions?.url ?? "";
-    const required = requiredPermissionForRoute(req.method, routeUrl);
-    if (!required || !req.headers.authorization) return;
+    if (routeHasOwnPublicProtection(req.method, routeUrl, req.params)) return;
+
     const params = req.params as { projectId?: string } | undefined;
     const query = req.query as { projectId?: string } | undefined;
     const pid = params?.projectId ?? query?.projectId;
@@ -67,7 +92,8 @@ export function registerRbacGuard(
           undefined,
           deps.allowedPolicies
         );
-    assertPermission(ctx, required);
+    const required = requiredPermissionForRoute(req.method, routeUrl);
+    if (required) assertPermission(ctx, required);
   });
 }
 

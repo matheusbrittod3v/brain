@@ -6,11 +6,12 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "dev": "node --env-file-if-exists=../../.env --watch dist/src/server.js",
-    "start": "node --env-file-if-exists=../../.env dist/src/server.js",
-    "test": "node --test dist/test/*.test.js test/*.test.mjs"
+    "dev": "bun --env-file=../../.env --watch src/server.ts",
+    "start": "bun --env-file=../../.env src/server.ts",
+    "test": "NOEMA_JWT_SECRET=test-suite-jwt-secret-key-at-least-32-chars! node --test dist/test/*.test.js test/*.test.mjs"
   },
   "dependencies": {
+    "@arcjet/node": "^1.16.0",
     "@fastify/type-provider-typebox": "^5.2.0",
     "@modelcontextprotocol/sdk": "^1.12.0",
     "@noema/agent-handoff": "*",
@@ -19,8 +20,6 @@
     "@noema/audit-engine": "*",
     "@noema/auth": "*",
     "@noema/code-intelligence": "*",
-    "@noema/connector-github": "*",
-    "@noema/connector-saas": "*",
     "@noema/context-engine": "*",
     "@noema/core": "*",
     "@noema/cross-service": "*",
@@ -42,6 +41,7 @@
     "@sinclair/typebox": "^0.34.0",
     "fastify": "^5.2.0",
     "pg-boss": "^10.1.5",
+    "simple-git": "^4.1.0",
     "ws": "^8.23.0"
   },
   "devDependencies": {

@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import type { FastifyInstance } from "fastify";
 import type { AuditLogger } from "@noema/audit-engine";
-import { assertPolicyAccess, assertProjectAccess, authenticateRequest, evaluateOpaPolicy, type AuthContext } from "@noema/auth";
+import { assertPolicyAccess, assertProjectAccess, authenticateRequest, buildAbilityForContext, subject, type AuthContext } from "@noema/auth";
 import { BrainError, type KnowledgeItem } from "@noema/core";
 import type { CrossServiceContractRegistry, PostgresCrossServiceRegistry } from "@noema/cross-service";
 import type { PgOperationalRepository } from "@noema/database";
@@ -52,8 +52,9 @@ export function registerPrivacyEnterpriseRoutes(
 
   app.post<{ Body: { subjectId: string; projectId: string } }>("/v1/privacy/erase", async (req) => {
     const ctx = await authenticateProjectRequest(req.headers.authorization, req.body.projectId);
-    const opaAllowed = await evaluateOpaPolicy(ctx, { projectId: req.body.projectId, accessPolicyId: "internal-project", action: "write" });
-    if (!opaAllowed) throw new BrainError("BRAIN_ERR_POLICY_DENIED", "OPA negou operação de privacy erase.", 403);
+    const ability = buildAbilityForContext(ctx);
+    const opaAllowed = ability.can("write", subject("Knowledge", { projectId: req.body.projectId, accessPolicyId: "internal-project" }));
+    if (!opaAllowed) throw new BrainError("BRAIN_ERR_POLICY_DENIED", "CASL negou operação de privacy erase.", 403);
     if (!systemKnowledgeClient || process.env.NOEMA_PG_STORES !== "1") {
       throw new BrainError(
         "BRAIN_ERR_STORAGE_UNAVAILABLE",

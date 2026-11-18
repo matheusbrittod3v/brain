@@ -5,7 +5,7 @@ import type { BrainRunnerQueue } from "@noema/agent-runner";
 import type { ApprovalDecision, ApprovalQueue, PostgresApprovalQueue } from "@noema/approval-engine";
 import type { AuditLogger } from "@noema/audit-engine";
 import { canApproveDomain, type AuthContext } from "@noema/auth";
-import { createBranchAndCommitFiles, createGitHubPullRequest } from "@noema/connector-github";
+import { createBranchAndCommitFiles, createGitHubPullRequest } from "@noema/ingestion";
 import { BrainError, paginateCursor, type KnowledgeItem } from "@noema/core";
 import type { PgOperationalRepository } from "@noema/database";
 import type { KnowledgeGraphStore, PostgresGraphStore } from "@noema/graph";

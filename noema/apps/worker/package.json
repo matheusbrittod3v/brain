@@ -15,8 +15,6 @@
     "@noema/auth": "*",
     "@noema/code-intelligence": "*",
     "@noema/connector-framework": "*",
-    "@noema/connector-github": "*",
-    "@noema/connector-saas": "*",
     "@noema/core": "*",
     "@noema/database": "*",
     "@noema/graph": "*",

@@ -1,17 +1,10 @@
-import { createHash, createHmac } from "node:crypto";
+import { createHash, createHmac, timingSafeEqual } from "node:crypto";
 import type { FastifyInstance } from "fastify";
 import type { BrainRunnerQueue } from "@noema/agent-runner";
 import type { ApprovalDecision, ApprovalQueue, PostgresApprovalQueue } from "@noema/approval-engine";
 import type { AuditLogger } from "@noema/audit-engine";
 import { assertPolicyAccess, assertProjectAccess, authenticateRequest, type AuthContext } from "@noema/auth";
-import { parseGitHubPushEvent, verifyGitHubSignature } from "@noema/connector-github";
-import {
-  handleSaasWebhook,
-  parseChannelActionPayload,
-  verifyChannelWebhookSignature,
-  verifySlackRequestSignature,
-  type SaasProvider
-} from "@noema/connector-saas";
+import { parseGitHubPushEvent, verifyGitHubSignature } from "@noema/ingestion";
 import { BrainError, type KnowledgeItem } from "@noema/core";
 import type { PgOperationalRepository } from "@noema/database";
 import { scanForSecrets } from "@noema/ingestion";
@@ -24,6 +17,14 @@ import {
   mapExternalHumanActor,
   resolveGitHubRepoMapping
 } from "../services/jobs.js";
+
+function verifyHmacSha256Signature(rawBody: string, signatureHeader: string | undefined, secret: string): boolean {
+  if (!signatureHeader || !secret) return false;
+  const expected = `sha256=${createHmac("sha256", secret).update(rawBody).digest("hex")}`;
+  const a = Buffer.from(expected, "utf8");
+  const b = Buffer.from(signatureHeader.trim(), "utf8");
+  return a.length === b.length && timingSafeEqual(a, b);
+}
 
 export function registerWebhookRoutes(
   app: FastifyInstance,
@@ -160,33 +161,7 @@ export function registerWebhookRoutes(
         });
         return { accepted: true, provider: "github", repository: summary.repository, ref: summary.ref, commitSha: summary.commitSha, jobId, mainHeadUpdated };
       }
-      const item = handleSaasWebhook(provider as SaasProvider, req.body ?? {});
-      assertSecretScanClean(scanForSecrets(`${item.title}\n${item.content}`), "Segredo detectado no payload do webhook");
-      const originalContent = item.content;
-      const originalTitle = item.title;
-      const [sanitizedContent, sanitizedTitle] = await Promise.all([redactPiiWithAiWorker(item.content), redactPiiWithAiWorker(item.title)]);
-      item.content = sanitizedContent;
-      item.title = sanitizedTitle;
-      item.contentHash = createHash("sha256").update(`${sanitizedTitle}\n${sanitizedContent}`).digest("hex");
-      await upsertKnowledgeItem(
-        { tenantId: item.tenantId, actorId: "saas-webhook", actorType: "system", roles: ["system"], allowedProjects: [item.projectId], allowedPolicies: [item.accessPolicyId] },
-        item
-      );
-      await recordAudit(
-        { tenantId: item.tenantId, actorId: "saas-webhook", actorType: "system", roles: ["system"], allowedProjects: [item.projectId], allowedPolicies: [item.accessPolicyId] },
-        {
-          tenantId: item.tenantId,
-          projectId: item.projectId,
-          accessPolicyId: item.accessPolicyId,
-          actorId: "saas-webhook",
-          actorType: "system",
-          action: "create",
-          targetType: "knowledge_item",
-          targetId: item.id,
-          metadata: { source: "saas_webhook", piiRedacted: sanitizedContent !== originalContent || sanitizedTitle !== originalTitle }
-        }
-      );
-      return { accepted: true, provider, itemId: item.id, trustLevel: item.trustLevel };
+      throw new BrainError("BRAIN_ERR_NOT_FOUND", `Webhook '${provider}' não suportado (apenas Git/GitHub ativo).`, 404);
     }
   );
 
@@ -218,7 +193,7 @@ export function registerWebhookRoutes(
     const webhookSecret = process.env[`NOEMA_WEBHOOK_SECRET_${provider.toUpperCase()}`] ?? process.env.NOEMA_CHANNEL_WEBHOOK_SECRET;
     if (webhookSecret) {
       const sigHeader = (req.headers["x-noema-signature-256"] as string | undefined) ?? (req.headers["x-hub-signature-256"] as string | undefined);
-      if (!verifyChannelWebhookSignature(JSON.stringify(req.body ?? {}), sigHeader, webhookSecret)) {
+      if (!verifyHmacSha256Signature(JSON.stringify(req.body ?? {}), sigHeader, webhookSecret)) {
         throw new BrainError("BRAIN_ERR_POLICY_DENIED", `Assinatura HMAC inválida para canal '${provider}'.`, 401);
       }
     }
@@ -385,97 +360,7 @@ export function registerWebhookRoutes(
       }
     }
 
-    const item = handleSaasWebhook(provider as SaasProvider, body.payload ?? (body as Record<string, unknown>));
-    assertSecretScanClean(scanForSecrets(`${item.title}\n${item.content}`), "Segredo detectado no evento de integração");
-    assertProjectAccess(ctx, item.projectId);
-    assertPolicyAccess(ctx, item.accessPolicyId);
-    const originalContent = item.content;
-    const originalTitle = item.title;
-    const [sanitizedContent, sanitizedTitle] = await Promise.all([redactPiiWithAiWorker(item.content), redactPiiWithAiWorker(item.title)]);
-    item.content = sanitizedContent;
-    item.title = sanitizedTitle;
-    item.contentHash = createHash("sha256").update(`${sanitizedTitle}\n${sanitizedContent}`).digest("hex");
-    await upsertKnowledgeItem(ctx, item);
-    await recordAudit(ctx, { tenantId: ctx.tenantId, projectId: item.projectId, accessPolicyId: item.accessPolicyId, actorId: ctx.actorId, actorType: ctx.actorType, action: "create", targetType: "knowledge_item", targetId: item.id, metadata: { source: "saas_integration_event", piiRedacted: sanitizedContent !== originalContent || sanitizedTitle !== originalTitle } });
-    return { accepted: true, provider, handled: "ingestion", itemId: item.id };
-  });
-
-  const forwardInteractiveApprovalAction = async (
-    provider: string,
-    signingSecret: string,
-    input: { projectId: string; proposalId: string; proposalVersion: number; decision: ApprovalDecision; externalUserId: string; externalEventId: string; comment?: string }
-  ) => {
-    const integrationEvent = {
-      eventType: "approval.decision",
-      projectId: input.projectId,
-      proposalId: input.proposalId,
-      proposalVersion: input.proposalVersion,
-      decision: input.decision,
-      externalUserId: input.externalUserId,
-      externalEventId: input.externalEventId,
-      ...(input.comment ? { comment: input.comment } : {})
-    };
-    const eventSignature = createHmac("sha256", signingSecret).update(JSON.stringify(integrationEvent), "utf8").digest("hex");
-    return app.inject({
-      method: "POST",
-      url: `/v1/integrations/${encodeURIComponent(provider)}/events`,
-      headers: { authorization: `Bearer ${configuredApiKey}`, "content-type": "application/json", "x-noema-signature-256": `sha256=${eventSignature}` },
-      payload: integrationEvent
-    });
-  };
-
-  app.post<{ Body: { payload?: unknown } }>("/v1/integrations/slack/actions", async (req, reply) => {
-    const signingSecret = process.env.NOEMA_WEBHOOK_SECRET_SLACK ?? process.env.NOEMA_CHANNEL_WEBHOOK_SECRET;
-    const rawBody = (req as typeof req & { noemaRawBody?: string }).noemaRawBody;
-    const timestamp = req.headers["x-slack-request-timestamp"] as string | undefined;
-    const signature = req.headers["x-slack-signature"] as string | undefined;
-    if (!signingSecret || !rawBody || !verifySlackRequestSignature(rawBody, timestamp, signature, signingSecret)) {
-      throw new BrainError("BRAIN_ERR_UNAUTHORIZED", "Assinatura Slack inválida ou expirada.", 401);
-    }
-    const payload = req.body?.payload as { type?: string; user?: { id?: string }; actions?: Array<{ action_id?: string; action_ts?: string; value?: string }> } | undefined;
-    const action = payload?.actions?.[0];
-    if (payload?.type !== "block_actions" || !payload.user?.id || !action?.action_id || !action.action_ts || !action.value) {
-      throw new BrainError("BRAIN_ERR_CONFLICT", "Payload de ação Slack inválido.", 400);
-    }
-    const decisions: Record<string, ApprovalDecision> = { noema_approve: "approve", noema_reject: "reject", noema_request_changes: "request_changes" };
-    const decision = decisions[action.action_id];
-    if (!decision) throw new BrainError("BRAIN_ERR_CONFLICT", "Ação Slack desconhecida.", 400);
-    let context: { projectId?: unknown; proposalId?: unknown; proposalVersion?: unknown };
-    try {
-      context = JSON.parse(action.value) as typeof context;
-    } catch {
-      throw new BrainError("BRAIN_ERR_CONFLICT", "Contexto de aprovação Slack inválido.", 400);
-    }
-    if (typeof context.projectId !== "string" || typeof context.proposalId !== "string" || !Number.isInteger(context.proposalVersion) || Number(context.proposalVersion) < 1) {
-      throw new BrainError("BRAIN_ERR_CONFLICT", "A ação Slack não contém projeto, proposta e versão válidos.", 400);
-    }
-    const result = await forwardInteractiveApprovalAction("slack", signingSecret, {
-      projectId: context.projectId, proposalId: context.proposalId, proposalVersion: Number(context.proposalVersion),
-      decision, externalUserId: payload.user.id, externalEventId: `${payload.user.id}:${action.action_ts}`
-    });
-    if (result.statusCode < 200 || result.statusCode >= 300) {
-      return reply.code(200).send({ response_type: "ephemeral", text: "O Noema não conseguiu concluir a ação. Confira o estado da proposta no Command Center." });
-    }
-    return reply.code(200).send({ response_type: "ephemeral", text: "Decisão registrada no Noema." });
-  });
-
-  app.post<{ Params: { channel: string }; Body: Record<string, unknown> }>("/v1/integrations/:channel/actions", async (req, reply) => {
-    const channel = req.params.channel.toLowerCase();
-    if (!["teams", "jira", "clickup", "email"].includes(channel)) throw new BrainError("BRAIN_ERR_NOT_FOUND", `Canal interativo '${req.params.channel}' não suportado.`, 404);
-    const signingSecret = process.env[`NOEMA_WEBHOOK_SECRET_${channel.toUpperCase()}`] ?? process.env.NOEMA_CHANNEL_WEBHOOK_SECRET;
-    const rawBody = (req as typeof req & { noemaRawBody?: string }).noemaRawBody;
-    const signature = req.headers["x-noema-signature-256"] as string | undefined;
-    if (!signingSecret || !rawBody || !verifyChannelWebhookSignature(rawBody, signature, signingSecret)) {
-      throw new BrainError("BRAIN_ERR_UNAUTHORIZED", `Assinatura ${channel} inválida ou ausente.`, 401);
-    }
-    const normalized = parseChannelActionPayload(channel as "teams" | "jira" | "clickup" | "email", (req.body ?? {}) as Record<string, unknown>);
-    if (!normalized) throw new BrainError("BRAIN_ERR_CONFLICT", `Payload de ação ${channel} inválido.`, 400);
-    const result = await forwardInteractiveApprovalAction(channel, signingSecret, {
-      projectId: normalized.projectId, proposalId: normalized.proposalId, proposalVersion: normalized.proposalVersion,
-      decision: normalized.decision, externalUserId: normalized.externalUserId, externalEventId: normalized.externalEventId, comment: normalized.comment
-    });
-    if (result.statusCode < 200 || result.statusCode >= 300) return reply.code(result.statusCode).send(result.json());
-    return reply.code(200).send({ accepted: true, channel, decision: normalized.decision, result: result.json() });
+    throw new BrainError("BRAIN_ERR_NOT_FOUND", `Evento de integração '${provider}' não suportado (apenas Git ativo).`, 404);
   });
 }
 

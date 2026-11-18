@@ -7,11 +7,11 @@ import {
   type AuditLogger,
   type RlsSessionContext
 } from "@noema/audit-engine";
-import { assertProjectAccess, authenticateRequest, evaluateOpaPolicy, type AuthContext } from "@noema/auth";
+import { assertProjectAccess, authenticateRequest, buildAbilityForContext, subject, type AuthContext } from "@noema/auth";
 import { ContextEngine } from "@noema/context-engine";
 import { BrainError, type KnowledgeItem } from "@noema/core";
 import { CrossServiceContractRegistry, PostgresCrossServiceRegistry } from "@noema/cross-service";
-import { createDatabaseClient, PgOperationalRepository } from "@noema/database";
+import { createDatabaseClient, PgAuthRepository, PgOperationalRepository } from "@noema/database";
 import { KnowledgeGraphStore, PostgresGraphStore } from "@noema/graph";
 import { PostgresKnowledgeRepository, type SystemKnowledgeSqlClient } from "@noema/knowledge";
 import { PostgresMemoryManager } from "@noema/memory";
@@ -120,6 +120,7 @@ export function createApiRuntimeStores(deps: {
           return new PgOperationalRepository(operationalDatabaseClient.db);
         })()
       : undefined;
+  const authRepo = operationalDatabaseClient ? new PgAuthRepository(operationalDatabaseClient.db) : undefined;
   const pgTemporal =
     appPostgresClient && process.env.NOEMA_PG_STORES === "1"
       ? new PgTemporalKnowledgeRepository(appPostgresClient as never)
@@ -154,9 +155,10 @@ export function createApiRuntimeStores(deps: {
     ctx: AuthContext,
     resource: { projectId: string; accessPolicyId: string; action: "read" | "write" | "create" | "update" | "approve"; domainId?: number }
   ) {
-    const allowed = await evaluateOpaPolicy(ctx, resource);
+    const ability = buildAbilityForContext(ctx);
+    const allowed = ability.can(resource.action, subject("Knowledge", resource));
     if (!allowed) {
-      throw new BrainError("BRAIN_ERR_POLICY_DENIED", `OPA negou ação '${resource.action}' em '${resource.projectId}'.`, 403);
+      throw new BrainError("BRAIN_ERR_POLICY_DENIED", `CASL negou ação '${resource.action}' em '${resource.projectId}'.`, 403);
     }
   }
 
@@ -171,7 +173,16 @@ export function createApiRuntimeStores(deps: {
   }
 
   async function authenticateProjectRequest(headerValue: string | undefined, projectId: string) {
-    const ctx = await authenticateRequest(headerValue, configuredApiKey, "default-org", allowedProjects, undefined, allowedPolicies);
+    const rawCtx = await authenticateRequest(headerValue, configuredApiKey, "default-org", allowedProjects, undefined, allowedPolicies);
+    const dbUser = authRepo ? await authRepo.findUserById(rawCtx.actorId) : null;
+    const ctx: AuthContext = dbUser
+      ? {
+          ...rawCtx,
+          roles: dbUser.roles,
+          allowedProjects: dbUser.allowedProjects,
+          allowedPolicies: dbUser.allowedPolicies
+        }
+      : rawCtx;
     assertProjectAccess(ctx, projectId);
     if (opRepo) {
       return opRepo.resolveEffectiveAuthContext(ctx, projectId);
@@ -205,6 +216,8 @@ export function createApiRuntimeStores(deps: {
     pgKnowledge,
     pgApprovals,
     opRepo,
+    operationalDb: operationalDatabaseClient?.db,
+    authRepo,
     pgTemporal,
     pgCrossService,
     upsertKnowledgeItem,

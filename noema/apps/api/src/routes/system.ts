@@ -4,10 +4,16 @@ import type { HandoffStore } from "@noema/agent-handoff";
 import type { BrainRunnerQueue } from "@noema/agent-runner";
 import type { ApprovalQueue, PostgresApprovalQueue } from "@noema/approval-engine";
 import type { AuditLogger } from "@noema/audit-engine";
-import { authenticateRequest, type AuthContext } from "@noema/auth";
+import {
+  authenticateRequest,
+  exportAbilityRules,
+  resolveDefaultPermissionsForRoles,
+  usersStore,
+  type AuthContext
+} from "@noema/auth";
 import type { ContextEngine } from "@noema/context-engine";
 import type { CrossServiceContractRegistry, PostgresCrossServiceRegistry } from "@noema/cross-service";
-import type { PgOperationalRepository } from "@noema/database";
+import type { PgAuthRepository, PgOperationalRepository } from "@noema/database";
 import type { KnowledgeGraphStore, PostgresGraphStore } from "@noema/graph";
 import { scanForSecrets } from "@noema/ingestion";
 import type { PostgresKnowledgeRepository } from "@noema/knowledge";
@@ -37,6 +43,7 @@ export function registerSystemRoutes(
     allowedPolicies: readonly string[];
     recordAudit: (ctx: AuthContext, event: Parameters<AuditLogger["record"]>[0]) => Promise<unknown>;
     opRepo?: PgOperationalRepository;
+    authRepo?: PgAuthRepository;
     pgGraph?: PostgresGraphStore;
     graph: KnowledgeGraphStore;
     queryAwareRetrieval: AsyncRetrievalEngine;
@@ -60,6 +67,7 @@ export function registerSystemRoutes(
     allowedPolicies,
     recordAudit,
     opRepo,
+    authRepo,
     pgGraph,
     graph,
     queryAwareRetrieval,
@@ -77,20 +85,43 @@ export function registerSystemRoutes(
 
   app.get("/v1/health", async () => ({ service: "noema-api", status: "ok", version: "0.1.0", deploymentMode }));
 
-  app.get("/v1/auth/me", async (req) => {
-    const ctx = await authenticateRequest(req.headers.authorization, configuredApiKey, "default-org", allowedProjects);
-    const visibilityScope = ctx.roles.some((r) => ["admin", "appsec", "cto"].includes(r))
+  app.get<{ Querystring: { projectId?: string } }>("/v1/auth/me", async (req) => {
+    const ctx = await authenticateRequest(req.headers.authorization, configuredApiKey, "default-org", allowedProjects, undefined, allowedPolicies);
+    const memUser = usersStore.getUserById(ctx.actorId);
+    const dbUser = authRepo ? await authRepo.findUserById(ctx.actorId) : null;
+    const user = dbUser ?? memUser;
+    const baseCtx: AuthContext = dbUser
+      ? {
+          ...ctx,
+          roles: dbUser.roles,
+          allowedProjects: dbUser.allowedProjects,
+          allowedPolicies: dbUser.allowedPolicies
+        }
+      : ctx;
+    const effectiveCtx =
+      req.query.projectId && opRepo
+        ? await opRepo.resolveEffectiveAuthContext(baseCtx, req.query.projectId)
+        : baseCtx;
+    const visibilityScope = effectiveCtx.roles.some((r) => ["admin", "appsec", "cto"].includes(r))
       ? "org"
-      : ctx.roles.some((r) => ["tech-lead", "po", "reviewer"].includes(r))
+      : effectiveCtx.roles.some((r) => ["tech-lead", "po", "reviewer"].includes(r))
         ? "project"
         : "self";
+    const resolvedPermissions =
+      effectiveCtx.permissions && effectiveCtx.permissions.length > 0
+        ? effectiveCtx.permissions
+        : resolveDefaultPermissionsForRoles(effectiveCtx.roles);
     return {
-      tenantId: ctx.tenantId,
-      actorId: ctx.actorId,
-      actorType: ctx.actorType,
-      roles: ctx.roles,
-      allowedProjects: ctx.allowedProjects,
-      allowedPolicies: ctx.allowedPolicies,
+      tenantId: effectiveCtx.tenantId,
+      actorId: effectiveCtx.actorId,
+      actorType: effectiveCtx.actorType,
+      email: user?.email,
+      name: user?.name,
+      roles: effectiveCtx.roles,
+      allowedProjects: effectiveCtx.allowedProjects,
+      allowedPolicies: effectiveCtx.allowedPolicies,
+      permissions: resolvedPermissions,
+      abilities: exportAbilityRules(effectiveCtx),
       visibilityScope
     };
   });

@@ -1,5 +1,14 @@
 import { BrainError } from "@noema/core";
 import { createRemoteJWKSet, customFetch, importSPKI, jwtVerify } from "jose";
+import { verifyUserJwt } from "./jwt.js";
+
+export * from "./password.js";
+export * from "./email.js";
+export * from "./jwt.js";
+export * from "./oauth2.js";
+export * from "./users-store.js";
+export * from "./casl.js";
+export * from "./better-auth.js";
 
 export type ActorType = "human" | "agent" | "system";
 
@@ -390,79 +399,6 @@ export function authenticateOidcClaims(claims: OidcClaims): AuthContext {
 
 export type PolicyAction = "read" | "write" | "create" | "update" | "approve";
 
-export interface OpaPolicyInput {
-  projectId: string;
-  accessPolicyId: string;
-  action: PolicyAction;
-  tenantId?: string;
-  domainId?: number;
-}
-
-function evaluateLocalOpaFallback(ctx: AuthContext, input: OpaPolicyInput): boolean {
-  if (!ctx.tenantId || typeof ctx.tenantId !== "string") {
-    return false;
-  }
-  if (input.tenantId !== undefined && input.tenantId !== ctx.tenantId) {
-    return false;
-  }
-  if (!input.projectId || !ctx.allowedProjects.includes(input.projectId)) {
-    return false;
-  }
-  if (!input.accessPolicyId || !ctx.allowedPolicies.includes(input.accessPolicyId)) {
-    return false;
-  }
-  if (input.domainId !== undefined && ctx.allowedDomains && ctx.allowedDomains.length > 0) {
-    if (!ctx.allowedDomains.includes(input.domainId)) {
-      return false;
-    }
-  }
-  if (ctx.allowedActions && ctx.allowedActions.length > 0 && !ctx.allowedActions.includes(input.action)) {
-    return false;
-  }
-  if (input.action === "read") {
-    return true;
-  }
-  if (WRITE_ACTIONS.has(input.action)) {
-    return ctx.roles.some((role) => WRITE_ROLES.has(role));
-  }
-  if (input.action === "approve") {
-    if (ctx.actorType !== "human" && !ctx.inheritUserPermissions && !ctx.allowedActions?.includes("approve")) {
-      return false;
-    }
-    const allowedRoles =
-      input.domainId !== undefined && CRITICAL_DOMAINS.has(input.domainId)
-        ? CRITICAL_APPROVE_ROLES
-        : STANDARD_APPROVE_ROLES;
-    return ctx.roles.some((role) => allowedRoles.has(role));
-  }
-  return false;
-}
-
-/**
- * Consulta servidor OPA externo (/v1/data/noema/authz/allow) com fallback determinístico fail-closed.
- */
-export async function evaluateOpaPolicy(
-  ctx: AuthContext,
-  input: OpaPolicyInput,
-  opaUrl = process.env.OPA_URL,
-  fetchFn: typeof fetch = fetch
-): Promise<boolean> {
-  if (!evaluateLocalOpaFallback(ctx, input)) {
-    return false;
-  }
-  if (!opaUrl) {
-    return true;
-  }
-  const res = await fetchFn(`${opaUrl}/v1/data/noema/authz/allow`, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ input: { subject: ctx, resource: input } })
-  });
-  if (!res.ok) return false;
-  const body = (await res.json()) as { result?: boolean };
-  return body.result === true;
-}
-
 export interface VerifyOidcOptions {
   jwksUri?: string;
   hmacSecret?: string;
@@ -557,8 +493,19 @@ export async function authenticateRequest(
   }
 
   const oidcConfigured = Boolean(oidcOpts.jwksUri || oidcOpts.hmacSecret || oidcOpts.publicKeyPem);
-  if (oidcConfigured && token.split(".").length === 3) {
-    return verifyOidcJwt(token, oidcOpts);
+  if (token.split(".").length === 3) {
+    if (oidcConfigured) {
+      try {
+        return await verifyOidcJwt(token, oidcOpts);
+      } catch {
+        // Fallback to checking local signed user JWT
+      }
+    }
+    try {
+      return await verifyUserJwt(token);
+    } catch {
+      // Fallback to API Key check if needed
+    }
   }
 
   const localApiKey = expectedApiKey?.trim();

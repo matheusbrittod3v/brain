@@ -4,3 +4,4 @@ export * from "./client.js";
 export * from "./repositories.js";
 export * from "./operational-repos.js";
 export * from "./bootstrap-roles.js";
+export * from "./auth-repo.js";

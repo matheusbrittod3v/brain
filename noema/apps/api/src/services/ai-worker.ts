@@ -1,9 +1,9 @@
 import { BrainError } from "@noema/core";
-import type { SecretScanResult } from "@noema/ingestion";
+import { parseDocumentBase64, redactPii, rerankPassages, type SecretScanResult } from "@noema/ingestion";
 
 export const MAX_DOCUMENT_BYTES = 16 * 1024 * 1024;
 export const MAX_DOCUMENT_BASE64_CHARS = 4 * Math.ceil(MAX_DOCUMENT_BYTES / 3);
-export const DOCUMENT_EXTENSIONS = new Set([".pdf", ".docx", ".pptx", ".xlsx", ".html", ".htm", ".csv"]);
+export const DOCUMENT_EXTENSIONS = new Set([".pdf", ".docx", ".pptx", ".xlsx", ".html", ".htm", ".csv", ".md", ".txt", ".json"]);
 
 export function assertSecretScanClean(scan: SecretScanResult, detectedMessage: string): void {
   if (scan.engine === "unavailable") {
@@ -52,9 +52,16 @@ export async function redactPiiWithAiWorker(
 export async function parseDocumentWithAiWorker(
   fileName: string,
   contentBase64: string
-): Promise<{ markdown: string; engine: "docling" | "markitdown" }> {
+): Promise<{ markdown: string; engine: "docling" | "markitdown" | "unpdf" | "mammoth" | "turndown" | "text" }> {
   const aiWorkerUrl = process.env.AI_WORKER_URL;
-  if (!aiWorkerUrl) throw new BrainError("BRAIN_ERR_STORAGE_UNAVAILABLE", "Docling requer AI_WORKER_URL configurado.", 503);
+  if (!aiWorkerUrl) {
+    // Native TypeScript document parsing (replaces Python AI Worker)
+    try {
+      return await parseDocumentBase64(fileName, contentBase64);
+    } catch (error) {
+      throw new BrainError("BRAIN_ERR_INVALID_INPUT", error instanceof Error ? error.message : String(error), 422);
+    }
+  }
   let response: Response;
   try {
     response = await fetch(`${aiWorkerUrl.replace(/\/$/, "")}/parse-document`, {
@@ -92,7 +99,10 @@ export async function rerankWithAiWorker<T extends { id: string; title: string; 
   items: T[],
   aiWorkerUrl = process.env.AI_WORKER_URL
 ): Promise<T[]> {
-  if (!aiWorkerUrl || items.length <= 1) return items;
+  if (items.length <= 1) return items;
+  if (!aiWorkerUrl) {
+    return rerankPassages(query, items);
+  }
   try {
     const res = await fetch(`${aiWorkerUrl.replace(/\/$/, "")}/rerank`, {
       method: "POST",

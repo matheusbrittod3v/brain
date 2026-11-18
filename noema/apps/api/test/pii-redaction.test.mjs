@@ -99,41 +99,6 @@ test("project ingestion does not persist content when configured PII redaction i
   }
 });
 
-test("authenticated SaaS ingestion events redact title and body before persistence", async () => {
-  const previousUrl = process.env.AI_WORKER_URL;
-  const previousFetch = globalThis.fetch;
-  process.env.AI_WORKER_URL = "http://ai-worker";
-  globalThis.fetch = async (_url, init) => {
-    const { text } = JSON.parse(init.body);
-    return Response.json({ redacted_text: text.replaceAll("jane@example.test", "[EMAIL]") });
-  };
-  const app = buildApp("test-secret-key", ["pii-event"], new InMemoryAuditLogger());
-  try {
-    const response = await app.inject({
-      method: "POST",
-      url: "/v1/integrations/jira/events",
-      headers: { authorization: "Bearer test-secret-key" },
-      payload: {
-        eventType: "issue.updated", projectId: "pii-event",
-        title: "Ticket for jane@example.test", body: "Contact jane@example.test"
-      }
-    });
-    assert.equal(response.statusCode, 200, response.body);
-    const search = await app.inject({
-      method: "POST", url: "/v1/projects/pii-event/search",
-      headers: { authorization: "Bearer test-secret-key" }, payload: { query: "Contact" }
-    });
-    assert.equal(search.statusCode, 200, search.body);
-    assert.doesNotMatch(search.body, /jane@example\.test/);
-    assert.match(search.body, /\[EMAIL\]/);
-  } finally {
-    await app.close();
-    globalThis.fetch = previousFetch;
-    if (previousUrl === undefined) delete process.env.AI_WORKER_URL;
-    else process.env.AI_WORKER_URL = previousUrl;
-  }
-});
-
 test("Edge sync push scans raw drafts and persists a redacted title and body", async () => {
   const previousUrl = process.env.AI_WORKER_URL;
   const previousFetch = globalThis.fetch;

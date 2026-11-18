@@ -6,6 +6,10 @@ import { extractCodeSymbols } from "@noema/code-intelligence";
 import { getEncoding } from "js-tiktoken";
 import ts from "typescript";
 
+export * from "./pii.js";
+export * from "./document-parser.js";
+export * from "./git-github.js";
+
 const SECRET_PATTERNS: Array<{ name: string; regex: RegExp }> = [
   { name: "AWS Access Key", regex: /\bAKIA[0-9A-Z]{16}\b/ },
   { name: "GitHub Token", regex: /\bgh[pousr]_[A-Za-z0-9_]{20,}\b/ },

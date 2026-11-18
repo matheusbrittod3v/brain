@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { createHmac, generateKeyPairSync } from "node:crypto";
 import { exportJWK, SignJWT } from "jose";
 import test from "node:test";
-import { authenticateRequest, evaluateOpaPolicy, verifyOidcJwt } from "../dist/index.js";
+import { authenticateRequest, buildAbilityForContext, subject, verifyOidcJwt } from "../dist/index.js";
 
 function makeCtx(overrides = {}) {
   return {
@@ -24,49 +24,45 @@ function signHs256(payload, secret) {
   return `${header}.${body}.${sig}`;
 }
 
-test("local OPA fallback denies cross-tenant access and missing tenantId", async () => {
+function canCasl(ctx, resource) {
+  const ability = buildAbilityForContext(ctx);
+  return ability.can(resource.action, subject("Knowledge", resource));
+}
+
+test("CASL ability denies cross-tenant access and missing tenantId", async () => {
   const ctx = makeCtx({ tenantId: "tenant-a" });
-  const crossTenant = await evaluateOpaPolicy(
-    ctx,
-    { projectId: "project-a", accessPolicyId: "internal-project", action: "read", tenantId: "tenant-b" },
-    ""
-  );
+  const crossTenant = canCasl(ctx, { projectId: "project-a", accessPolicyId: "internal-project", action: "read", tenantId: "tenant-b" });
   assert.equal(crossTenant, false);
 
-  const missingSubjectTenant = await evaluateOpaPolicy(
+  const missingSubjectTenant = canCasl(
     makeCtx({ tenantId: "" }),
-    { projectId: "project-a", accessPolicyId: "internal-project", action: "read" },
-    ""
+    { projectId: "project-a", accessPolicyId: "internal-project", action: "read" }
   );
   assert.equal(missingSubjectTenant, false);
 
-  const sameTenant = await evaluateOpaPolicy(
-    ctx,
-    { projectId: "project-a", accessPolicyId: "internal-project", action: "read", tenantId: "tenant-a" },
-    ""
-  );
+  const sameTenant = canCasl(ctx, { projectId: "project-a", accessPolicyId: "internal-project", action: "read", tenantId: "tenant-a" });
   assert.equal(sameTenant, true);
 });
 
-test("local OPA fallback allows __org__ only when explicitly in allowedProjects", async () => {
+test("CASL ability allows __org__ only when explicitly in allowedProjects", async () => {
   const withoutOrg = makeCtx({ allowedProjects: ["project-a"] });
   assert.equal(
-    await evaluateOpaPolicy(withoutOrg, { projectId: "__org__", accessPolicyId: "internal-project", action: "read" }, ""),
+    canCasl(withoutOrg, { projectId: "__org__", accessPolicyId: "internal-project", action: "read" }),
     false
   );
 
   const withOrg = makeCtx({ allowedProjects: ["__org__"] });
   assert.equal(
-    await evaluateOpaPolicy(withOrg, { projectId: "__org__", accessPolicyId: "internal-project", action: "read" }, ""),
+    canCasl(withOrg, { projectId: "__org__", accessPolicyId: "internal-project", action: "read" }),
     true
   );
 });
 
-test("local OPA fallback enforces write roles for write, create, and update", async () => {
+test("CASL ability enforces write roles for write, create, and update", async () => {
   const viewerCtx = makeCtx({ roles: ["viewer"] });
   for (const action of ["write", "create", "update"]) {
     assert.equal(
-      await evaluateOpaPolicy(viewerCtx, { projectId: "project-a", accessPolicyId: "internal-project", action }, ""),
+      canCasl(viewerCtx, { projectId: "project-a", accessPolicyId: "internal-project", action }),
       false
     );
   }
@@ -74,77 +70,38 @@ test("local OPA fallback enforces write roles for write, create, and update", as
   for (const role of ["developer", "tech-lead", "admin", "ci-bot", "agent"]) {
     const allowedCtx = makeCtx({ roles: [role] });
     assert.equal(
-      await evaluateOpaPolicy(allowedCtx, { projectId: "project-a", accessPolicyId: "internal-project", action: "create" }, ""),
+      canCasl(allowedCtx, { projectId: "project-a", accessPolicyId: "internal-project", action: "create" }),
       true
     );
   }
 });
 
-test("local OPA fallback denies agent approval and unprivileged roles on critical domains", async () => {
+test("CASL ability denies agent approval and unprivileged roles on critical domains", async () => {
   for (const domainId of [1, 2, 3, 7, 11]) {
     const agentAdmin = makeCtx({ actorType: "agent", roles: ["admin", "tech-lead"] });
     assert.equal(
-      await evaluateOpaPolicy(
-        agentAdmin,
-        { projectId: "project-a", accessPolicyId: "internal-project", action: "approve", domainId },
-        ""
-      ),
+      canCasl(agentAdmin, { projectId: "project-a", accessPolicyId: "internal-project", action: "approve", domainId }),
       false
     );
 
     const productOwner = makeCtx({ actorType: "human", roles: ["product-owner"] });
     assert.equal(
-      await evaluateOpaPolicy(
-        productOwner,
-        { projectId: "project-a", accessPolicyId: "internal-project", action: "approve", domainId },
-        ""
-      ),
+      canCasl(productOwner, { projectId: "project-a", accessPolicyId: "internal-project", action: "approve", domainId }),
       false
     );
 
     const appsecHuman = makeCtx({ actorType: "human", roles: ["appsec"] });
     assert.equal(
-      await evaluateOpaPolicy(
-        appsecHuman,
-        { projectId: "project-a", accessPolicyId: "internal-project", action: "approve", domainId },
-        ""
-      ),
+      canCasl(appsecHuman, { projectId: "project-a", accessPolicyId: "internal-project", action: "approve", domainId }),
       true
     );
   }
 
   const productOwnerNonCritical = makeCtx({ actorType: "human", roles: ["product-owner"] });
   assert.equal(
-    await evaluateOpaPolicy(
-      productOwnerNonCritical,
-      { projectId: "project-a", accessPolicyId: "internal-project", action: "approve", domainId: 4 },
-      ""
-    ),
+    canCasl(productOwnerNonCritical, { projectId: "project-a", accessPolicyId: "internal-project", action: "approve", domainId: 4 }),
     true
   );
-});
-
-test("evaluateOpaPolicy sends subject and resource to external OPA server", async () => {
-  let capturedBody;
-  const mockFetch = async (_url, init) => {
-    capturedBody = JSON.parse(String(init.body));
-    return {
-      ok: true,
-      json: async () => ({ result: true })
-    };
-  };
-
-  const ctx = makeCtx({ roles: ["tech-lead"] });
-  const allowed = await evaluateOpaPolicy(
-    ctx,
-    { projectId: "project-a", accessPolicyId: "internal-project", action: "approve", domainId: 1, tenantId: "tenant-a" },
-    "http://opa.local:8181",
-    mockFetch
-  );
-
-  assert.equal(allowed, true);
-  assert.equal(capturedBody.input.subject.tenantId, "tenant-a");
-  assert.equal(capturedBody.input.resource.domainId, 1);
 });
 
 test("authenticateRequest rejects missing or invalid API keys when OIDC is not configured", async () => {

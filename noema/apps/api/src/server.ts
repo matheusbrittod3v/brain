@@ -9,8 +9,9 @@ import {
   assertPolicyAccess,
   assertProjectAccess,
   authenticateRequest,
+  getJwtSecretKey,
   canApproveDomain,
-  evaluateOpaPolicy,
+  createNoemaBetterAuth,
   type AuthContext
 } from "@noema/auth";
 import { BrainError, paginateCursor, type KnowledgeItem } from "@noema/core";
@@ -32,6 +33,7 @@ import { analyzeDistributedImpact } from "@noema/impact-analysis";
 import { planAutonomousTasks } from "@noema/task-engine";
 import { orchestrateLivingDocDrafts } from "@noema/workflow-orchestrator";
 import { createRealtimeHub } from "./realtime.js";
+import { registerAuthRoutes } from "./routes/auth.js";
 import { registerAccessProfileRoutes } from "./routes/access-profile.js";
 import { registerAccessRbacRoutes } from "./routes/access-rbac.js";
 import { registerBrainpackRoutes } from "./routes/brainpack.js";
@@ -50,6 +52,7 @@ import { registerSyncRoutes } from "./routes/sync.js";
 import { registerSystemRoutes } from "./routes/system.js";
 import { registerWebhookRoutes } from "./routes/webhooks.js";
 import { createApiRuntimeStores } from "./runtime/stores.js";
+import { registerArcjetGuard } from "./security/arcjet.js";
 import { registerRbacGuard } from "./security/rbac.js";
 import { createProjectMetricsService } from "./services/project-metrics.js";
 import {
@@ -94,7 +97,7 @@ import {
   createGitHubPullRequest,
   parseGitHubPushEvent,
   verifyGitHubSignature
-} from "@noema/connector-github";
+} from "@noema/ingestion";
 
 export function buildApp(
   expectedApiKey: string | undefined = process.env.NOEMA_LOCAL_API_KEY,
@@ -125,7 +128,11 @@ export function buildApp(
   if (typeof apiKey !== "string" || apiKey.trim().length === 0) {
     throw new Error("NOEMA_LOCAL_API_KEY is required to start the API.");
   }
-  const configuredApiKey = apiKey as string;
+  if (apiKey.trim() === "change-me-local-dev-key") {
+    throw new Error("NOEMA_LOCAL_API_KEY cannot use the published development key. Configure a unique secret before starting the API.");
+  }
+  getJwtSecretKey();
+  const configuredApiKey = apiKey.trim();
 
   const app = Fastify({ logger: false }).withTypeProvider<TypeBoxTypeProvider>();
   app.removeContentTypeParser("application/json");
@@ -223,6 +230,8 @@ export function buildApp(
     pgKnowledge,
     pgApprovals,
     opRepo,
+    operationalDb,
+    authRepo,
     pgTemporal,
     pgCrossService,
     upsertKnowledgeItem,
@@ -257,11 +266,47 @@ export function buildApp(
     await shutdownTelemetry();
   });
 
+  registerArcjetGuard(app);
   registerRbacGuard(app, {
     authenticateProjectRequest,
     configuredApiKey,
     allowedProjects,
     allowedPolicies
+  });
+  const betterAuth = createNoemaBetterAuth({
+    db: operationalDb
+  });
+  app.all("/api/auth/*", async (req, reply) => {
+    const protocol = req.protocol || "http";
+    const host = req.headers.host || "localhost:3333";
+    const url = new URL(req.url, `${protocol}://${host}`);
+    const headers = new Headers();
+    for (const [key, value] of Object.entries(req.headers)) {
+      if (Array.isArray(value)) {
+        for (const v of value) headers.append(key, v);
+      } else if (value !== undefined) {
+        headers.set(key, String(value));
+      }
+    }
+    const hasBody = req.method !== "GET" && req.method !== "HEAD" && req.body !== undefined;
+    const body = hasBody ? (typeof req.body === "string" ? req.body : JSON.stringify(req.body)) : undefined;
+    const webRequest = new Request(url.toString(), {
+      method: req.method,
+      headers,
+      body
+    });
+    const webResponse = await betterAuth.handler(webRequest);
+    reply.status(webResponse.status);
+    webResponse.headers.forEach((value, key) => {
+      reply.header(key, value);
+    });
+    const text = await webResponse.text();
+    return reply.send(text);
+  });
+
+  registerAuthRoutes(app, {
+    authenticateRequest: (h) => authenticateRequest(h, configuredApiKey, "default-org", allowedProjects, undefined, allowedPolicies),
+    authRepo
   });
   registerRealtimeRoutes(app, {
     realtime,
@@ -274,7 +319,8 @@ export function buildApp(
     app,
     authenticateProjectRequest,
     recordAudit,
-    opRepo
+    opRepo,
+    authRepo
   });
 
   const { projectVerifiedTests, projectHealth, projectModelUsage } = createProjectMetricsService({
@@ -310,6 +356,7 @@ export function buildApp(
     allowedPolicies,
     recordAudit,
     opRepo,
+    authRepo,
     pgGraph,
     graph,
     queryAwareRetrieval,
@@ -528,7 +575,7 @@ export function buildApp(
   return app;
 }
 
-if (process.argv[1]?.endsWith("server.js")) {
+if (process.argv[1]?.endsWith("server.js") || process.argv[1]?.endsWith("server.ts")) {
   initTelemetry("noema-api");
   const port = Number(process.env.PORT ?? 3333);
   const deploymentMode = process.env.NOEMA_DEPLOYMENT_MODE === "cloud" ? "cloud" : "local";

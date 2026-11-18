@@ -13,6 +13,7 @@ dist/
 *.sqlite
 *.log
 .DS_Store
+backups/
 .superpowers/
 **/.superpowers/
 .venv/

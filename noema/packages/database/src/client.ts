@@ -145,3 +145,5 @@ export async function withTenantRls<T>(
     return fn(tx as unknown as NoemaDb);
   });
 }
+
+export const withRlsContext = withTenantRls;

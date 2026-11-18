@@ -133,6 +133,7 @@ export const knowledgeEmbeddings = pgTable(
     uniqueIndex("ke_item_version_chunk_model_unique").on(
       t.tenantId, t.projectId, t.knowledgeItemId, t.sourceVersion, t.chunkIndex, t.embeddingModel
     ),
+    index("idx_ke_embedding_hnsw").using("hnsw", t.embedding.op("vector_cosine_ops")),
     foreignKey({
       columns: [t.tenantId, t.projectId, t.knowledgeItemId],
       foreignColumns: [knowledgeItems.tenantId, knowledgeItems.projectId, knowledgeItems.id],
@@ -497,4 +498,57 @@ export const lgpdShreddedSubjects = pgTable("lgpd_shredded_subjects", {
   shreddedBy: text("shredded_by").notNull(),
   shreddedAt: timestamp("shredded_at", { withTimezone: true }).defaultNow().notNull()
 }, (t) => [primaryKey({ columns: [t.tenantId, t.projectId, t.subjectId] })]);
+
+export const authUsers = pgTable("auth_users", {
+  id: text("id").primaryKey(),
+  tenantId: text("tenant_id").default("default-org").notNull(),
+  email: text("email").notNull().unique(),
+  name: text("name").notNull(),
+  passwordHash: text("password_hash").notNull(),
+  emailVerified: boolean("email_verified").default(false).notNull(),
+  roles: text("roles").array().default(["developer"]).notNull(),
+  allowedProjects: text("allowed_projects").array().default(["local-project", "noema"]).notNull(),
+  allowedPolicies: text("allowed_policies").array().default(["public-org", "internal-project"]).notNull(),
+  customPermissions: text("custom_permissions").array().default([]).notNull(),
+  linkedAgentIds: text("linked_agent_ids").array().default([]).notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull()
+});
+
+export const authVerificationTokens = pgTable("auth_verification_tokens", {
+  token: text("token").primaryKey(),
+  userId: text("user_id")
+    .notNull()
+    .references(() => authUsers.id, { onDelete: "cascade" }),
+  type: text("type").notNull(),
+  expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull()
+});
+
+export const authOAuthSessions = pgTable("auth_oauth_sessions", {
+  deviceCode: text("device_code").primaryKey(),
+  userCode: text("user_code").notNull().unique(),
+  clientId: text("client_id").notNull(),
+  clientName: text("client_name").notNull(),
+  scope: text("scope").notNull(),
+  userId: text("user_id").references(() => authUsers.id, { onDelete: "cascade" }),
+  status: text("status").default("pending").notNull(),
+  expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull()
+});
+
+export const authPasskeys = pgTable("auth_passkeys", {
+  id: text("id").primaryKey(),
+  userId: text("user_id")
+    .notNull()
+    .references(() => authUsers.id, { onDelete: "cascade" }),
+  publicKey: text("public_key").notNull(),
+  credentialId: text("credential_id").notNull().unique(),
+  counter: integer("counter").default(0).notNull(),
+  deviceType: text("device_type").notNull(),
+  backedUp: boolean("backed_up").default(false).notNull(),
+  transports: text("transports").array().default([]).notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull()
+});
+
 

@@ -8,19 +8,21 @@
     "packages/*",
     "integrations/*"
   ],
+  "packageManager": "bun@1.4.4",
   "scripts": {
-    "build": "npm -w @noema/core run build && npm -w @noema/auth run build && npm -w @noema/database run build && npm -w @noema/audit-engine run build && npm -w @noema/graph run build && npm -w @noema/retrieval run build && npm -w @noema/context-engine run build && npm -w @noema/agent-handoff run build && npm -w @noema/knowledge run build && npm -w @noema/ingestion run build && npm -w @noema/code-intelligence run build && npm -w @noema/architecture-guardian run build && npm -w @noema/connector-github run build && npm -w @noema/connector-saas run build && npm -w @noema/observability run build && npm run build --workspaces --if-present",
-    "typecheck": "npm run typecheck --workspaces --if-present",
-    "test": "npm run test --workspaces --if-present",
-    "dev:api": "npm --workspace=@noema/api run dev",
-    "dev:web": "npm --workspace=@noema/web run dev",
-    "start:api": "npm --workspace=@noema/api run start",
-    "start:local": "NOEMA_DEPLOYMENT_MODE=local npm --workspace=@noema/api run start",
-    "start:cloud": "NOEMA_DEPLOYMENT_MODE=cloud npm --workspace=@noema/api run start",
-    "start:web": "npm --workspace=@noema/web run start",
-    "start:worker": "npm --workspace=@noema/worker run start",
-    "db:bootstrap-roles": "npm -w @noema/database run db:bootstrap-roles",
-    "db:migrate": "npm -w @noema/database run db:migrate",
+    "build": "turbo run build",
+    "typecheck": "turbo run typecheck",
+    "test": "turbo run test",
+    "dev": "turbo run dev",
+    "dev:api": "bun --filter @noema/api dev",
+    "dev:web": "bun --filter @noema/web dev",
+    "start:api": "bun --filter @noema/api start",
+    "start:local": "NOEMA_DEPLOYMENT_MODE=local bun --filter @noema/api start",
+    "start:cloud": "NOEMA_DEPLOYMENT_MODE=cloud bun --filter @noema/api start",
+    "start:web": "bun --filter @noema/web start",
+    "start:worker": "bun --filter @noema/worker start",
+    "db:bootstrap-roles": "bun --filter @noema/database db:bootstrap-roles",
+    "db:migrate": "bun --filter @noema/database db:migrate",
     "infra:up": "docker compose -f infra/docker/docker-compose.yml up -d",
     "infra:down": "docker compose -f infra/docker/docker-compose.yml down"
   },
@@ -29,6 +31,8 @@
   },
   "overrides": {
     "esbuild": "^0.28.2"
+  },
+  "devDependencies": {
+    "turbo": "^2.11.12"
   }
 }
-

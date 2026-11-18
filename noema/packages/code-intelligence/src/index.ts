@@ -8,6 +8,8 @@ import { IndexSchema, SymbolRole, type Index as ProtoScipIndex, type Occurrence 
 import ts from "typescript";
 import { Parser, Language } from "web-tree-sitter";
 
+export * from "./tree-sitter.js";
+
 const execFileAsync = promisify(execFile);
 
 export interface CodeAnchor {

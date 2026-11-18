@@ -10,14 +10,17 @@
     "test": "node --test dist/test/*.test.js"
   },
   "dependencies": {
-    "@noema/core": "*",
     "@noema/code-intelligence": "*",
+    "@noema/core": "*",
     "js-tiktoken": "^1.0.19",
-    "typescript": "^5.7.2"
+    "mammoth": "^1.13.0",
+    "turndown": "^7.2.5",
+    "typescript": "^5.7.2",
+    "unpdf": "^2.2.1"
   },
   "devDependencies": {
     "@types/node": "^22.10.0",
+    "@types/turndown": "^5.0.6",
     "typescript": "^5.7.2"
   }
 }
-

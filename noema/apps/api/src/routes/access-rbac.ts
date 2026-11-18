@@ -10,7 +10,47 @@ import { BrainError } from "@noema/core";
 import type { ApiRouteDeps } from "./types.js";
 
 export function registerAccessRbacRoutes(deps: ApiRouteDeps) {
-  const { app, authenticateProjectRequest, recordAudit, opRepo } = deps;
+  const { app, authenticateProjectRequest, recordAudit, opRepo, authRepo } = deps;
+
+  app.get<{ Params: { projectId: string } }>("/v1/projects/:projectId/access/users", async (req) => {
+    const ctx = await authenticateProjectRequest(req.headers.authorization, req.params.projectId);
+    assertPermission(ctx, "roles:view");
+    const dbUsers = authRepo ? await authRepo.listUsers(ctx.tenantId) : [];
+    const members = opRepo ? await opRepo.listAccessMembers(ctx, req.params.projectId) : [];
+    const byId = new Map<string, { id: string; name: string; email?: string; roles: string[]; linkedAgentIds: string[]; source: string }>();
+
+    for (const u of dbUsers) {
+      byId.set(u.id, {
+        id: u.id,
+        name: u.name,
+        email: u.email,
+        roles: u.roles,
+        linkedAgentIds: u.linkedAgentIds ?? [],
+        source: "registered"
+      });
+    }
+    for (const m of members) {
+      if (!byId.has(m.actorId)) {
+        byId.set(m.actorId, {
+          id: m.actorId,
+          name: m.actorId,
+          roles: m.roles,
+          linkedAgentIds: [],
+          source: "member"
+        });
+      }
+    }
+    if (!byId.has(ctx.actorId)) {
+      byId.set(ctx.actorId, {
+        id: ctx.actorId,
+        name: ctx.actorId,
+        roles: ctx.roles,
+        linkedAgentIds: [],
+        source: "session"
+      });
+    }
+    return { projectId: req.params.projectId, users: [...byId.values()] };
+  });
 
   app.get<{ Params: { projectId: string } }>(
     "/v1/projects/:projectId/access/user-policies",

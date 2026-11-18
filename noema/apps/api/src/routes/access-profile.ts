@@ -91,9 +91,9 @@ export function registerAccessProfileRoutes(
       tenantId: ctx.tenantId,
       actorId: ctx.actorId,
       actorType: ctx.actorType,
-      identitySource: ctx.actorId === "local-api-key" ? "local-api-key" : "oidc-claims",
-      opaConfigured: Boolean(process.env.OPA_URL),
-      keycloakAdminConfigured: Boolean(process.env.KEYCLOAK_ADMIN_URL),
+      identitySource: ctx.actorId === "local-api-key" ? "local-api-key" : "jwt-claims",
+      caslEnabled: true,
+      betterAuthEnabled: true,
       roles: ctx.roles,
       effectivePermissions: ctx.permissions ?? [],
       allowedProjects: ctx.allowedProjects,
@@ -102,7 +102,9 @@ export function registerAccessProfileRoutes(
       currentProjectAuthorized: true,
       managementAvailable: true,
       managementStorage: opRepo ? "postgres" : "process-memory",
-      managementNote: `${opRepo ? "Alterações locais de acesso persistem em PostgreSQL. " : "Alterações locais de acesso ficam em memória e se perdem ao reiniciar. "}${process.env.KEYCLOAK_ADMIN_URL ? "Sincronização OIDC/Keycloak está configurada." : "Configure KEYCLOAK_ADMIN_URL para sincronização OIDC externa."}`
+      managementNote: opRepo
+        ? "Alterações de acesso persistem em PostgreSQL (CASL + Better Auth)."
+        : "Alterações locais de acesso ficam em memória e se perdem ao reiniciar."
     };
   });
 
@@ -113,7 +115,7 @@ export function registerAccessProfileRoutes(
     const members = opRepo
       ? await opRepo.listAccessMembers(ctx, req.params.projectId)
       : [...accessMembers.entries()].filter(([key]) => key.startsWith(prefix)).map(([, member]) => member);
-    return { projectId: req.params.projectId, keycloakConfigured: Boolean(process.env.KEYCLOAK_ADMIN_URL), members };
+    return { projectId: req.params.projectId, betterAuthEnabled: true, members };
   });
 
   app.put<{ Params: { projectId: string; actorId: string }; Body: { roles: string[]; allowedPolicies?: string[] } }>(
