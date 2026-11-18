@@ -1,0 +1,11 @@
+<idea-plugin>
+  <id>dev.brain.jetbrains</id>
+  <name>Brain — Project Brain OS 2.0</name>
+  <vendor>Brain</vendor>
+  <description>Integração nativa JetBrains com o Universal Agent Gateway (/mcp Streamable HTTP).</description>
+  <depends>com.intellij.modules.platform</depends>
+  <extensions defaultExtensionNs="com.intellij">
+    <applicationService serviceImplementation="com.brain.brain.BrainMcpService"/>
+  </extensions>
+</idea-plugin>
+

@@ -1,0 +1,26 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://brain.dev/protocols/edge-sync/schema.json",
+  "title": "EdgeSyncEnvelope",
+  "type": "object",
+  "required": ["syncMode", "syncSeq", "policyEpoch", "items", "tombstones"],
+  "properties": {
+    "syncMode": { "type": "string", "enum": ["snapshot", "delta"] },
+    "syncSeq": { "type": "integer", "minimum": 0 },
+    "policyEpoch": { "type": "integer", "minimum": 1 },
+    "snapshotSeq": { "type": "integer", "minimum": 0 },
+    "snapshotCursor": { "type": ["string", "null"] },
+    "snapshotDone": { "type": "boolean" },
+    "snapshotRestarted": { "type": "boolean" },
+    "revokedPolicies": { "type": "array", "items": { "type": "string" } },
+    "items": { "type": "array", "items": { "type": "object" } },
+    "tombstones": { "type": "array", "items": { "type": "string" } }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "syncMode": { "const": "snapshot" } } },
+      "then": { "required": ["snapshotSeq", "snapshotCursor", "snapshotDone"] }
+    }
+  ]
+}
+

@@ -1,0 +1,25 @@
+{
+  "name": "@brain/agent-runner",
+  "version": "0.1.0",
+  "type": "module",
+  "main": "./dist/src/index.js",
+  "types": "./dist/src/index.d.ts",
+  "scripts": {
+    "build": "tsc -p tsconfig.json && node -e \"if (process.platform === 'darwin') require('node:child_process').execFileSync('swiftc', ['-parse-as-library', 'native/apple-fm-bridge.swift', '-o', 'dist/apple-fm-bridge'], { stdio: 'inherit' })\"",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "node --test dist/test/*.test.js"
+  },
+  "dependencies": {
+    "@ai-sdk/anthropic": "^4.0.106",
+    "@ai-sdk/openai": "^4.0.121",
+    "@brain/auth": "*",
+    "@brain/core": "*",
+    "ai": "^7.0.176",
+    "ollama": "^0.6.4",
+    "zod": "^3.24.2"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "typescript": "^5.7.2"
+  }
+}

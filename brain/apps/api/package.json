@@ -1,0 +1,52 @@
+{
+  "name": "@brain/api",
+  "version": "0.1.0",
+  "type": "module",
+  "main": "./dist/src/server.js",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "dev": "bun --env-file=../../.env --watch src/server.ts",
+    "start": "bun --env-file=../../.env src/server.ts",
+    "test": "BRAIN_JWT_SECRET=test-suite-jwt-secret-key-at-least-32-chars! node --test dist/test/*.test.js test/*.test.mjs"
+  },
+  "dependencies": {
+    "@arcjet/node": "^1.16.0",
+    "@fastify/type-provider-typebox": "^5.2.0",
+    "@modelcontextprotocol/sdk": "^1.12.0",
+    "@brain/agent-handoff": "*",
+    "@brain/agent-runner": "*",
+    "@brain/approval-engine": "*",
+    "@brain/audit-engine": "*",
+    "@brain/auth": "*",
+    "@brain/code-intelligence": "*",
+    "@brain/context-engine": "*",
+    "@brain/core": "*",
+    "@brain/cross-service": "*",
+    "@brain/database": "*",
+    "@brain/enterprise-views": "*",
+    "@brain/graph": "*",
+    "@brain/impact-analysis": "*",
+    "@brain/ingestion": "*",
+    "@brain/knowledge": "*",
+    "@brain/mcp-server": "*",
+    "@brain/memory": "*",
+    "@brain/observability": "*",
+    "@brain/retrieval": "*",
+    "@brain/task-engine": "*",
+    "@brain/temporal-knowledge": "*",
+    "@brain/worker": "*",
+    "@brain/workflow-orchestrator": "*",
+    "@brain/workspace-detection": "*",
+    "@sinclair/typebox": "^0.34.0",
+    "fastify": "^5.2.0",
+    "pg-boss": "^10.1.5",
+    "simple-git": "^4.1.0",
+    "ws": "^8.23.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "@types/ws": "^8.18.2",
+    "typescript": "^5.7.2"
+  }
+}

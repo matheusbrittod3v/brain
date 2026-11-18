@@ -1,0 +1,41 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://brain.dev/protocols/context-pack/schema.json",
+  "title": "ContextPack",
+  "type": "object",
+  "required": ["project", "task", "context", "warnings", "conflicts", "sources"],
+  "properties": {
+    "project": { "type": "string" },
+    "task": { "type": "string" },
+    "tokenUsage": { "type": "integer", "minimum": 0 },
+    "context": {
+      "type": "object",
+      "properties": {
+        "businessRules": { "type": "array", "items": { "type": "object" } },
+        "architecture": { "type": "array", "items": { "type": "object" } },
+        "services": { "type": "array", "items": { "type": "object" } },
+        "tests": { "type": "array", "items": { "type": "string" } },
+        "tasks": { "type": "array", "items": { "type": "object" } }
+      }
+    },
+    "warnings": { "type": "array", "items": { "type": "string" } },
+    "conflicts": { "type": "array", "items": { "type": "object" } },
+    "sources": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "version", "status", "trustLevel", "sourceOrigin", "sourceUri"],
+        "properties": {
+          "id": { "type": "string" },
+          "version": { "type": "string" },
+          "status": { "type": "string", "enum": ["draft", "approved", "deprecated", "superseded"] },
+          "trustLevel": { "type": "string", "enum": ["verified", "self_authored", "untrusted"] },
+          "sourceOrigin": { "type": "string", "enum": ["internal", "external_reference"] },
+          "sourceUri": { "type": "string" },
+          "chunkIndex": { "type": "integer" }
+        }
+      }
+    }
+  }
+}
+

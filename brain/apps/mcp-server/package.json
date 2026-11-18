@@ -1,0 +1,49 @@
+{
+  "name": "@brain/mcp-server",
+  "version": "0.1.0",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "bin": {
+    "brain-mcp": "./dist/index.js"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "node --test test/*.test.mjs"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.12.0",
+    "pg-boss": "^10.1.5",
+    "@brain/agent-handoff": "*",
+    "@brain/agent-runner": "*",
+    "@brain/approval-engine": "*",
+    "@brain/architecture-guardian": "*",
+    "@brain/audit-engine": "*",
+    "@brain/auth": "*",
+    "@brain/business-rule-guardian": "*",
+    "@brain/code-intelligence": "*",
+    "@brain/context-engine": "*",
+    "@brain/core": "*",
+    "@brain/cross-service": "*",
+    "@brain/database": "*",
+    "@brain/enterprise-views": "*",
+    "@brain/graph": "*",
+    "@brain/impact-analysis": "*",
+    "@brain/ingestion": "*",
+    "@brain/knowledge": "*",
+    "@brain/knowledge-health": "*",
+    "@brain/memory": "*",
+    "@brain/retrieval": "*",
+    "@brain/task-engine": "*",
+    "@brain/temporal-knowledge": "*",
+    "@brain/workflow-orchestrator": "*",
+    "@brain/workspace-detection": "*",
+    "zod": "^4.6.7"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "typescript": "^5.7.2"
+  }
+}
+

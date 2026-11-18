@@ -1,0 +1,17 @@
+node_modules/
+dist/
+.next/
+.turbo/
+*.tsbuildinfo
+.env
+.env.local
+*.db
+*.sqlite
+*.log
+.DS_Store
+.superpowers/
+.nuxt/
+.output/
+.brain/runner-connections.json
+.brain/runner-routing.json
+

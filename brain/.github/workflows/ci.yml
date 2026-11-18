@@ -1,0 +1,120 @@
+name: Brain CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  edge-cross-platform:
+    name: Edge SQLCipher (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: package-lock.json
+      - run: npm ci
+      - run: npm -w @brain/core run build && npm -w @brain/database-edge run build
+      - run: npm -w @brain/database-edge test
+
+  build-test-eval:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: brain_admin
+          POSTGRES_PASSWORD: brain_admin_dev_password
+          POSTGRES_DB: project_brain_os
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "22"
+      - run: npm ci
+      - name: Set up Go for Gitleaks
+        uses: actions/setup-go@v6
+        with:
+          go-version: "1.24.x"
+      - name: Install Gitleaks CLI
+        run: |
+          go install github.com/gitleaks/gitleaks/v8@v8.30.1
+          echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
+          gitleaks version
+      - run: npm run build
+      - run: npm test
+      - run: node --test tests/retrieval-evals/eval.test.mjs
+      - name: Security & Retrieval Benchmarks
+        run: node --test tests/security/security.test.mjs tests/benchmarks/retrieval-p95.test.mjs
+      - name: Bootstrap Database Roles
+        env:
+          DATABASE_ADMIN_URL: postgresql://brain_admin:brain_admin_dev_password@localhost:5432/project_brain_os
+          DATABASE_SYSTEM_URL: postgresql://brain_system:brain_system_dev_password@localhost:5432/project_brain_os
+          DATABASE_URL: postgresql://brain_app:brain_app_dev_password@localhost:5432/project_brain_os
+          BRAIN_SYSTEM_DB_PASSWORD: brain_system_dev_password
+          BRAIN_APP_DB_PASSWORD: brain_app_dev_password
+          POSTGRES_ADMIN_PASSWORD: brain_admin_dev_password
+        run: npm -w @brain/database run db:bootstrap-roles
+      - name: Run Database Migrations
+        env:
+          DATABASE_SYSTEM_URL: postgresql://brain_system:brain_system_dev_password@localhost:5432/project_brain_os
+        run: npm -w @brain/database run db:migrate
+      - name: Live PostgreSQL Integration
+        env:
+          BRAIN_INTEGRATION_DB_URL: postgresql://brain_admin:brain_admin_dev_password@localhost:5432/project_brain_os
+        run: node --test tests/integration/postgres-live.test.mjs
+      - name: Live PostgreSQL API Ingest & Context
+        env:
+          BRAIN_INTEGRATION_DB_URL: postgresql://brain_admin:brain_admin_dev_password@localhost:5432/project_brain_os
+          BRAIN_APP_DB_URL: postgresql://brain_app:brain_app_dev_password@localhost:5432/project_brain_os
+        run: node --test tests/integration/postgres-api-context-live.test.mjs
+      - name: Live PostgreSQL VERIFIED_BY CI Evidence
+        env:
+          BRAIN_INTEGRATION_DB_URL: postgresql://brain_admin:brain_admin_dev_password@localhost:5432/project_brain_os
+          BRAIN_APP_DB_URL: postgresql://brain_app:brain_app_dev_password@localhost:5432/project_brain_os
+        run: node --test tests/integration/postgres-verified-by-live.test.mjs
+      - name: Live PostgreSQL Retrieval & Graph Isolation
+        env:
+          BRAIN_INTEGRATION_DB_URL: postgresql://brain_admin:brain_admin_dev_password@localhost:5432/project_brain_os
+          BRAIN_APP_DB_URL: postgresql://brain_app:brain_app_dev_password@localhost:5432/project_brain_os
+        run: node --test tests/integration/postgres-retrieval-graph-live.test.mjs
+      - name: Live PostgreSQL MCP Proposal Persistence
+        env:
+          BRAIN_INTEGRATION_DB_URL: postgresql://brain_admin:brain_admin_dev_password@localhost:5432/project_brain_os
+          BRAIN_APP_DB_URL: postgresql://brain_app:brain_app_dev_password@localhost:5432/project_brain_os
+        run: node --test tests/integration/postgres-mcp-proposal-live.test.mjs
+      - name: Live PostgreSQL All SQL MCP Tools
+        env:
+          BRAIN_INTEGRATION_DB_URL: postgresql://brain_admin:brain_admin_dev_password@localhost:5432/project_brain_os
+          BRAIN_APP_DB_URL: postgresql://brain_app:brain_app_dev_password@localhost:5432/project_brain_os
+        run: node --test tests/integration/postgres-mcp-tools-live.test.mjs
+      - name: Live PostgreSQL RLS Matrix
+        env:
+          BRAIN_INTEGRATION_DB_URL: postgresql://brain_admin:brain_admin_dev_password@localhost:5432/project_brain_os
+          BRAIN_APP_DB_URL: postgresql://brain_app:brain_app_dev_password@localhost:5432/project_brain_os
+        run: node --test tests/integration/postgres-rls-matrix-live.test.mjs
+      - name: Live Git/SaaS pg-boss Worker & Graceful Shutdown
+        env:
+          BRAIN_INTEGRATION_DB_URL: postgresql://brain_admin:brain_admin_dev_password@localhost:5432/project_brain_os
+          BRAIN_APP_DB_URL: postgresql://brain_app:brain_app_dev_password@localhost:5432/project_brain_os
+          DATABASE_SYSTEM_URL: postgresql://brain_system:brain_system_dev_password@localhost:5432/project_brain_os
+          DATABASE_URL: postgresql://brain_app:brain_app_dev_password@localhost:5432/project_brain_os
+        run: node --test tests/integration/postgres-worker-live.test.mjs
+      - name: Architecture Layer & Semgrep Check
+        run: npx --yes dependency-cruiser --validate .dependency-cruiser.cjs packages apps && pipx run semgrep --config .semgrep.yml packages apps
+

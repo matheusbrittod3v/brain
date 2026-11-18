@@ -1,0 +1,22 @@
+{{- if .Values.opa.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .Release.Name }}-opa
+  labels:
+    app.kubernetes.io/name: brain
+    app.kubernetes.io/component: opa
+    app.kubernetes.io/instance: {{ .Release.Name }}
+spec:
+  type: ClusterIP
+  ports:
+    - port: 8181
+      targetPort: http
+      protocol: TCP
+      name: http
+  selector:
+    app.kubernetes.io/name: brain
+    app.kubernetes.io/component: opa
+    app.kubernetes.io/instance: {{ .Release.Name }}
+{{- end }}
+

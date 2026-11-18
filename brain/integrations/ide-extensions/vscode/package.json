@@ -1,0 +1,15 @@
+{
+  "name": "brain-vscode",
+  "displayName": "Brain — Project Brain OS",
+  "version": "0.1.0",
+  "engines": { "vscode": "^1.90.0" },
+  "activationEvents": ["onStartupFinished"],
+  "main": "./src/extension.js",
+  "contributes": {
+    "commands": [
+      { "command": "brain.buildContextPack", "title": "Brain: Build Context Pack" },
+      { "command": "brain.createHandoff", "title": "Brain: Create Agent Handoff" }
+    ]
+  }
+}
+

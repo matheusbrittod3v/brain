@@ -1,0 +1,32 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://brain.dev/protocols/project-manifest/schema.json",
+  "title": "ProjectManifest",
+  "type": "object",
+  "required": ["schemaVersion", "tenantId", "projectId"],
+  "properties": {
+    "schemaVersion": { "type": "string", "default": "1.0.0" },
+    "tenantId": { "type": "string" },
+    "projectId": { "type": "string" },
+    "ownerRepo": { "type": "string" },
+    "knowledgeRoot": { "type": "string", "default": ".brain/" },
+    "knowledgePaths": { "type": "array", "items": { "type": "string" } },
+    "knowledgePrecedence": {
+      "type": "array",
+      "items": { "type": "string", "enum": ["knowledgePaths", "localBrain", "centralOrg"] }
+    },
+    "guardianMode": { "type": "string", "enum": ["audit", "advisory", "enforced"], "default": "advisory" },
+    "subProjects": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["projectId", "path"],
+        "properties": {
+          "projectId": { "type": "string" },
+          "path": { "type": "string" }
+        }
+      }
+    }
+  }
+}
+

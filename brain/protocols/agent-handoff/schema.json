@@ -1,0 +1,24 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://brain.dev/protocols/agent-handoff/schema.json",
+  "title": "AgentHandoff",
+  "type": "object",
+  "required": ["handoffId", "fromAgent", "projectId", "taskId", "repoUrl", "branch", "baseCommitSha", "workingTreeDirty", "modifiedFiles", "testsExecuted", "nextSteps"],
+  "properties": {
+    "handoffId": { "type": "string" },
+    "fromAgent": { "type": "string" },
+    "projectId": { "type": "string" },
+    "taskId": { "type": "string" },
+    "repoUrl": { "type": "string" },
+    "branch": { "type": "string" },
+    "baseCommitSha": { "type": "string" },
+    "workingTreeDirty": { "type": "boolean" },
+    "ephemeralBranch": { "type": "string" },
+    "patchRef": { "type": "string" },
+    "modifiedFiles": { "type": "array", "items": { "type": "string" } },
+    "testsExecuted": { "type": "array", "items": { "type": "string" } },
+    "decisions": { "type": "array", "items": { "type": "string" } },
+    "nextSteps": { "type": "array", "items": { "type": "string" } }
+  }
+}
+
