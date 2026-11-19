@@ -162,9 +162,12 @@ export function registerEvolutionPrioritiesRoutes(
     const dbUser = authRepo ? await authRepo.findUserById(rawCtx.actorId) : null;
     const memUser = !dbUser && rawCtx.actorId !== "local-dev" ? usersStore.getUserById(rawCtx.actorId) : null;
     const fresh = dbUser ?? memUser;
-    return fresh
+    const baseCtx: AuthContext = fresh
       ? { ...rawCtx, roles: fresh.roles, allowedProjects: fresh.allowedProjects, allowedPolicies: fresh.allowedPolicies }
       : rawCtx;
+    return opRepo
+      ? await opRepo.resolveDynamicMcpScope(baseCtx, fresh ? [] : allowedProjects, allowedPolicies)
+      : baseCtx;
   };
 
   // 1. Search Benchmark & Quality Diagnostics (Priority 1)
@@ -506,6 +509,7 @@ export function registerEvolutionPrioritiesRoutes(
     const checks = [
       {
         id: "postgres-rls",
+        name: "PostgreSQL 16 + pgvector + BM25 + RLS",
         label: "PostgreSQL 16 + pgvector + BM25 + RLS",
         ok: Boolean(opRepo),
         detail: opRepo ? "Conectado com RLS, índice HNSW e função brain_bm25_rank ativa." : "Repositório PostgreSQL indisponível.",
@@ -513,6 +517,7 @@ export function registerEvolutionPrioritiesRoutes(
       },
       {
         id: "system-settings",
+        name: "Configurações Dinâmicas (system_settings)",
         label: "Configurações Dinâmicas (system_settings)",
         ok: settingsCount > 0,
         detail: `${settingsCount} parâmetros persistidos no PostgreSQL.`,
@@ -520,6 +525,7 @@ export function registerEvolutionPrioritiesRoutes(
       },
       {
         id: "valkey-cache",
+        name: "Cache Distribuído Valkey (:6379)",
         label: "Cache Distribuído Valkey (:6379)",
         ok: true,
         detail: "ValkeyRetrievalCache conectado em redis://localhost:6379.",
@@ -527,6 +533,7 @@ export function registerEvolutionPrioritiesRoutes(
       },
       {
         id: "minio-storage",
+        name: "MinIO S3 Object Storage (:9000)",
         label: "MinIO S3 Object Storage (:9000)",
         ok: minioOk,
         detail: minioOk ? "Bucket 'brain-artifacts' ativo com URLs pré-assinadas (TTL 15m)." : "MinIO inacessível em :9000.",
@@ -534,6 +541,7 @@ export function registerEvolutionPrioritiesRoutes(
       },
       {
         id: "ollama-embeddings",
+        name: "Embeddings Vetoriais Ollama (bge-m3)",
         label: "Embeddings Vetoriais Ollama (bge-m3)",
         ok: ollamaOk,
         detail: ollamaOk ? "Servidor Ollama (:11434) online com modelo bge-m3 (1024 dimensões)." : "Ollama offline.",
@@ -541,6 +549,7 @@ export function registerEvolutionPrioritiesRoutes(
       },
       {
         id: "mcp-http-gateway",
+        name: "Gateway MCP Streamable HTTP (/mcp)",
         label: "Gateway MCP Streamable HTTP (/mcp)",
         ok: true,
         detail: "Endpoint http://localhost:3333/mcp pronto para chamadas HTTP JSON-RPC e OAuth 2.1 PKCE.",

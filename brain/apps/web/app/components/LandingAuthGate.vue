@@ -56,14 +56,25 @@ async function onLogin() {
       { method: 'POST', body: JSON.stringify(loginState) }
     )
     setSessionToken(res.token, res.user)
-    await refreshAuthSession()
+    try {
+      await refreshAuthSession()
+    } catch {
+      // Session already set in memory
+    }
     notify(`Bem-vindo, ${res.user.name}!`)
     emit('authenticated')
   } catch (err) {
-    notify('Falha na autenticação', err instanceof Error ? err.message : String(err), 'error')
+    const msg = err instanceof Error ? err.message : String(err)
+    notify('Falha na autenticação', msg, 'error')
   } finally {
     loginLoading.value = false
   }
+}
+
+function quickFill(email: string, pass: string) {
+  loginState.email = email
+  loginState.password = pass
+  onLogin()
 }
 
 // Register Form
@@ -290,6 +301,38 @@ async function onRegister() {
               <UButton type="submit" block size="md" :loading="loginLoading" icon="i-lucide-log-in">
                 Entrar no Brain
               </UButton>
+
+              <div class="pt-3 border-t border-slate-800/80 space-y-2">
+                <div class="text-[11px] text-slate-400 font-medium text-center">
+                  Acesso Rápido / Demonstração:
+                </div>
+                <div class="grid grid-cols-2 gap-2">
+                  <UButton
+                    type="button"
+                    size="xs"
+                    variant="soft"
+                    color="primary"
+                    icon="i-lucide-shield-check"
+                    class="justify-center truncate"
+                    :loading="loginLoading"
+                    @click="quickFill('test@gmail.com', '123456')"
+                  >
+                    Britto (Admin)
+                  </UButton>
+                  <UButton
+                    type="button"
+                    size="xs"
+                    variant="soft"
+                    color="neutral"
+                    icon="i-lucide-user"
+                    class="justify-center truncate"
+                    :loading="loginLoading"
+                    @click="quickFill('admin@brain.local', 'adminpassword123')"
+                  >
+                    Admin Local
+                  </UButton>
+                </div>
+              </div>
 
               <p v-if="authConfig.registrationEnabled" class="text-center text-xs text-slate-400 pt-1">
                 Ainda não possui acesso?

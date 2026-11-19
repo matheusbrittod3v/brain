@@ -489,10 +489,10 @@ export class PgAccessRbacRepo {
     const [tenantProjects, memberships, activeGrants] = systemDb
       ? await Promise.all([
           queryDb
-            .select({ id: projects.id })
+            .select({ id: projects.id, isShared: projects.isShared })
             .from(projects)
             .where(eq(projects.tenantId, ctx.tenantId))
-            .catch(() => [] as Array<{ id: string }>),
+            .catch(() => [] as Array<{ id: string; isShared: boolean | null }>),
           queryDb
             .select({
               projectId: projectAccessMembers.projectId,
@@ -526,10 +526,10 @@ export class PgAccessRbacRepo {
           (tx) =>
             Promise.all([
               tx
-                .select({ id: projects.id })
+                .select({ id: projects.id, isShared: projects.isShared })
                 .from(projects)
                 .where(eq(projects.tenantId, ctx.tenantId))
-                .catch(() => [] as Array<{ id: string }>),
+                .catch(() => [] as Array<{ id: string; isShared: boolean | null }>),
               tx
                 .select({
                   projectId: projectAccessMembers.projectId,
@@ -558,15 +558,14 @@ export class PgAccessRbacRepo {
     const projectSet = new Set<string>([...ctx.allowedProjects]);
     const policySet = new Set<string>([...ctx.allowedPolicies, ...fallbackPolicies, "public-org", "internal-project"]);
 
-    if (isAdmin && ctx.actorId === "local-dev") {
+    if (isAdmin) {
       for (const p of tenantProjects) projectSet.add(p.id);
       for (const p of fallbackProjects) projectSet.add(p);
       policySet.add("confidential-business");
       policySet.add("restricted-security");
     } else {
-      if (isAdmin) {
-        policySet.add("confidential-business");
-        policySet.add("restricted-security");
+      for (const p of tenantProjects) {
+        if (p.isShared) projectSet.add(p.id);
       }
       for (const m of memberships) {
         projectSet.add(m.projectId);

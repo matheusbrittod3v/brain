@@ -43,12 +43,17 @@ async function onLogin() {
       { method: 'POST', body: JSON.stringify(loginState) }
     )
     setSessionToken(res.token, res.user)
-    await refreshAuthSession()
+    try {
+      await refreshAuthSession()
+    } catch {
+      // Session already cached
+    }
     notify(`Bem-vindo, ${res.user.name}!`)
     authModalOpen.value = false
     emit('authenticated')
   } catch (err) {
-    notify('Erro no login', err instanceof Error ? err.message : String(err), 'error')
+    const msg = err instanceof Error ? err.message : String(err)
+    notify('Erro no login', msg, 'error')
   } finally {
     loginLoading.value = false
   }

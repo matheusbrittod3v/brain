@@ -403,8 +403,13 @@ export class PgOperationalRepository extends PgRunnerHandoffsRepo {
   }
 
   async listProjects(ctx: AuthContext) {
-    if (ctx.allowedProjects.length === 0) return [];
-    const allowAll = ctx.allowedProjects.includes("*");
+    const isAdmin =
+      ctx.actorType === "system" ||
+      ctx.roles.some((r) => ["admin", "owner", "org_admin", "superadmin"].includes(r.toLowerCase()));
+    if (ctx.allowedProjects.length === 0 && !isAdmin) {
+      return this.listSharedProjects(ctx.tenantId);
+    }
+    const allowAll = isAdmin || ctx.allowedProjects.includes("*");
     return withTenantRls(this.db, ctx, async (tx) => {
       const rows = await tx
         .select()

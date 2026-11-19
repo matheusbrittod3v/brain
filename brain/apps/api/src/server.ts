@@ -197,16 +197,43 @@ export function buildApp(
     });
   });
   const allowedCorsOrigin = process.env.BRAIN_CORS_ORIGIN ?? "http://localhost:3000";
+  const allowedOriginsList = allowedCorsOrigin
+    .split(",")
+    .map((s) => s.trim().replace(/\/+$/, ""))
+    .filter(Boolean);
+
+  const isAllowedOrigin = (origin: string | undefined): boolean => {
+    if (!origin) return false;
+    const clean = origin.replace(/\/+$/, "");
+    if (allowedCorsOrigin === "*" || allowedOriginsList.includes("*") || allowedOriginsList.includes(clean)) {
+      return true;
+    }
+    try {
+      const parsed = new URL(clean);
+      if (parsed.hostname === "localhost" || parsed.hostname === "127.0.0.1" || parsed.hostname === "0.0.0.0") {
+        return true;
+      }
+    } catch {
+      // ignore
+    }
+    return false;
+  };
+
   const realtime = createRealtimeHub({ server: app.server, allowedCorsOrigin });
   app.addHook("onRequest", async (req, reply) => {
     const origin = req.headers.origin;
-    if (origin && (allowedCorsOrigin === "*" || origin === allowedCorsOrigin)) {
+    if (origin && isAllowedOrigin(origin)) {
       reply.header("Access-Control-Allow-Origin", origin);
       reply.header("Vary", "Origin");
       reply.header("Access-Control-Allow-Methods", "GET,POST,PUT,PATCH,DELETE,OPTIONS");
-      reply.header("Access-Control-Allow-Headers", "Authorization,Content-Type,Mcp-Session-Id");
+      reply.header(
+        "Access-Control-Allow-Headers",
+        "Authorization, Content-Type, Mcp-Session-Id, x-api-key, x-user-id, x-user-roles, x-tenant-id, cache-control"
+      );
+      reply.header("Access-Control-Allow-Credentials", "true");
     }
     if (req.method === "OPTIONS") {
+      reply.header("Access-Control-Max-Age", "86400");
       return reply.code(204).send();
     }
   });

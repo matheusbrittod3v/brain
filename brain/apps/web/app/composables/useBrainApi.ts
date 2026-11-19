@@ -32,7 +32,11 @@ export function useBrainApi() {
     const savedUrl = localStorage.getItem('brain.apiUrl')
     const savedKey = localStorage.getItem('brain.apiKey')
     const savedProj = localStorage.getItem('brain.projectId')
-    if (savedUrl && apiUrl.value === 'http://localhost:3333') apiUrl.value = savedUrl
+    if (savedUrl) {
+      apiUrl.value = savedUrl
+    } else if (typeof window !== 'undefined' && window.location.hostname === '127.0.0.1') {
+      apiUrl.value = 'http://127.0.0.1:3333'
+    }
     if (savedKey && !apiKey.value) apiKey.value = savedKey
     if (savedProj && projectId.value === 'brain') projectId.value = savedProj
   }
