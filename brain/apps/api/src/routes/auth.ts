@@ -246,7 +246,7 @@ export function registerAuthRoutes(
   }>("/v1/auth/oauth/device/code", async (req) => {
     const clientId = req.body?.clientId?.trim() || "brain-mcp-client";
     const clientName = req.body?.clientName?.trim() || "MCP Server / Agent";
-    const scope = req.body?.scope?.trim() || "projects:all";
+    const scope = req.body?.scope?.trim() || "projects:all knowledge:read knowledge:write runner:execute";
 
     const session = oauth2Manager.createDeviceAuthorization({
       clientId,

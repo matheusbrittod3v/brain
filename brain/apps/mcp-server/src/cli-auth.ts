@@ -115,7 +115,7 @@ export async function runMcpLoginFlow(apiUrlInput?: string): Promise<void> {
               client_name: "Brain MCP CLI (stdio)",
               redirect_uris: [boundRedirectUri],
               grant_types: ["authorization_code", "refresh_token"],
-              scope: "projects:all knowledge:read knowledge:write"
+              scope: "projects:all knowledge:read knowledge:write runner:execute"
             })
           });
           if (regRes.ok) {
@@ -129,7 +129,7 @@ export async function runMcpLoginFlow(apiUrlInput?: string): Promise<void> {
           authUrl.searchParams.set("redirect_uri", boundRedirectUri);
           authUrl.searchParams.set("code_challenge", codeChallenge);
           authUrl.searchParams.set("code_challenge_method", "S256");
-          authUrl.searchParams.set("scope", "projects:all knowledge:read knowledge:write");
+          authUrl.searchParams.set("scope", "projects:all knowledge:read knowledge:write runner:execute");
           authUrl.searchParams.set("state", state);
 
           console.error(`\n[brain-mcp] Abrindo navegador para aprovação 1-clique:\n  ${authUrl.toString()}\n`);

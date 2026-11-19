@@ -7,7 +7,7 @@ const clientId = computed(() => String(route.query.client_id ?? '').trim())
 const redirectUri = computed(() => String(route.query.redirect_uri ?? '').trim())
 const codeChallenge = computed(() => String(route.query.code_challenge ?? '').trim())
 const codeChallengeMethod = computed(() => String(route.query.code_challenge_method ?? 'S256').trim())
-const requestedScope = computed(() => String(route.query.scope ?? 'projects:all').trim())
+const requestedScope = computed(() => String(route.query.scope ?? 'projects:all knowledge:read knowledge:write runner:execute').trim())
 const oauthState = computed(() => String(route.query.state ?? '').trim())
 const isPkceMode = computed(() => Boolean(clientId.value && redirectUri.value && codeChallenge.value))
 
