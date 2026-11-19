@@ -1,0 +1,24 @@
+id: BR-BRAIN-009
+type: business_rule
+title: Avaliação Prévia de Impacto de Mudanças e Detecção de Contradições Arquiteturais
+domainId: 3
+status: approved
+owner: architecture-council
+accessPolicyId: internal-project
+tags:
+  - impact-analysis
+  - contradictions
+  - risk-assessment
+  - pr-review
+summary: >
+  Antes de aprovar mudanças estruturais em regras de negócio ou decisões arquiteturais, o
+  sistema deve calcular o raio de explosão (blast radius), detectar potenciais contradições
+  com regras pré-existentes e emitir checklist técnico para revisão de Pull Requests.
+invariants:
+  - Modificações em código que toquem arquivos relacionados a regras com status 'approved' devem disparar revalidação automática de conformidade.
+  - Se duas regras ou decisões descreverem comportamentos conflitantes no mesmo domínio, o motor de inteligência emitirá um alerta de severidade correspondente no painel de contradições.
+  - Pull Requests devem conter checklist assinado cobrindo conformidade arquitetural, segurança RLS e limites de 700 linhas por arquivo.
+verification:
+  testIds:
+    - TEST-BR-BRAIN-009
+  testFile: tests/intelligence-rules.test.ts

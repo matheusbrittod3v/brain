@@ -1,0 +1,25 @@
+id: BR-BRAIN-008
+type: business_rule
+title: Governança, Rastreabilidade e Proveniência de Itens de Conhecimento (KnowledgeProvenance)
+domainId: 3
+status: approved
+owner: engineering-governance
+accessPolicyId: internal-project
+tags:
+  - provenance
+  - metadata
+  - validation
+  - audit
+  - governance
+summary: >
+  Todo item de conhecimento gerado ou atualizado por agentes, integrações Git ou humanos deve
+  manter metadados explícitos de proveniência (origem, autor, versão, nível de confiança, data
+  da última validação e status de revisão), impedindo alucinações e garantindo rastreabilidade.
+invariants:
+  - Itens importados de repositórios Git devem registrar sourceUri e sourceVersion correspondentes ao commit.
+  - O campo confidence varia de 0.0 a 1.0, onde valores inferiores a 0.7 marcam o item com validationStatus='pending_review'.
+  - Apenas atores com cargo 'tech-lead' ou 'admin' podem promover um item de 'pending_review' para 'valid' com status 'approved'.
+verification:
+  testIds:
+    - TEST-BR-BRAIN-008
+  testFile: tests/provenance-rules.test.ts

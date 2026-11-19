@@ -336,7 +336,10 @@ export function registerProjectCoreRoutes(app: FastifyInstance, deps: ProjectsKn
       await enforceOpa(ctx, { projectId: req.params.projectId, accessPolicyId: "internal-project", action: "write", domainId: 2 });
 
       const projectMeta = registeredProjects.get(`${ctx.tenantId}:${req.params.projectId}`);
-      const rootDir = req.body?.workspacePath?.trim() || configuredWorkspaceRoot(projectMeta?.knowledgeRoot || process.cwd());
+      let rootDir = req.body?.workspacePath?.trim() || configuredWorkspaceRoot(projectMeta?.knowledgeRoot || process.cwd());
+      if (!existsSync(join(rootDir, ".brain")) && existsSync(join(rootDir, "../../.brain"))) {
+        rootDir = join(rootDir, "../..");
+      }
       const brainDir = rootDir.endsWith(".brain") ? rootDir : join(rootDir, ".brain");
       if (!existsSync(brainDir)) {
         return { projectId: req.params.projectId, brainDir, syncedCount: 0, items: [], message: "Diretório .brain não encontrado neste workspace." };
@@ -348,7 +351,11 @@ export function registerProjectCoreRoutes(app: FastifyInstance, deps: ProjectsKn
           const full = join(dir, entry);
           const st = statSync(full);
           if (st.isDirectory()) walk(full);
-          else if (entry.toLowerCase().endsWith(".md")) mdFiles.push(full);
+          else if (
+            entry.toLowerCase().endsWith(".md") ||
+            entry.toLowerCase().endsWith(".yaml") ||
+            entry.toLowerCase().endsWith(".yml")
+          ) mdFiles.push(full);
         }
       };
       walk(brainDir);
