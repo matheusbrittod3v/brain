@@ -1,6 +1,5 @@
 <script setup lang="ts">
 import { z } from 'zod'
-import TaskTrackerModal from './daily/TaskTrackerModal.vue'
 
 export interface RunnerTaskItem {
   taskId: string
@@ -53,7 +52,6 @@ const compareResult = ref<{
 const statusFilter = ref<'all' | 'active' | 'completed' | 'failed'>('all')
 const searchQuery = ref('')
 const inspectedTask = ref<RunnerTaskItem | null>(null)
-const trackerModalOpen = ref(false)
 
 const priorityOptions: Array<{ value: 'low' | 'normal' | 'high'; label: string; icon: string; color: 'neutral' | 'primary' | 'error' }> = [
   { value: 'low', label: 'Baixa', icon: 'i-lucide-arrow-down', color: 'neutral' },
@@ -312,15 +310,6 @@ function onTextareaKeydown(e: KeyboardEvent) {
             />
             <UButton
               size="xs"
-              variant="soft"
-              color="info"
-              icon="i-lucide-activity"
-              @click="trackerModalOpen = true"
-            >
-              Task Tracker
-            </UButton>
-            <UButton
-              size="xs"
               variant="ghost"
               icon="i-lucide-refresh-cw"
               :loading="loading"
@@ -549,8 +538,6 @@ function onTextareaKeydown(e: KeyboardEvent) {
         </div>
       </template>
     </USlideover>
-
-    <TaskTrackerModal v-model:open="trackerModalOpen" :project-id="projectId" />
   </div>
 </template>
 

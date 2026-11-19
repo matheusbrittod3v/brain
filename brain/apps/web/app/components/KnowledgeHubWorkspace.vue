@@ -5,7 +5,6 @@ import KnowledgeLayersTopologyTab from './knowledge/LayersTopologyTab.vue'
 import SkillsTab from './knowledge/SkillsTab.vue'
 import SpecsTab from './knowledge/SpecsTab.vue'
 import UploadModal from './knowledge/UploadModal.vue'
-import DiscussionImporterModal from './daily/DiscussionImporterModal.vue'
 import {
   KNOWLEDGE_LAYERS,
   computeKnowledgeQuality,
@@ -35,7 +34,6 @@ const layerFilter = ref<'all' | KnowledgeLayer>('all')
 const fetchedSkills = ref<KnowledgeItemRow[]>([])
 const syncingBrain = ref(false)
 const uploadOpen = ref(false)
-const discussionOpen = ref(false)
 const createOpen = ref(false)
 const createInitialType = ref('doc')
 const inspected = ref<KnowledgeItemRow | null>(null)
@@ -243,16 +241,6 @@ async function handleRefresh() {
         <UButton
           v-if="hasPermission('knowledge:write')"
           size="sm"
-          variant="soft"
-          color="warning"
-          icon="i-lucide-messages-square"
-          @click="discussionOpen = true"
-        >
-          Extrair de Discussão
-        </UButton>
-        <UButton
-          v-if="hasPermission('knowledge:write')"
-          size="sm"
           variant="outline"
           color="neutral"
           icon="i-lucide-upload"
@@ -448,12 +436,6 @@ async function handleRefresh() {
       :can-write="hasPermission('knowledge:write')"
       @close="inspected = null"
       @updated="(updatedItem) => { inspected = updatedItem; handleRefresh() }"
-    />
-
-    <DiscussionImporterModal
-      v-model:open="discussionOpen"
-      :project-id="projectId"
-      @imported="handleRefresh"
     />
   </div>
 </template>

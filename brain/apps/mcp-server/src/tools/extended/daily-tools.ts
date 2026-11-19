@@ -177,67 +177,7 @@ export function registerDailyIntelligenceTools(
     }
   );
 
-  // 5. brain_decision_preview
-  server.tool(
-    "brain_decision_preview",
-    describeMcpTool(profile, "Prévia do impacto de uma decisão arquitetural: compara Opção A vs Opção B e aponta regras e serviços afetados."),
-    {
-      projectId: z.string().optional().describe("ID do projeto"),
-      optionA: z.object({ title: z.string(), description: z.string() }).describe("Primeira opção considerada"),
-      optionB: z.object({ title: z.string(), description: z.string() }).describe("Segunda opção considerada")
-    },
-    async (args) => {
-      const pid = args.projectId || ctx.allowedProjects[0] || "brain";
-      assertProjectAccess(ctx, pid);
-      const items = await fetchItems(pid, 250);
-
-      const assess = (opt: { title: string; description: string }) => {
-        const full = `${opt.title} ${opt.description}`.toLowerCase();
-        const affected = items.filter((i) => i.type === "business_rule" && full.includes(i.title.toLowerCase().slice(0, 10)));
-        return {
-          title: opt.title,
-          risk: affected.length > 2 ? "high" : affected.length > 0 ? "medium" : "low",
-          affectedRules: affected.map((r) => r.title)
-        };
-      };
-
-      const resA = assess(args.optionA);
-      const resB = assess(args.optionB);
-
-      return okJson({
-        projectId: pid,
-        optionA: resA,
-        optionB: resB,
-        recommendation: resA.affectedRules.length <= resB.affectedRules.length ? args.optionA.title : args.optionB.title,
-        reason: "Menor quantidade de regras existentes afetadas."
-      });
-    }
-  );
-
-  // 6. brain_explain_permissions
-  server.tool(
-    "brain_explain_permissions",
-    describeMcpTool(profile, "Explicação de permissões CASL e RLS em linguagem natural ('quem pode alterar este conhecimento?')."),
-    {
-      projectId: z.string().optional().describe("ID do projeto"),
-      knowledgeItemId: z.string().optional().describe("ID do item"),
-      action: z.string().optional().describe("Ação desejada (ex: 'read', 'write', 'approve')")
-    },
-    async (args) => {
-      const pid = args.projectId || ctx.allowedProjects[0] || "brain";
-      assertProjectAccess(ctx, pid);
-
-      return okJson({
-        projectId: pid,
-        targetItem: args.knowledgeItemId || "Recurso geral",
-        action: args.action || "write",
-        allowedRoles: ["admin", "developer", "tech-lead"],
-        plainLanguageExplanation: `Para executar '${args.action || "write"}', o ator precisa possuir uma das roles [admin, developer] associadas ao projeto '${pid}'. A política de confidencialidade RLS protege a integridade e audita todas as mutações.`
-      });
-    }
-  );
-
-  // 7. brain_internal_examples
+  // 5. brain_internal_examples
   server.tool(
     "brain_internal_examples",
     describeMcpTool(profile, "Busca exemplos e padrões de implementação aprovados já resolvidos dentro do próprio repositório."),

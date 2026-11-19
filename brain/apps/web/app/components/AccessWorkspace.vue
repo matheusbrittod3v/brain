@@ -79,39 +79,8 @@ const unifiedUsers = computed<UnifiedUserRow[]>(() => {
 const tabs = computed(() => [
   { label: 'Usuários & Vínculos', value: 'assignments', icon: 'i-lucide-users', badge: unifiedUsers.value.length },
   { label: 'Cargos & Permissões', value: 'roles', icon: 'i-lucide-shield', badge: rolesList.value.length },
-  { label: 'Acesso Just-In-Time', value: 'grants', icon: 'i-lucide-clock', badge: grantsList.value.length },
-  { label: 'Explicador de Permissões', value: 'explain', icon: 'i-lucide-help-circle' }
+  { label: 'Acesso Just-In-Time', value: 'grants', icon: 'i-lucide-clock', badge: grantsList.value.length }
 ])
-
-// Explain Permissions in Plain Language
-const explainForm = reactive({
-  itemId: '',
-  action: 'write'
-})
-const loadingExplain = ref(false)
-const explainResult = ref<{
-  targetItem: string
-  action: string
-  policyApplied: string
-  allowedRoles: string[]
-  whoCanPerform: string
-  plainLanguageExplanation: string
-  canCurrentUserPerform: boolean
-} | null>(null)
-
-async function runExplainPermissions() {
-  loadingExplain.value = true
-  try {
-    explainResult.value = await apiFetch(`/v1/projects/${encodeURIComponent(projectId.value || 'brain')}/daily/explain-permissions`, {
-      method: 'POST',
-      body: JSON.stringify({ knowledgeItemId: explainForm.itemId.trim() || undefined, targetAction: explainForm.action })
-    })
-  } catch (err) {
-    notify('Erro ao explicar permissão', err instanceof Error ? err.message : String(err), 'error')
-  } finally {
-    loadingExplain.value = false
-  }
-}
 
 async function loadAccessData() {
   accessError.value = null
@@ -281,67 +250,6 @@ async function deleteRole(roleId: string) {
       :initial-actor-id="grantPresetActorId"
       @refresh="loadAccessData"
     />
-
-    <!-- Explicador de Permissões em Linguagem Simples -->
-    <div v-else-if="activeTab === 'explain'" class="space-y-5">
-      <UCard>
-        <template #header>
-          <div class="space-y-1">
-            <h3 class="font-semibold text-sm">Explicador de Permissões em Linguagem Simples</h3>
-            <p class="text-xs text-muted">
-              Descubra exatamente "quem pode alterar este conhecimento?" ou "por que tenho ou não acesso?", com justificativa técnica explicada de forma clara.
-            </p>
-          </div>
-        </template>
-
-        <div class="grid grid-cols-1 md:grid-cols-12 gap-3 items-end">
-          <UFormField label="ID do Conhecimento (opcional)" class="md:col-span-6">
-            <UInput v-model="explainForm.itemId" placeholder="Ex.: BR-BRAIN-001 ou deixe em branco para escopo geral..." class="w-full font-mono text-xs" />
-          </UFormField>
-          <UFormField label="Ação a Verificar" class="md:col-span-4">
-            <USelect
-              v-model="explainForm.action"
-              :items="[
-                { label: 'Escrita / Edição (write)', value: 'write' },
-                { label: 'Leitura / Consulta (read)', value: 'read' },
-                { label: 'Aprovação Formal (approve)', value: 'approve' },
-                { label: 'Exclusão (delete)', value: 'delete' }
-              ]"
-              class="w-full text-xs"
-            />
-          </UFormField>
-          <div class="md:col-span-2">
-            <UButton block color="primary" icon="i-lucide-help-circle" :loading="loadingExplain" @click="runExplainPermissions">
-              Explicar
-            </UButton>
-          </div>
-        </div>
-      </UCard>
-
-      <div v-if="explainResult" class="p-4 rounded-xl border border-primary/20 bg-elevated/50 space-y-3 text-xs">
-        <div class="flex items-center justify-between">
-          <span class="font-bold text-primary">{{ explainResult.targetItem }}</span>
-          <UBadge :color="explainResult.canCurrentUserPerform ? 'success' : 'warning'" size="xs" variant="subtle">
-            {{ explainResult.canCurrentUserPerform ? 'Você tem permissão ativa' : 'Permissão restrita' }}
-          </UBadge>
-        </div>
-        <p class="text-xs text-highlighted">{{ explainResult.plainLanguageExplanation }}</p>
-        <div class="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-2 border-t border-default/50">
-          <div>
-            <span class="text-[11px] font-semibold text-muted">Política CASL / RLS:</span>
-            <p class="font-mono text-xs text-primary">{{ explainResult.policyApplied }}</p>
-          </div>
-          <div>
-            <span class="text-[11px] font-semibold text-muted">Cargos que Podem Executar:</span>
-            <div class="flex gap-1 mt-0.5">
-              <UBadge v-for="r in explainResult.allowedRoles" :key="r" color="neutral" variant="outline" size="xs">
-                {{ r }}
-              </UBadge>
-            </div>
-          </div>
-        </div>
-      </div>
-    </div>
 
     <AccessAssignmentSlideover
       v-model:open="assignSlideoverOpen"

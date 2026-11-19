@@ -57,7 +57,6 @@ const graphNodes = ref<Array<{ id: string; title?: string; type?: string; status
 const graphEdges = ref<Array<{ from: string; to: string; relation: string }>>([])
 const evaluatingBenchmark = ref(false)
 const benchmarkSummary = ref<BenchmarkSummary | null>(null)
-const zeroHitQueries = ref<Array<{ query: string; count: number }>>([])
 const staleItemsCount = ref(0)
 const untestedRulesCount = ref(0)
 const isDependencyMapMode = ref(false)
@@ -87,10 +86,9 @@ async function runBenchmarkEvaluation() {
   const pid = encodeURIComponent(projectId.value)
   try {
     const [bRes, eRes] = await Promise.all([
-      apiFetch<{ zeroHitQueries?: Array<{ query: string; count: number }>; staleItems?: unknown[]; untestedRules?: unknown[] }>(`/v1/projects/${pid}/search/benchmark`),
+      apiFetch<{ staleItems?: unknown[]; untestedRules?: unknown[] }>(`/v1/projects/${pid}/search/benchmark`),
       apiFetch<{ summary: BenchmarkSummary }>(`/v1/projects/${pid}/search/evaluate`, { method: 'POST' })
     ])
-    zeroHitQueries.value = bRes.zeroHitQueries ?? []
     staleItemsCount.value = bRes.staleItems?.length ?? 0
     untestedRulesCount.value = bRes.untestedRules?.length ?? 0
     benchmarkSummary.value = eRes.summary
@@ -561,7 +559,7 @@ function exportGraphJson() {
       </template>
 
       <!-- Painel de Benchmark e Saúde de Busca -->
-      <div v-if="benchmarkSummary || zeroHitQueries.length > 0" class="p-4 mb-4 rounded-xl bg-elevated/40 border border-default/70 space-y-3">
+      <div v-if="benchmarkSummary" class="p-4 mb-4 rounded-xl bg-elevated/40 border border-default/70 space-y-3">
         <div class="flex items-center justify-between">
           <div class="flex items-center gap-2">
             <UIcon name="i-lucide-activity" class="size-4 text-primary" />
@@ -585,10 +583,7 @@ function exportGraphJson() {
         </div>
 
         <!-- Indicadores de Risco / Lacunas de Busca -->
-        <div v-if="zeroHitQueries.length > 0 || staleItemsCount > 0 || untestedRulesCount > 0" class="flex flex-wrap items-center gap-2 pt-1 text-xs">
-          <UBadge v-if="zeroHitQueries.length > 0" color="warning" variant="subtle" size="xs" icon="i-lucide-alert-triangle">
-            {{ zeroHitQueries.length }} perguntas sem resposta
-          </UBadge>
+        <div v-if="staleItemsCount > 0 || untestedRulesCount > 0" class="flex flex-wrap items-center gap-2 pt-1 text-xs">
           <UBadge v-if="staleItemsCount > 0" color="neutral" variant="subtle" size="xs" icon="i-lucide-clock">
             {{ staleItemsCount }} docs desatualizados (&gt;60d)
           </UBadge>

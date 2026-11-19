@@ -1,6 +1,5 @@
 <script setup lang="ts">
 import { z } from 'zod'
-import DecisionPreviewTab from './daily/DecisionPreviewTab.vue'
 import CodeExplainerTab from './daily/CodeExplainerTab.vue'
 
 const props = defineProps<{
@@ -9,7 +8,7 @@ const props = defineProps<{
 
 const { projectId, apiFetch, notify } = useBrainApi()
 
-const activeTab = ref<'blast' | 'assistant' | 'preview' | 'code' | 'checklist' | 'contradictions'>('blast')
+const activeTab = ref<'blast' | 'assistant' | 'code' | 'checklist' | 'contradictions'>('blast')
 
 // 1. Blast Radius
 const schema = z.object({
@@ -180,15 +179,6 @@ watch(activeTab, (tab) => {
         @click="activeTab = 'assistant'"
       >
         Assistente de Mudança (Diff &amp; Plano)
-      </UButton>
-      <UButton
-        size="sm"
-        :variant="activeTab === 'preview' ? 'solid' : 'soft'"
-        color="primary"
-        icon="i-lucide-git-compare"
-        @click="activeTab = 'preview'"
-      >
-        Prévia de Decisão (A vs B)
       </UButton>
       <UButton
         size="sm"
@@ -398,17 +388,12 @@ watch(activeTab, (tab) => {
       </div>
     </div>
 
-    <!-- TAB 3: DECISION PREVIEW -->
-    <div v-else-if="activeTab === 'preview'" class="space-y-6">
-      <DecisionPreviewTab :project-id="projectId" />
-    </div>
-
-    <!-- TAB 4: CODE EXPLAINER -->
+    <!-- TAB 3: CODE EXPLAINER -->
     <div v-else-if="activeTab === 'code'" class="space-y-6">
       <CodeExplainerTab :project-id="projectId" />
     </div>
 
-    <!-- TAB 5: PR REVIEW CHECKLIST -->
+    <!-- TAB 4: PR REVIEW CHECKLIST -->
     <div v-else-if="activeTab === 'checklist'" class="space-y-6">
       <UCard>
         <template #header>
@@ -451,7 +436,7 @@ watch(activeTab, (tab) => {
       </div>
     </div>
 
-    <!-- TAB 4: CONTRADICTIONS -->
+    <!-- TAB 5: CONTRADICTIONS -->
     <div v-else-if="activeTab === 'contradictions'" class="space-y-6">
       <div class="flex items-center justify-between">
         <div>
