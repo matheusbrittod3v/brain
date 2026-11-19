@@ -17,43 +17,36 @@ description: >-
 
 Sempre que o servidor MCP **Brain** estiver conectado, use-o proativamente como fonte primária de contexto e memória do projeto:
 
-## 1. Antes de explorar ou editar código
-1. **Identifique o projeto automaticamente**: chame \`brain_resolve_workspace_project\` (ou \`brain_list_projects\` se necessário) para obter o \`projectId\` sem depender de IDs manuais.
-2. **Busque conhecimento pronto**:
-   - \`brain_context_build\` para montar o Context Pack da tarefa.
-   - \`brain_search\` / \`brain_get_layered_knowledge\` para consultar arquitetura, regras de negócio, fluxos, código e dados já documentados.
-   - \`brain_get_active_rules\` para conhecer invariantes e ADRs que governam o módulo.
-   - \`brain_export_topology_diagram\` ou \`brain://projects/{projectId}/topology/{layer}\` para visualizar dependências em Mermaid.
-3. **Verifique continuidade e locks**:
-   - \`brain_resume_handoff\` para recuperar decisões da sessão anterior.
-   - \`brain_check_file_leases\` / \`brain_acquire_lease\` antes de edições concorrentes.
-
-## 2. Durante e antes de concluir mudanças
-- \`brain_validate_implementation\` para validar mudanças contra regras e ADRs.
-- \`brain_analyze_change_impact\` e \`brain_cross_service_blast_radius\` para medir impacto.
-- \`brain_secret_scan\` antes de gravar ou commitar trechos sensíveis.
-
-## 3. Centralização Obrigatória em \`.brain/\` (Sem pasta \`docs/\` e nada fora do projeto)
+## 1. Centralização Obrigatória em \`.brain/\` (Sem pasta \`docs/\` e Workspace Universal)
 - **NUNCA crie pasta \`docs/\`** (nem \`doc/\`, nem planos/skills/documentos fora do projeto ou soltos na raiz).
-- Tudo que seria colocado em \`docs/\` ou em diretórios externos deve ser centralizado **dentro de \`.brain/\` na raiz do projeto** (\`.brain/00-overview/\`, \`.brain/01-business/\`, \`.brain/02-onboarding/\`, \`.brain/03-architecture/\`, \`.brain/04-engineering/\`, \`.brain/05-flows/\`, \`.brain/06-operations/\`, \`.brain/skills/\`).
-- **Ao iniciar um projeto novo**: se \`.project-brain.json\` e \`.brain/\` ainda não existirem na pasta do projeto, crie-os imediatamente (ou chame \`brain_resolve_workspace_project\` com \`createIfMissing: true\`) antes de iniciar a implementação.
+- Centralize **100% do conhecimento dentro de \`.brain/\`** na raiz do projeto (\`knowledgeRoot: ".brain/"\`).
+- **Aceita todos os setores e formatos**: além de \`00-overview/\`..\`06-operations/\`, \`skills/\`, \`specs/\` e \`tests/\`, organize qualquer setor/domínio (\`marketing/\`, \`produto/\`, \`design/\`, \`dados/\`, \`juridico/\`, \`financeiro/\`, \`clientes/\`, \`infra/\`, \`pesquisa/\`) usando qualquer formato textual/estruturado (\`.md\`, \`.yaml\`, \`.yml\`, \`.json\`, \`.txt\`, \`.csv\`, \`.mmd\`/\`.mermaid\`, \`.sql\`, \`.toml\`, \`.html\`, \`.rst\`, \`.graphql\`, \`.proto\`).
+- **Projeto novo**: ao iniciar qualquer projeto sem \`.project-brain.json\` e \`.brain/\`, crie ambos imediatamente na raiz do projeto e chame \`brain_resolve_workspace_project({ workspacePath, createIfMissing: true })\`.
 
-## 4. Após concluir a tarefa (manter o Brain vivo)
-- \`brain_ingest_git_repo\` se criou/atualizou arquivos em \`.brain/\`.
-- \`brain_record_test_result\` ao rodar testes vinculados a regras (\`ruleIds\`).
-- \`brain_record_learning\` para registrar descobertas importantes (bugs, armadilhas, decisões).
-- \`brain_create_handoff\` ao encerrar uma etapa longa para o próximo agente.
+## 2. Casos de Uso & Fluxo 360° (Com Exemplos de Tools)
+1. **Descoberta & Contexto (antes de codar)**:
+   - \`brain_resolve_workspace_project({ workspacePath })\` -> \`brain_context_build({ projectId, task })\`
+   - \`brain_get_active_rules({ projectId })\`, \`brain_search({ projectId, query })\`, \`brain_memory_recall({ projectId, query })\`, \`brain_list_skills({ projectId })\`
+   - Para bases globais (\`isShared=true\`): \`brain_list_shared_projects()\` e consulte pelo \`projectId\` global ou \`includeShared: true\` em \`brain_search\`.
+   - Resources MCP: \`brain://projects/{projectId}/overview\`, \`brain://projects/{projectId}/rules\`, \`brain://projects/{projectId}/topology/{layer}\`.
+2. **Arquitetura, Segurança & Impacto (durante mudanças)**:
+   - \`brain_analyze_change_impact\`, \`brain_cross_service_blast_radius\`, \`brain_contradiction_detect\`, \`brain_validate_implementation\`.
+   - \`brain_export_topology_diagram\` (Mermaid), \`brain_secret_scan\`, \`brain_check_file_leases\` / \`brain_acquire_lease\`.
+3. **Governança, QA & Continuidade (ao finalizar)**:
+   - \`brain_ingest_git_repo\` ou \`brain_ingest_document\` sempre que criar/alterar arquivos em \`.brain/\`.
+   - \`brain_graph_relate\` para conectar arestas (\`VERIFIED_BY\`, \`IMPLEMENTS\`, \`GOVERNED_BY\`, \`DEPENDS_ON\`).
+   - \`brain_record_test_result\` ao validar regras (\`BR-*\`), \`brain_record_learning\` para lições aprendidas e \`brain_create_handoff\` / \`brain_resume_handoff\` entre sessões.
 `;
 
 export const BRAIN_MCP_MANAGED_BLOCK = `${BLOCK_START}
-## Brain MCP — Uso Obrigatório & Conselheiro de Projeto
+## Brain MCP — Guia 360° Obrigatório
 
-Quando o servidor MCP **brain** estiver disponível nesta sessão, **use-o sempre que possível** para economizar tokens, evitar retrabalho e manter o conhecimento atualizado:
+Quando o servidor MCP **brain** estiver disponível nesta sessão, **use-o proativamente**:
 
-1. **Sem pasta \`docs/\` — tudo em \`.brain/\`**: NUNCA crie \`docs/\` nem grave documentação, planos ou skills fora do projeto. Ao iniciar um projeto novo sem \`.brain/\`, crie \`.project-brain.json\` e a pasta \`.brain/\` na raiz do projeto imediatamente.
-2. **Início da tarefa**: chame \`brain_resolve_workspace_project\` para detectar (ou criar) o \`projectId\`, depois consulte \`brain_context_build\`, \`brain_get_active_rules\` e \`brain_search\` para aproveitar regras, topologias, contratos e decisões já prontas.
-3. **Antes de concluir**: valide contra invariantes com \`brain_validate_implementation\`, avalie impacto com \`brain_analyze_change_impact\` e verifique segredos com \`brain_secret_scan\`.
-4. **Ao finalizar**: atualize o Brain com \`brain_ingest_git_repo\` (se alterou \`.brain/\`), \`brain_record_test_result\`, \`brain_record_learning\` e \`brain_create_handoff\`.
+1. **Sem \`docs/\` — tudo em \`.brain/\` (multi-setor e multi-formato)**: NUNCA crie \`docs/\` nem grave documentos/skills fora do projeto. Use \`.brain/\` como workspace universal (\`.md\`, \`.yaml\`, \`.json\`, \`.txt\`, \`.csv\`, \`.mmd\`, \`.sql\`, etc.) para qualquer setor (engenharia, produto, marketing, design, dados, jurídico, infra). Em projeto novo, crie \`.project-brain.json\` e \`.brain/\` imediatamente.
+2. **Antes de agir**: \`brain_resolve_workspace_project\` -> \`brain_context_build\`, \`brain_get_active_rules\`, \`brain_search\`, \`brain_memory_recall\`, \`brain_list_skills\` (e \`brain_list_shared_projects\` para consultar projetos globais \`isShared\`).
+3. **Durante e antes de concluir**: \`brain_validate_implementation\`, \`brain_analyze_change_impact\`, \`brain_cross_service_blast_radius\`, \`brain_secret_scan\`.
+4. **Ao finalizar**: \`brain_ingest_git_repo\` (se alterou \`.brain/\`), \`brain_graph_relate\`, \`brain_record_test_result\`, \`brain_record_learning\` e \`brain_create_handoff\`.
 ${BLOCK_END}`;
 
 async function pathExists(p: string): Promise<boolean> {

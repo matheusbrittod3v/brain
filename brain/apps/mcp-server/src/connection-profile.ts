@@ -7,21 +7,17 @@ export interface McpConnectionProfile {
 }
 
 const BRAIN_INITIALIZATION_INSTRUCTIONS = [
-  "REGRA DE OURO DO CONSELHEIRO BRAIN: Sempre use o MCP Brain antes, durante e depois das tarefas para buscar conhecimento pronto (regras, topologias, contratos, memórias) e manter o cérebro atualizado.",
-  "POLÍTICA DE CENTRALIZAÇÃO EM `.brain/` (SEM PASTA `docs/`): NUNCA crie ou utilize pasta `docs/` (nem `doc/`, nem planos/notas/skills fora do projeto ou soltos na raiz). Todo conteúdo que normalmente iria para `docs/` ou pastas externas DEVE ser criado, consultado e centralizado exclusivamente dentro da pasta `.brain/` na raiz do projeto (`knowledgeRoot: \".brain/\"`).",
-  "Estrutura `.brain/` e inicialização obrigatória de projetos novos:",
-  "0. Descoberta automática de projeto: antes de tudo, chame `brain_resolve_workspace_project` (passando o `workspacePath` ou `repoUrl` atual, com `createIfMissing: true` se for projeto novo) para descobrir/registrar o `projectId` automaticamente sem depender de IDs no `.env`. Os projetos e políticas são resolvidos dinamicamente pelo seu usuário autenticado (JWT ou `~/.brain/credentials.json`).",
-  "1. Ao iniciar um projeto novo (ou projeto sem memória configurada): se `.project-brain.json` e a pasta `.brain/` ainda NÃO existirem na raiz do repositório, CRIE ambos imediatamente na pasta do projeto (`brain onboard` / `brain init` ou criando os diretórios abaixo) antes de escrever código de aplicação.",
-  "2. Pastas e arquivos importantes em `.brain/` que o Brain consome:",
-  "   - `.project-brain.json`: manifesto do projeto (`schemaVersion`, `tenantId`, `projectId`, `knowledgeRoot: \".brain/\"`, `guardianMode`, `accessPolicyId`).",
-  "   - `.brain/00-overview/vision.md`: visão geral, objetivo, escopo e domínio do projeto (`VIS-<PROJETO>`).",
-  "   - `.brain/01-business/business-rules/*.yaml`: regras de negócio e invariantes (`id: BR-...`, `type: business_rule`, `status`, `access_policy`, `description`).",
-  "   - `.brain/02-onboarding/guide.md`: mapa de componentes, setup local e fluxo de trabalho.",
-  "   - `.brain/03-architecture/decisions/ADR-*.md`: registros de decisão arquitetural com frontmatter (`id`, `title`, `status`, `access_policy`).",
-  "   - `.brain/04-engineering/` (`coding-standards.md`, `security-standards.md`): padrões técnicos, segurança, PII e restrições de engenharia.",
-  "3. Como funciona o consumo pelo Brain:",
-  "   - A pasta `.brain/` é a fonte de verdade versionada em Git; os arquivos `.md` e `.yaml` são indexados no PostgreSQL (FTS + `pgvector` + grafo) via `brain_ingest_git`, `brain_ingest_document`, `brain_propose_knowledge`, `brain sync` ou webhook do GitHub.",
-  "   - Após indexados, os agentes consultam esse conhecimento com `brain_context_build`, validam alterações contra regras/ADRs com `brain_validate_implementation` e preservam continuidade entre sessões com `brain_create_handoff` / `brain_resume_handoff`."
+  "REGRA DE OURO DO CONSELHEIRO BRAIN (VISÃO 360°): Sempre use o MCP Brain antes, durante e depois de qualquer tarefa para consultar regras, topologias, contratos, memórias e manter o conhecimento vivo.",
+  "1. POLÍTICA DE CENTRALIZAÇÃO EM `.brain/` (SEM PASTA `docs/`): NUNCA crie ou utilize pasta `docs/` (nem `doc/`, planos, notas ou skills fora do projeto). Todo conteúdo que iria para `docs/` ou pastas externas DEVE ser centralizado exclusivamente em `.brain/` (`knowledgeRoot: \".brain/\"`).",
+  "2. WORKSPACE UNIVERSAL MULTI-SETOR E MULTI-FORMATO: A pasta `.brain/` aceita QUALQUER setor/arquitetura/pasta (ex.: `00-overview/`, `01-business/`, `02-onboarding/`, `03-architecture/`, `04-engineering/`, `05-flows/`, `06-operations/`, `skills/`, `specs/`, `tests/`, `marketing/`, `produto/`, `design/`, `dados/`, `juridico/`, `financeiro/`, `clientes/`, `infra/`, `pesquisa/`) e QUALQUER formato textual/estruturado (`.md`, `.yaml`, `.yml`, `.json`, `.jsonl`, `.txt`, `.csv`, `.mmd`/`.mermaid`, `.sql`, `.toml`, `.html`, `.rst`, `.adoc`, `.graphql`, `.proto`).",
+  "3. INICIALIZAÇÃO DE PROJETO NOVO: Ao iniciar um projeto novo (ou sem `.brain/`), chame `brain_resolve_workspace_project({ workspacePath, createIfMissing: true })` e crie imediatamente `.project-brain.json` + `.brain/` na raiz do projeto antes de escrever código.",
+  "4. CASOS DE USO E PADRÕES 360° (EXEMPLOS PRÁTICOS):",
+  "   - Descoberta & Contexto: `brain_resolve_workspace_project` -> `brain_context_build({ projectId, task })` -> `brain_get_active_rules({ projectId })` -> `brain_search({ projectId, query })` -> `brain_memory_recall({ projectId, query })` -> `brain_list_skills({ projectId })`.",
+  "   - Projetos Globais/Compartilháveis (`isShared=true`): use `brain_list_shared_projects()` para descobrir bases globais e consulte pelo `projectId` global (ou `includeShared: true` em `brain_search`) sem misturar dados em painéis de projetos isolados.",
+  "   - Arquitetura & Impacto: `brain_analyze_change_impact`, `brain_cross_service_blast_radius`, `brain_validate_implementation`, `brain_contradiction_detect`, `brain_export_topology_diagram`, `brain_secret_scan`.",
+  "   - Execução & Governança: `brain_check_file_leases` / `brain_acquire_lease` antes de editar; `brain_change_propose` para propor novas regras/ADRs; `brain_ask_human` para aprovações; `brain_runner_delegate` para delegar tarefas.",
+  "   - Fechamento & Retroalimentação: `brain_ingest_git_repo` (ou `brain_ingest_document`) ao alterar `.brain/`; `brain_graph_relate` (`VERIFIED_BY`, `IMPLEMENTS`, `GOVERNED_BY`); `brain_record_test_result` (para manter 100% de cobertura QA); `brain_record_learning`; `brain_create_handoff` / `brain_resume_handoff`.",
+  "   - Resources MCP (`read_resource`): `brain://projects/{projectId}/overview`, `brain://projects/{projectId}/rules`, `brain://projects/{projectId}/topology/{layer}`."
 ].join("\n");
 
 export const MCP_CONNECTION_PROFILES: Record<McpConnectionProfileName, McpConnectionProfile> = {

@@ -340,44 +340,60 @@ export function registerProjectCoreRoutes(app: FastifyInstance, deps: ProjectsKn
         return { projectId: req.params.projectId, brainDir, syncedCount: 0, items: [], message: "Diretório .brain não encontrado neste workspace." };
       }
 
+      const UNIVERSAL_TEXT_EXTENSIONS = new Set([
+        ".md", ".mdx", ".yaml", ".yml", ".json", ".jsonl", ".txt", ".csv", ".tsv",
+        ".mmd", ".mermaid", ".sql", ".toml", ".xml", ".html", ".htm", ".rst", ".adoc",
+        ".org", ".graphql", ".proto", ".ini", ".conf", ".ts", ".js", ".py", ".go", ".sh"
+      ]);
       const mdFiles: string[] = [];
       const walk = (dir: string) => {
         for (const entry of readdirSync(dir)) {
+          if (entry === ".git" || entry === "node_modules" || entry === ".DS_Store") continue;
           const full = join(dir, entry);
           const st = statSync(full);
-          if (st.isDirectory()) walk(full);
-          else if (
-            entry.toLowerCase().endsWith(".md") ||
-            entry.toLowerCase().endsWith(".yaml") ||
-            entry.toLowerCase().endsWith(".yml")
-          ) mdFiles.push(full);
+          if (st.isDirectory()) {
+            walk(full);
+          } else {
+            const dotIdx = entry.lastIndexOf(".");
+            const ext = dotIdx >= 0 ? entry.slice(dotIdx).toLowerCase() : "";
+            if (UNIVERSAL_TEXT_EXTENSIONS.has(ext) && st.size <= 512 * 1024) {
+              mdFiles.push(full);
+            }
+          }
         }
       };
       walk(brainDir);
 
       const synced: KnowledgeItem[] = [];
-      for (const filePath of mdFiles.slice(0, 100)) {
+      for (const filePath of mdFiles.slice(0, 500)) {
         const rel = relative(brainDir, filePath).replace(/\\/g, "/");
         const raw = readFileSync(filePath, "utf8");
         const cleanContent = await redactPiiWithAiWorker(raw);
         assertSecretScanClean(scanForSecrets(cleanContent), rel);
 
-        const inferredType: KnowledgeItem["type"] = rel.startsWith("skills/")
+        const lowerRel = rel.toLowerCase();
+        const inferredType: KnowledgeItem["type"] = lowerRel.startsWith("skills/")
           ? "skill"
-          : rel.startsWith("specs/")
+          : lowerRel.startsWith("specs/") || lowerRel.includes("contracts/")
             ? "spec"
-            : rel.includes("business")
-              ? "business_rule"
-              : rel.includes("architecture")
-                ? "architecture_decision"
-                : "document";
+            : lowerRel.includes("tests/")
+              ? "test"
+              : lowerRel.includes("runbooks/")
+                ? "runbook"
+                : lowerRel.includes("business")
+                  ? "business_rule"
+                  : lowerRel.includes("architecture") || lowerRel.includes("diagrams/")
+                    ? "architecture_decision"
+                    : lowerRel.includes("flows/") || lowerRel.includes("process")
+                      ? "process"
+                      : "document";
 
         const frontmatterId = /^id:\s*([A-Za-z0-9_-]+)/m.exec(cleanContent)?.[1]?.trim();
         const frontmatterTitle = /^title:\s*["']?([^"'\r\n]+)["']?/m.exec(cleanContent)?.[1]?.trim();
         const frontmatterType = /^type:\s*([A-Za-z0-9_-]+)/m.exec(cleanContent)?.[1]?.trim() as KnowledgeItem["type"] | undefined;
 
         const id = frontmatterId || `BRAIN-${rel.replace(/[^A-Za-z0-9]+/g, "-").replace(/^-|-$/g, "").toUpperCase().slice(0, 48)}`;
-        const title = frontmatterTitle || rel.replace(/\.(md|ya?ml)$/i, "");
+        const title = frontmatterTitle || rel.replace(/\.[^.]+$/i, "");
         const type = frontmatterType || inferredType;
 
         const existing = pgRetrieval

@@ -15,19 +15,19 @@ export function normalizePosixPath(filePath: string): string {
 }
 
 export function inferDomainFromPath(filePath: string): number {
-  const p = normalizePosixPath(filePath);
-  if (p.includes("00-overview/")) return 1;
-  if (p.includes("01-business/kpis/")) return 10;
-  if (p.includes("01-business/customer-journeys/")) return 9;
-  if (p.includes("01-business/")) return 2;
-  if (p.includes("02-product/") || p.includes("05-execution/")) return 6;
-  if (p.includes("03-architecture/decisions/")) return 7;
-  if (p.includes("03-architecture/data-models/")) return 10;
-  if (p.includes("03-architecture/")) return 3;
-  if (p.includes("policies/") || p.includes("security-standards")) return 11;
-  if (p.includes("04-engineering/")) return 4;
-  if (p.includes("06-operations/")) return 8;
-  if (p.includes("08-agent-memory/")) return 12;
+  const p = normalizePosixPath(filePath).toLowerCase();
+  if (p.includes("00-overview/") || p.includes("visao/") || p.includes("vision")) return 1;
+  if (p.includes("01-business/kpis/") || p.includes("dados/") || p.includes("analytics/") || p.includes("bi/")) return 10;
+  if (p.includes("01-business/customer-journeys/") || p.includes("clientes/") || p.includes("suporte/") || p.includes("ux/")) return 9;
+  if (p.includes("01-business/") || p.includes("marketing/") || p.includes("vendas/") || p.includes("comercial/") || p.includes("financeiro/")) return 2;
+  if (p.includes("02-product/") || p.includes("05-execution/") || p.includes("produto/") || p.includes("design/") || p.includes("pesquisa/")) return 6;
+  if (p.includes("03-architecture/decisions/") || p.includes("adr")) return 7;
+  if (p.includes("03-architecture/data-models/") || p.endsWith(".sql")) return 10;
+  if (p.includes("03-architecture/") || p.includes("arquitetura/") || p.includes("diagrams/") || p.endsWith(".mmd") || p.endsWith(".mermaid")) return 3;
+  if (p.includes("policies/") || p.includes("security-standards") || p.includes("juridico/") || p.includes("compliance/") || p.includes("seguranca/")) return 11;
+  if (p.includes("04-engineering/") || p.includes("engenharia/") || p.includes("specs/") || p.includes("contracts/")) return 4;
+  if (p.includes("06-operations/") || p.includes("operacoes/") || p.includes("infra/") || p.includes("devops/") || p.includes("runbooks/")) return 8;
+  if (p.includes("08-agent-memory/") || p.includes("skills/") || p.includes("memory/")) return 12;
   return 5;
 }
 
@@ -179,34 +179,61 @@ export function parseKnowledgeFile(opts: ParseFileOptions): KnowledgeItem {
   let body = opts.rawContent;
 
   const isKnowledgeDir = /(^|\/)(\.brain|data\/knowledge)\//.test(posixPath);
-  if (posixPath.endsWith(".yaml") || posixPath.endsWith(".yml")) {
-    if (isKnowledgeDir) {
-      rawMeta = (yaml.load(opts.rawContent) as Record<string, unknown>) ?? {};
-      body = String(rawMeta.description ?? opts.rawContent);
-    } else {
-      try {
-        const parsed = yaml.load(opts.rawContent);
-        if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
-          const check = KnowledgeYamlSchema.safeParse(parsed);
-          if (check.success) {
-            rawMeta = parsed as Record<string, unknown>;
-            body = String(rawMeta.description ?? opts.rawContent);
-          }
+  const lowerPath = posixPath.toLowerCase();
+  if (lowerPath.endsWith(".yaml") || lowerPath.endsWith(".yml")) {
+    try {
+      const parsed = yaml.load(opts.rawContent);
+      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+        const candidate = parsed as Record<string, unknown>;
+        const check = KnowledgeYamlSchema.safeParse(candidate);
+        if (check.success) {
+          rawMeta = candidate;
+          body = String(rawMeta.description ?? opts.rawContent);
+        } else if (isKnowledgeDir) {
+          rawMeta = {
+            id: typeof candidate.id === "string" ? candidate.id : undefined,
+            title: typeof candidate.title === "string" ? candidate.title : undefined,
+            summary: typeof candidate.summary === "string" ? candidate.summary : undefined,
+            tags: Array.isArray(candidate.tags) ? candidate.tags.map(String) : undefined
+          };
+          body = opts.rawContent;
         }
-      } catch {
-        // Non-knowledge YAML (e.g., Helm templates with {{ ... }}) falls back to raw document.
       }
+    } catch {
+      // Non-knowledge or templated YAML falls back safely to raw document.
+    }
+  } else if (lowerPath.endsWith(".json")) {
+    try {
+      const parsed = JSON.parse(opts.rawContent);
+      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+        const candidate = parsed as Record<string, unknown>;
+        const check = KnowledgeYamlSchema.safeParse(candidate);
+        if (check.success) {
+          rawMeta = candidate;
+          body = String(rawMeta.description ?? opts.rawContent);
+        }
+      }
+    } catch {
+      // Malformed or partial JSON falls back safely to raw document.
     }
   } else if (opts.rawContent.startsWith("---")) {
     const endIdx = opts.rawContent.indexOf("\n---", 3);
     if (endIdx !== -1) {
       const fm = opts.rawContent.slice(3, endIdx);
-      rawMeta = (yaml.load(fm) as Record<string, unknown>) ?? {};
+      try {
+        const parsed = yaml.load(fm);
+        if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+          rawMeta = parsed as Record<string, unknown>;
+        }
+      } catch {
+        rawMeta = {};
+      }
       body = opts.rawContent.slice(endIdx + 4).trim();
     }
   }
 
-  const meta = KnowledgeYamlSchema.parse(rawMeta);
+  const parsedMeta = KnowledgeYamlSchema.safeParse(rawMeta);
+  const meta = parsedMeta.success ? parsedMeta.data : {};
   const id = String(meta.id ?? posixPath);
   const title = String(meta.title ?? posixPath.split("/").pop() ?? id);
   const type = (meta.type as KnowledgeType) ?? "document";

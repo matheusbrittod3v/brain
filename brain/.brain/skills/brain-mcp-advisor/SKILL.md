@@ -1,25 +1,29 @@
 ---
 name: brain-mcp-advisor
-description: Orienta agentes (Codex, Claude, Cursor, Antigravity) a sempre consultar e atualizar o MCP Brain antes e depois de tarefas no projeto, reutilizando regras, topologias, contratos, configurações dinâmicas e memórias.
+description: >-
+  Guia 360° para agentes (Codex, Claude, Cursor, Antigravity) usarem o MCP Brain
+  e manterem todo conhecimento multi-setor e multi-formato centralizado em .brain/.
 ---
 
-# Brain MCP Advisor Skill
+# Brain MCP Advisor — Guia 360°
 
-Sempre que o MCP ou plugin do **Brain** estiver disponível no projeto, siga este ciclo contínuo:
+Sempre que o MCP **Brain** estiver conectado, use-o como workspace central de conhecimento, governança e memória do projeto:
 
-## 1. Antes de Implementar (Descoberta e Contexto)
-1. **Identidade e Projetos**: chame `brain_whoami` e `brain_list_projects` para descobrir o `projectId` ativo e permissões CASL.
-2. **Context Pack e Busca Híbrida**: chame `brain_get_context_pack` e `brain_search_knowledge` (HNSW `bge-m3` + BM25 + Grafo) para recuperar ADRs, regras de negócio (`BR-*`), contratos de API e padrões de código.
-3. **Configurações Dinâmicas**: chame `brain_system_settings_get` para inspecionar parâmetros persistidos no PostgreSQL (`embeddings`, `runner`, `github`, `smtp`, `policies`) em vez de acoplar novas variáveis ao `.env`.
-4. **Análise de Impacto**: antes de alterar schemas, rotas ou contratos, execute `brain_analyze_change_impact` e `brain_validate_cross_service_change`.
+## 1. Centralização Total em `.brain/` (Sem `docs/` e Workspace Universal)
+- **NUNCA crie ou use pasta `docs/`** (nem `doc/`, planos, notas ou skills fora do projeto).
+- Centralize **100% do conhecimento em `.brain/`** na raiz do projeto (`knowledgeRoot: ".brain/"`).
+- **Suporte Universal (Setores, Arquiteturas e Formatos)**: `.brain/` aceita qualquer setor/pasta (`00-overview/`, `01-business/`, `02-onboarding/`, `03-architecture/`, `04-engineering/`, `05-flows/`, `06-operations/`, `skills/`, `specs/`, `tests/`, `marketing/`, `produto/`, `design/`, `dados/`, `juridico/`, `financeiro/`, `clientes/`, `infra/`, `pesquisa/`) e qualquer formato (`.md`, `.yaml`, `.yml`, `.json`, `.jsonl`, `.txt`, `.csv`, `.mmd`/`.mermaid`, `.sql`, `.toml`, `.html`, `.rst`, `.adoc`, `.graphql`, `.proto`).
+- **Ao iniciar um projeto novo**: se `.project-brain.json` e `.brain/` não existirem, crie-os imediatamente e chame `brain_resolve_workspace_project({ workspacePath, createIfMissing: true })`.
 
-## 2. Centralização Obrigatória em `.brain/` (Sem pasta `docs/` e nada fora do projeto)
-- **NUNCA crie ou use pasta `docs/`** (nem `doc/`, nem documentação, planos ou skills fora do projeto ou soltos na raiz).
-- Tudo que seria colocado em `docs/` ou fora do projeto deve ser centralizado **exclusivamente dentro de `.brain/`** na raiz do projeto (`knowledgeRoot: ".brain/"`).
-- **Ao iniciar um projeto novo**: se `.project-brain.json` e `.brain/` ainda não existirem na pasta do projeto, crie-os imediatamente antes de começar a codar e indexe via `brain_ingest_git_repo`.
-
-## 3. Durante e Após a Implementação (Retroalimentação)
-1. **Propor e Sincronizar Conhecimento**: documente novas decisões, regras, fluxos e contratos com `brain_propose_knowledge` e sincronize a pasta `.brain/` com `brain_sync_brain_folder`.
-2. **Conectar o Grafo Semântico**: crie arestas rastreáveis (`implements`, `depends_on`, `governs`, `verifies`) usando `brain_link_knowledge`.
-3. **Registrar Testes de Regras de Negócio**: sempre que criar ou executar testes que validam uma `BR-*`, registre a execução com `brain_record_test_result` para manter a cobertura QA em 100%.
-4. **Memória Episódica e Handoff**: registre aprendizados técnicos com `brain_record_memory` e, ao delegar para subagentes ou encerrar etapas complexas, utilize `brain_runner_DynamicSubAgents` ou `brain_create_handoff`.
+## 2. Casos de Uso & Recursos (Visão 360°)
+- **Antes de implementar**:
+  - `brain_resolve_workspace_project` -> `brain_context_build` -> `brain_get_active_rules` -> `brain_search` -> `brain_memory_recall` -> `brain_list_skills`.
+  - `brain_system_settings_get` para consultar configurações dinâmicas no PostgreSQL sem acoplar ao `.env`.
+  - **Projetos Globais (`isShared=true`)**: `brain_list_shared_projects()` e consulta direta pelo `projectId` global (ou `includeShared: true` em `brain_search`), sem misturar dados em projetos isolados.
+  - **Resources MCP**: `brain://projects/{projectId}/overview`, `brain://projects/{projectId}/rules`, `brain://projects/{projectId}/topology/{layer}`.
+- **Durante mudanças & arquitetura**:
+  - `brain_analyze_change_impact`, `brain_cross_service_blast_radius`, `brain_contradiction_detect`, `brain_validate_implementation`, `brain_export_topology_diagram`, `brain_secret_scan`, `brain_check_file_leases` / `brain_acquire_lease`.
+- **Após implementar (retroalimentação)**:
+  - `brain_ingest_git_repo` / `brain_ingest_document` após editar `.brain/`.
+  - `brain_graph_relate` (`VERIFIED_BY`, `IMPLEMENTS`, `GOVERNED_BY`, `DEPENDS_ON`).
+  - `brain_record_test_result` para manter 100% de cobertura QA, `brain_record_learning` e `brain_create_handoff` / `brain_resume_handoff`.
