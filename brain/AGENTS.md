@@ -1,15 +1,16 @@
 # Brain — Project Brain OS 2.0
 
-Use sempre o MCP Brain antes de editar código crítico. O catálogo é extensível; atualmente há 35 ferramentas. Documente cada ferramenta nova ou alterada em `docs/02-specifications/mcp-and-api-spec.md` e mantenha `protocols/mcp-tools/catalog.json`, paridade HTTP/stdio e testes de autorização alinhados:
+Use sempre o MCP Brain antes de editar código crítico. O catálogo é extensível; atualmente há **108+ ferramentas MCP**. Documente cada ferramenta nova ou alterada em `.brain/06-operations/mcp-tools-catalog.md` e `.brain/04-engineering/api-and-mcp-contracts.md`, mantendo `protocols/mcp-tools/catalog.json`, paridade HTTP/stdio e testes de autorização alinhados:
 1. `brain_context_build` para montar o Context Pack da tarefa.
 2. `brain_validate_implementation` antes de concluir alterações em regras de negócio.
 3. `brain_create_handoff` / `brain_resume_handoff` para continuidade cross-IDE.
+4. `brain_list_skills` / `brain_get_skill` ou `.brain/skills/` para carregar as skills oficiais de engenharia (`git-workflow-craftsman`, `code-elegance-avoid-if-else`, `frontend-architecture-craft`, `backend-resilience-craft`, `fullstack-testing-strategy`, `modern-language-features`, `brain-mcp-advisor`, `brain-knowledge-hygiene`).
 
 ## MCP principal e MCP local (mesmo motor, modos distintos)
 
-- Os dois MCPs executam o **mesmo código/motor**; o que muda é o **ambiente de execução** (`BRAIN_DEPLOYMENT_MODE=local|cloud`) e o transporte:
-  - `brain` / **Brain principal** (`http://.../mcp` · Streamable HTTP): conecta no servidor compartilhado pelo time (nuvem/rede ou instância principal subindo com `npm run start:cloud`), usando a identidade, escopos e backend desse serviço.
-  - `brain_local` / **Brain local** (`stdio` · `npm run start:local`): roda na máquina do agente, herda o `.env` local e acessa o checkout/arquivos locais. Pode operar **solo** na sua máquina/rede ou como **espaço offline (Edge)** sincronizado sob demanda via `brain sync pull` / `brain sync push` com qualquer servidor em nuvem.
+- Os dois MCPs executam o **mesmo código/motor** sobre **Bun + Turborepo**; o que muda é o **ambiente de execução** (`BRAIN_DEPLOYMENT_MODE=local|cloud`) e o transporte:
+  - `brain` / **Brain principal** (`http://localhost:3333/mcp` · Streamable HTTP): conecta no servidor compartilhado pelo time (nuvem/rede ou instância principal subindo com `bun run start:cloud` ou `bun run init:start`), usando a identidade, escopos e backend desse serviço.
+  - `brain_local` / **Brain local** (`stdio` · `bun run start:local`): roda na máquina do agente, herda o `.env` local e acessa o checkout/arquivos locais. Pode operar **solo** na sua máquina/rede ou como **espaço offline (Edge)** sincronizado sob demanda via `brain sync pull` / `brain sync push` com qualquer servidor em nuvem.
 - As descrições das ferramentas começam com o perfil da conexão. Leia esse prefixo antes de uma operação que grava dados.
 - O rótulo `local` descreve onde o processo roda; se `DATABASE_URL` local apontar para a mesma base usada pelo serviço HTTP, os dados serão compartilhados diretamente em vez de isolados. Também não assuma sincronização automática entre bases distintas sem `pull`/`push`.
 - Nesta configuração, os dois perfis retornaram o mesmo registro do projeto `brain` (`tenantId` e `createdAt`) e o mesmo item episódico. Isso confirma sobreposição dos dados observados, mas não identifica a configuração física do banco. Se o projeto não aparecer numa conexão, verifique `projectId`, tenant e escopos nela antes de criar outro registro.
