@@ -72,12 +72,11 @@ export function registerMcpGatewayRoutes(app: FastifyInstance, deps: McpGatewayD
       activeMcpSessions: activeSessions.size,
       pgStoresEnabled: Boolean(deps.pgGraph && deps.pgRetrieval),
       auth: {
-        methods: ["oauth2_pkce", "oauth2_device_flow", "bearer_jwt", "stdio_credentials_file"],
+        methods: ["oauth2_pkce", "bearer_jwt", "stdio_credentials_file"],
         oauthProtectedResource: `${apiOrigin}/.well-known/oauth-protected-resource`,
         oauthAuthorizationServer: `${apiOrigin}/.well-known/oauth-authorization-server`,
         registrationEndpoint: `${apiOrigin}/oauth/register`,
         tokenEndpoint: `${apiOrigin}/oauth/token`,
-        deviceCodeEndpoint: `${apiOrigin}/v1/auth/oauth/device/code`,
         webApprovalUrl: `${webOrigin}/auth/oauth`,
         uiTokenGenerator: `${webOrigin} -> Acesso, CASL & Políticas -> Token MCP (POST ${apiOrigin}/v1/auth/mcp-token)`,
         cliLoginCommand: "brain-mcp login"
@@ -101,9 +100,8 @@ export function registerMcpGatewayRoutes(app: FastifyInstance, deps: McpGatewayD
       authorization_endpoint: `${apiOrigin}/oauth/authorize`,
       token_endpoint: `${apiOrigin}/oauth/token`,
       registration_endpoint: `${apiOrigin}/oauth/register`,
-      device_authorization_endpoint: `${apiOrigin}/v1/auth/oauth/device/code`,
-      response_types_supported: ["code", "token"],
-      grant_types_supported: ["authorization_code", "refresh_token", "urn:ietf:params:oauth:grant-type:device_code"],
+      response_types_supported: ["code"],
+      grant_types_supported: ["authorization_code", "refresh_token"],
       token_endpoint_auth_methods_supported: ["none"],
       code_challenge_methods_supported: ["S256"]
     };
@@ -135,14 +133,12 @@ export function registerMcpGatewayRoutes(app: FastifyInstance, deps: McpGatewayD
           login: {
             howToAuthenticate: [
               `1) OAuth 2.1 PKCE (automático): registre cliente em POST ${apiOrigin}/oauth/register, abra ${webOrigin}/auth/oauth e troque o código em POST ${apiOrigin}/oauth/token.`,
-              `2) OAuth2 Device Flow: POST ${apiOrigin}/v1/auth/oauth/device/code, aprove em ${webOrigin}/auth/oauth?code=<user_code> e faça polling em POST ${apiOrigin}/v1/auth/oauth/token.`,
-              `3) Bearer Token / CLI: gere em ${webOrigin} -> Acesso, CASL & Políticas -> Token MCP ou execute 'brain-mcp login'.`
+              `2) Bearer Token / CLI: gere em ${webOrigin} -> Acesso, CASL & Políticas -> Token MCP ou execute 'brain-mcp login'.`
             ],
             oauthProtectedResource: `${apiOrigin}/.well-known/oauth-protected-resource`,
             oauthAuthorizationServer: `${apiOrigin}/.well-known/oauth-authorization-server`,
             registrationEndpoint: `${apiOrigin}/oauth/register`,
             tokenEndpoint: `${apiOrigin}/oauth/token`,
-            deviceCodeEndpoint: `${apiOrigin}/v1/auth/oauth/device/code`,
             webApprovalUrl: `${webOrigin}/auth/oauth`,
             cliLoginCommand: "brain-mcp login"
           }

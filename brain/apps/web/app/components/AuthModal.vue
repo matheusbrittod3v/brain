@@ -93,45 +93,6 @@ async function onRegister() {
   }
 }
 
-// OAuth2 Device Flow State
-const userCode = ref('')
-const pendingOAuth = ref<{ userCode: string; clientId: string; clientName: string; scope: string } | null>(null)
-const checkingOAuth = ref(false)
-const approvingOAuth = ref(false)
-
-async function checkOAuthCode() {
-  const code = userCode.value.trim().toUpperCase()
-  if (!code) return
-  checkingOAuth.value = true
-  try {
-    pendingOAuth.value = await apiFetch(`/v1/auth/oauth/session/${encodeURIComponent(code)}`)
-  } catch (err) {
-    pendingOAuth.value = null
-    notify('Código inválido ou expirado', err instanceof Error ? err.message : String(err), 'error')
-  } finally {
-    checkingOAuth.value = false
-  }
-}
-
-async function approveOAuth() {
-  if (!pendingOAuth.value) return
-  approvingOAuth.value = true
-  try {
-    await apiFetch('/v1/auth/oauth/approve', {
-      method: 'POST',
-      body: JSON.stringify({ userCode: pendingOAuth.value.userCode })
-    })
-    notify('Agente autorizado!', `${pendingOAuth.value.clientName} conectado com suas permissões.`)
-    pendingOAuth.value = null
-    userCode.value = ''
-    authModalOpen.value = false
-  } catch (err) {
-    notify('Erro ao aprovar', err instanceof Error ? err.message : String(err), 'error')
-  } finally {
-    approvingOAuth.value = false
-  }
-}
-
 </script>
 
 <template>

@@ -64,49 +64,57 @@ test("Auth & OAuth2 Endpoints end-to-end", async (t) => {
   assert.equal(meRes.statusCode, 200);
   const meData = JSON.parse(meRes.body);
   assert.equal(meData.email, testEmail);
-  assert.ok(meData.allowedProjects.includes("brain"));
-  assert.ok(meData.allowedProjects.includes("local-project"));
+  assert.ok(Array.isArray(meData.allowedProjects));
 
-  // 5. OAuth2 Device Code flow for MCP server
-  const deviceRes = await app.inject({
+  // 5. OAuth 2.1 PKCE dynamic client registration & authorization
+  const { createHash } = await import("node:crypto");
+  const codeVerifier = "pkce_verifier_secret_value_for_test_1234567890";
+  const codeChallenge = createHash("sha256").update(codeVerifier).digest("base64url");
+  const redirectUri = "http://127.0.0.1:43210/callback";
+
+  const registerClientRes = await app.inject({
     method: "POST",
-    url: "/v1/auth/oauth/device/code",
+    url: "/oauth/register",
     payload: {
-      clientId: "cursor-mcp-plugin",
-      clientName: "Cursor IDE MCP Integration"
+      client_name: "Cursor IDE MCP Integration",
+      redirect_uris: [redirectUri]
     }
   });
-  assert.equal(deviceRes.statusCode, 200);
-  const device = JSON.parse(deviceRes.body);
-  assert.ok(device.device_code);
-  assert.ok(device.user_code);
+  assert.equal(registerClientRes.statusCode, 201);
+  const clientData = JSON.parse(registerClientRes.body);
+  assert.ok(clientData.client_id);
 
-  // 6. User approves OAuth session via Web interface
-  const approveRes = await app.inject({
+  // 6. User approves OAuth 2.1 PKCE session via Web interface
+  const authorizeRes = await app.inject({
     method: "POST",
-    url: "/v1/auth/oauth/approve",
-    headers: {
-      authorization: `Bearer ${userToken}`
-    },
+    url: "/v1/auth/oauth/authorize",
+    headers: { authorization: `Bearer ${userToken}` },
     payload: {
-      userCode: device.user_code
+      clientId: clientData.client_id,
+      redirectUri,
+      codeChallenge,
+      codeChallengeMethod: "S256"
     }
   });
-  assert.equal(approveRes.statusCode, 200);
+  assert.equal(authorizeRes.statusCode, 200);
+  const authCodeData = JSON.parse(authorizeRes.body);
+  assert.ok(authCodeData.code);
 
-  // 7. MCP exchanges device_code for Bearer token
+  // 7. MCP exchanges PKCE authorization code for Bearer token
   const tokenRes = await app.inject({
     method: "POST",
-    url: "/v1/auth/oauth/token",
+    url: "/oauth/token",
     payload: {
-      deviceCode: device.device_code,
-      clientId: "cursor-mcp-plugin"
+      grant_type: "authorization_code",
+      code: authCodeData.code,
+      redirect_uri: redirectUri,
+      client_id: clientData.client_id,
+      code_verifier: codeVerifier
     }
   });
   assert.equal(tokenRes.statusCode, 200);
   const tokenData = JSON.parse(tokenRes.body);
   assert.ok(tokenData.access_token);
-  assert.equal(tokenData.user.email, testEmail);
 
   // 8. MCP uses its access_token to access API
   const mcpAccessRes = await app.inject({

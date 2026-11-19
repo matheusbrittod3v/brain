@@ -11,9 +11,6 @@ const requestedScope = computed(() => String(route.query.scope ?? 'brain').trim(
 const oauthState = computed(() => String(route.query.state ?? '').trim())
 const isPkceMode = computed(() => Boolean(clientId.value && redirectUri.value && codeChallenge.value))
 
-// Auto-discovered pending Device Flow sessions (no code typing required)
-const queryUserCode = computed(() => String(route.query.code ?? '').trim().toUpperCase())
-const pendingList = ref<Array<{ userCode: string; clientId: string; clientName: string; scope: string; status: string }>>([])
 const clientInfo = ref<{ clientId: string; clientName: string; scope: string } | null>(null)
 const availableProjects = ref<Array<{ id: string; name: string }>>([])
 const selectedProjects = ref<string[]>([])
@@ -36,14 +33,6 @@ async function loadConsentContext() {
       clientInfo.value = await apiFetch<{ clientId: string; clientName: string; scope: string }>(
         `/v1/auth/oauth/client/${encodeURIComponent(clientId.value)}`
       ).catch(() => ({ clientId: clientId.value, clientName: clientId.value, scope: requestedScope.value }))
-    } else if (queryUserCode.value) {
-      const s = await apiFetch<{ userCode: string; clientId: string; clientName: string; scope: string; status: string }>(
-        `/v1/auth/oauth/session/${encodeURIComponent(queryUserCode.value)}`
-      )
-      pendingList.value = s.status === 'pending' ? [s] : []
-    } else if (apiKey.value) {
-      const res = await apiFetch<{ items?: typeof pendingList.value }>('/v1/auth/oauth/pending')
-      pendingList.value = res.items ?? []
     }
 
     if (apiKey.value) {
@@ -109,24 +98,6 @@ function rejectPkce() {
     window.location.href = target.toString()
   } catch {
     doneMessage.value = 'Solicitação cancelada.'
-  }
-}
-
-async function decidePending(userCode: string, approve: boolean) {
-  submitting.value = true
-  errorMessage.value = null
-  try {
-    const endpoint = approve ? '/v1/auth/oauth/approve' : '/v1/auth/oauth/reject'
-    const res = await apiFetch<{ status: string; message?: string }>(endpoint, {
-      method: 'POST',
-      body: JSON.stringify({ userCode })
-    })
-    doneMessage.value = res.message || (approve ? 'Conexão MCP autorizada! Você já pode voltar ao terminal/Codex.' : 'Solicitação rejeitada.')
-    pendingList.value = pendingList.value.filter((p) => p.userCode !== userCode)
-  } catch (err) {
-    errorMessage.value = err instanceof Error ? err.message : String(err)
-  } finally {
-    submitting.value = false
   }
 }
 
@@ -208,21 +179,8 @@ onMounted(loadConsentContext)
         </template>
 
         <template v-else>
-          <div v-if="loading" class="text-xs text-muted py-4 text-center">Carregando solicitações pendentes...</div>
-          <div v-else-if="pendingList.length === 0" class="text-xs text-muted py-4 text-center">
-            Nenhuma solicitação pendente. Conecte pelo Codex ou execute <code class="font-mono">brain-mcp login</code>.
-          </div>
-          <div v-else class="space-y-2.5">
-            <div v-for="item in pendingList" :key="item.userCode" class="rounded-lg border border-primary/40 bg-elevated/40 p-3.5 space-y-2.5">
-              <div class="flex items-center justify-between text-xs">
-                <span class="font-semibold text-highlighted">{{ item.clientName }}</span>
-                <span class="font-mono text-muted">{{ item.scope }}</span>
-              </div>
-              <div class="grid grid-cols-2 gap-2">
-                <UButton size="sm" color="neutral" variant="outline" :loading="submitting" @click="decidePending(item.userCode, false)">Rejeitar</UButton>
-                <UButton size="sm" color="primary" icon="i-lucide-check" :loading="submitting" @click="decidePending(item.userCode, true)">Aprovar</UButton>
-              </div>
-            </div>
+          <div class="text-xs text-muted py-4 text-center">
+            Nenhuma solicitação OAuth 2.1 ativa. Conecte pelo Codex ou execute <code class="font-mono">brain-mcp login</code>.
           </div>
         </template>
       </div>
