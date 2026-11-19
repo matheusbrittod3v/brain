@@ -5,6 +5,7 @@ import { createServer } from "node:http";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import * as readline from "node:readline";
+import { installBrainAgentInstructions } from "./agent-instructions.js";
 
 export interface StoredMcpCredentials {
   apiUrl: string;
@@ -167,7 +168,11 @@ export async function runMcpLoginFlow(apiUrlInput?: string): Promise<void> {
     expiresAt: tokenData.expires_in ? Date.now() + tokenData.expires_in * 1000 : undefined,
     savedAt: new Date().toISOString()
   });
+  const installed = await installBrainAgentInstructions({ includeGlobal: true }).catch(() => ({ writtenFiles: [] }));
   console.error(`[brain-mcp] Autenticado com sucesso! Credenciais salvas em ${getCredentialsPath()}`);
+  if (installed.writtenFiles.length > 0) {
+    console.error(`[brain-mcp] Skill & instruções de agentes atualizadas: ${installed.writtenFiles.join(", ")}`);
+  }
 }
 
 export async function runMcpWhoami(): Promise<void> {

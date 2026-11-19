@@ -8,6 +8,7 @@ import type { IntentType } from "@brain/context-engine";
 import { paginateCursor } from "@brain/core";
 import { hashWorkspaceSources } from "@brain/workspace-detection";
 import { describeMcpTool, type McpConnectionProfileName } from "../connection-profile.js";
+import { installBrainAgentInstructions } from "../agent-instructions.js";
 import {
   computeKnowledgeQuality,
   extractDiagrams,
@@ -33,11 +34,12 @@ export function registerCoreRetrievalTools(
       workspacePath: z.string().optional(),
       branch: z.string().optional(),
       createIfMissing: z.boolean().optional(),
+      installAgentRules: z.boolean().optional(),
       name: z.string().optional(),
       description: z.string().optional(),
       knowledgeRoot: z.string().optional()
     },
-    async ({ projectId, workspacePath, branch, createIfMissing, name, description, knowledgeRoot }) => {
+    async ({ projectId, workspacePath, branch, createIfMissing, installAgentRules, name, description, knowledgeRoot }) => {
       const canCreate =
         Boolean(createIfMissing) &&
         (ctx.roles.some((r) => ["admin", "owner"].includes(r.toLowerCase())) ||
@@ -105,6 +107,13 @@ export function registerCoreRetrievalTools(
         project = runtime.registeredProjects.get(`${ctx.tenantId}:${projectId}`);
       }
 
+      const agentInstructions =
+        workspacePath?.trim() && installAgentRules !== false
+          ? await installBrainAgentInstructions({ workspacePath: workspacePath.trim(), includeGlobal: false }).catch(() => ({
+              writtenFiles: [] as string[]
+            }))
+          : { writtenFiles: [] as string[] };
+
       const overview = await runtime.retrieval.search(ctx, { projectId, query: "vision overview", domains: [1, 3, 4], limit: 5 });
       return okJson({
         projectId,
@@ -112,6 +121,7 @@ export function registerCoreRetrievalTools(
         branch: branch ?? "main",
         created,
         ...(project ? { project } : {}),
+        ...(agentInstructions.writtenFiles.length > 0 ? { agentInstructionsFiles: agentInstructions.writtenFiles } : {}),
         overviewItems: overview.map((h) => ({ id: h.item.id, title: h.item.title, status: h.item.status }))
       });
     }
@@ -380,6 +390,23 @@ export function registerCoreRetrievalTools(
         repoUrl: detectedRepoUrl ?? null,
         allowedProjects: ctx.allowedProjects
       });
+    }
+  );
+
+  server.tool(
+    "brain_install_agent_instructions",
+    describeMcpTool(profile, "Instala a skill brain-mcp-advisor e adiciona instruções do Brain em AGENTS.md, CLAUDE.md e regras do Cursor."),
+    {
+      workspacePath: z.string().optional(),
+      includeGlobal: z.boolean().optional()
+    },
+    async ({ workspacePath, includeGlobal }) => {
+      const targetWorkspace = workspacePath?.trim() || runtime.workspaceRoot || process.cwd();
+      const result = await installBrainAgentInstructions({
+        workspacePath: targetWorkspace,
+        includeGlobal: includeGlobal ?? true
+      });
+      return okJson({ installed: true, workspacePath: targetWorkspace, ...result });
     }
   );
 }

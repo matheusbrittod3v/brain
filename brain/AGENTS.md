@@ -29,3 +29,13 @@ Se o repositório conectado ainda não tiver `.project-brain.json` e `.brain/`, 
 ### Como funciona
 1. `.brain/` é a fonte de verdade versionada em Git; os arquivos `.md` e `.yaml` são ingeridos e indexados no PostgreSQL (FTS + `pgvector` + grafo) via `brain_ingest_git`, `brain_ingest_document`, `brain_propose_knowledge`, `brain sync` ou webhook do GitHub.
 2. Uma vez indexados, os agentes consomem o conhecimento via `brain_context_build`, validam código contra regras e ADRs via `brain_validate_implementation` e registram continuidade entre sessões via `brain_create_handoff` / `brain_resume_handoff`.
+
+<!-- BRAIN:MCP:START -->
+## Brain MCP — Uso Obrigatório & Conselheiro de Projeto
+
+Quando o servidor MCP **brain** estiver disponível nesta sessão, **use-o sempre que possível** para economizar tokens, evitar retrabalho e manter o conhecimento atualizado:
+
+1. **Início da tarefa**: chame `brain_resolve_workspace_project` para detectar o `projectId`, depois consulte `brain_context_build`, `brain_get_active_rules` e `brain_search` para aproveitar regras, topologias, contratos e decisões já prontas.
+2. **Antes de concluir**: valide contra invariantes com `brain_validate_implementation`, avalie impacto com `brain_analyze_change_impact` e verifique segredos com `brain_secret_scan`.
+3. **Ao finalizar**: atualize o Brain com `brain_ingest_git_repo` (se alterou `.brain/`), `brain_record_test_result`, `brain_record_learning` e `brain_create_handoff`.
+<!-- BRAIN:MCP:END -->

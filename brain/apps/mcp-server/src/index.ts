@@ -4,6 +4,7 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import { createAppPostgresClient, type RlsSessionContext } from "@brain/audit-engine";
 import { assertPolicyAccess, type AuthContext } from "@brain/auth";
 import { MCP_CONNECTION_PROFILES, type McpConnectionProfileName } from "./connection-profile.js";
+import { installBrainAgentInstructions } from "./agent-instructions.js";
 import { loadStoredCredentials, runMcpLoginFlow, runMcpLogout, runMcpWhoami, runStdioHttpProxy } from "./cli-auth.js";
 import { registerExtendedMcpTools } from "./extended-tools.js";
 import { createBrainRuntime, createSqlBrainRuntime, type BrainRuntime, type CreateSqlBrainRuntimeOptions, type McpContextEngineContract, type McpRetrievalContract } from "./runtime.js";
@@ -62,6 +63,15 @@ if (process.argv[1]?.endsWith("index.js") || process.argv[1]?.endsWith("brain-mc
       console.error(err instanceof Error ? err.message : err);
       process.exit(1);
     });
+  } else if (subcommand === "install-rules") {
+    installBrainAgentInstructions({ workspacePath: process.argv[3] || process.cwd(), includeGlobal: true })
+      .then((res) => {
+        console.log(JSON.stringify(res, null, 2));
+      })
+      .catch((err) => {
+        console.error(err instanceof Error ? err.message : err);
+        process.exit(1);
+      });
   } else {
     (async () => {
       const credentials = process.env.BRAIN_FORCE_DIRECT_DB === "1" ? null : await loadStoredCredentials();
