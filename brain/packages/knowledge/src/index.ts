@@ -169,6 +169,55 @@ export function resolveSourceConflict(
   };
 }
 
+function extractMermaidCodeFlow(posixPath: string, content: string, rawType?: string) {
+  const isMermaidFile = posixPath.toLowerCase().endsWith(".mmd") || posixPath.toLowerCase().endsWith(".mermaid");
+  const mermaidMatch = content.match(/```mermaid\s*\n([\s\S]*?)```/i);
+  const mermaidDiagram = isMermaidFile ? content.trim() : mermaidMatch?.[1]?.trim();
+  if (!mermaidDiagram) return undefined;
+  if (!isMermaidFile && rawType !== "process" && !posixPath.includes("05-flows")) return undefined;
+
+  const entryMatch = content.match(/\*{0,2}Entrypoint:\*{0,2}\s*`?([^\n`]+)`?/i);
+  const entrypoint = entryMatch?.[1]?.trim() || posixPath;
+
+  const steps: Array<{
+    order: number;
+    layer: string;
+    componentOrClass?: string;
+    fnName: string;
+    filePath?: string;
+  }> = [];
+
+  const numberedRe = /^\s*(\d+)\.\s+\*{0,2}\[([^\]]+)\]\*{0,2}\s+`?([^\s`(]+)`?(?:\s+\(`?([^)`\n]+)`?\))?/gm;
+  for (const m of content.matchAll(numberedRe)) {
+    const fnToken = m[3]?.trim() ?? "";
+    const dotIdx = fnToken.indexOf(".");
+    steps.push({
+      order: Number(m[1]),
+      layer: m[2]?.trim() ?? "flow",
+      componentOrClass: dotIdx > 0 ? fnToken.slice(0, dotIdx) : undefined,
+      fnName: dotIdx > 0 ? fnToken.slice(dotIdx + 1) : fnToken,
+      filePath: m[4]?.trim()
+    });
+  }
+
+  if (steps.length === 0) {
+    const nodeRe = /^\s*[A-Za-z0-9_]+\s*\["?([^"\]]+)"?\]/gm;
+    let order = 1;
+    for (const m of mermaidDiagram.matchAll(nodeRe)) {
+      const label = m[1]?.trim();
+      if (!label) continue;
+      steps.push({ order: order++, layer: "flow", fnName: label });
+    }
+  }
+
+  return {
+    entrypoint,
+    steps,
+    mermaidDiagram,
+    layers: [...new Set(steps.map((s) => s.layer))]
+  };
+}
+
 /**
  * Converte arquivos .yaml/.yml ou .md (com frontmatter) da camada Git em KnowledgeItem validado via Zod.
  */
@@ -234,10 +283,11 @@ export function parseKnowledgeFile(opts: ParseFileOptions): KnowledgeItem {
 
   const parsedMeta = KnowledgeYamlSchema.safeParse(rawMeta);
   const meta = parsedMeta.success ? parsedMeta.data : {};
+  const isMermaidFile = lowerPath.endsWith(".mmd") || lowerPath.endsWith(".mermaid");
   const id = String(meta.id ?? posixPath);
   const title = String(meta.title ?? posixPath.split("/").pop() ?? id);
-  const type = (meta.type as KnowledgeType) ?? "document";
-  const status = (meta.status as KnowledgeStatus) ?? "draft";
+  const type = (meta.type as KnowledgeType) ?? (isMermaidFile ? "process" : "document");
+  const status = (meta.status as KnowledgeStatus) ?? (isMermaidFile ? "approved" : "draft");
   const accessPolicyId = String(meta.access_policy ?? "internal-project");
   const version = Number(meta.version ?? 1);
 
@@ -250,6 +300,12 @@ export function parseKnowledgeFile(opts: ParseFileOptions): KnowledgeItem {
   const relatedIds = meta.related
     ? [...new Set(Object.values(meta.related).flat())]
     : [];
+
+  const extractedCodeFlow = extractMermaidCodeFlow(posixPath, consolidatedContent, type);
+  const metadata: Record<string, unknown> = {
+    ...meta,
+    ...(extractedCodeFlow ? { knowledgeLayer: "code", codeFlow: extractedCodeFlow } : {})
+  };
 
   return {
     id,
@@ -277,7 +333,7 @@ export function parseKnowledgeFile(opts: ParseFileOptions): KnowledgeItem {
     tags: Array.isArray(meta.tags) ? meta.tags.map(String) : [],
     relatedIds,
     accessPolicyId,
-    metadata: meta,
+    metadata,
     createdAt: now,
     updatedAt: now
   };
