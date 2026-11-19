@@ -209,7 +209,8 @@ export function registerOAuthPkceRoutes(
       const tokenId = `mcpt_${randomUUID()}`;
       const refreshToken = `brt_${randomBytes(32).toString("base64url")}`;
       const scopes = authCode.scope.split(/\s+/).filter(Boolean);
-      const allowedProjects = authCode.allowedProjects.length > 0 ? authCode.allowedProjects : dbUser?.allowedProjects ?? [];
+      const restrictedProjects = authCode.allowedProjects;
+      const allowedProjects = restrictedProjects.length > 0 ? restrictedProjects : dbUser?.allowedProjects ?? [];
 
       const accessToken = await issueUserJwt(
         {
@@ -238,7 +239,7 @@ export function registerOAuthPkceRoutes(
           tokenHash: sha256Hex(accessToken),
           refreshTokenHash: sha256Hex(refreshToken),
           scopes,
-          allowedProjects,
+          allowedProjects: restrictedProjects,
           expiresAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000)
         });
       }

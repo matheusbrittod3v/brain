@@ -38,7 +38,15 @@ export function registerCoreRetrievalTools(
       knowledgeRoot: z.string().optional()
     },
     async ({ projectId, workspacePath, branch, createIfMissing, name, description, knowledgeRoot }) => {
-      assertProjectAccess(ctx, projectId);
+      const canCreate =
+        Boolean(createIfMissing) &&
+        (ctx.roles.some((r) => ["admin", "owner"].includes(r.toLowerCase())) ||
+          (ctx.permissions ?? []).includes("projects:create"));
+      if (!canCreate) {
+        assertProjectAccess(ctx, projectId);
+      } else if (!ctx.allowedProjects.includes(projectId)) {
+        ctx.allowedProjects.push(projectId);
+      }
       let created = false;
       let project: { projectId: string; tenantId: string; name: string; description?: string; knowledgeRoot: string; createdAt: string } | undefined;
 
@@ -358,8 +366,11 @@ export function registerCoreRetrievalTools(
         });
       }
 
+      const regStore = runtime.registeredProjects;
       const folderName = resolvedPath.split("/").filter(Boolean).pop()?.toLowerCase() ?? "";
-      const fallbackId = ctx.allowedProjects.find((id) => id.toLowerCase() === folderName) ?? null;
+      const fallbackId =
+        ctx.allowedProjects.find((id) => id.toLowerCase() === folderName) ??
+        (regStore?.has(`${ctx.tenantId}:${folderName}`) && ctx.allowedProjects.includes(folderName) ? folderName : null);
 
       return okJson({
         matched: Boolean(fallbackId),

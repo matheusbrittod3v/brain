@@ -457,42 +457,83 @@ export class PgAccessRbacRepo {
   async resolveDynamicMcpScope(
     ctx: AuthContext,
     fallbackProjects: readonly string[] = [],
-    fallbackPolicies: readonly string[] = []
+    fallbackPolicies: readonly string[] = [],
+    systemDb?: BrainDb
   ): Promise<AuthContext> {
     const now = new Date();
     const isAdmin =
       ctx.actorType === "system" ||
       ctx.roles.some((r) => ["admin", "owner", "org_admin", "superadmin"].includes(r.toLowerCase()));
 
-    const [tenantProjects, memberships, activeGrants] = await Promise.all([
-      this.db
-        .select({ id: projects.id })
-        .from(projects)
-        .where(eq(projects.tenantId, ctx.tenantId))
-        .catch(() => [] as Array<{ id: string }>),
-      this.db
-        .select({
-          projectId: projectAccessMembers.projectId,
-          allowedPolicies: projectAccessMembers.allowedPolicies
-        })
-        .from(projectAccessMembers)
-        .where(and(eq(projectAccessMembers.tenantId, ctx.tenantId), eq(projectAccessMembers.actorId, ctx.actorId)))
-        .catch(() => [] as Array<{ projectId: string; allowedPolicies: string[] }>),
-      this.db
-        .select({
-          projectId: temporaryAccessGrants.projectId,
-          policyIds: temporaryAccessGrants.policyIds
-        })
-        .from(temporaryAccessGrants)
-        .where(
-          and(
-            eq(temporaryAccessGrants.tenantId, ctx.tenantId),
-            eq(temporaryAccessGrants.actorId, ctx.actorId),
-            gt(temporaryAccessGrants.expiresAt, now)
-          )
-        )
-        .catch(() => [] as Array<{ projectId: string; policyIds: string[] }>)
-    ]);
+    const queryDb = systemDb ?? this.db;
+    const [tenantProjects, memberships, activeGrants] = systemDb
+      ? await Promise.all([
+          queryDb
+            .select({ id: projects.id })
+            .from(projects)
+            .where(eq(projects.tenantId, ctx.tenantId))
+            .catch(() => [] as Array<{ id: string }>),
+          queryDb
+            .select({
+              projectId: projectAccessMembers.projectId,
+              allowedPolicies: projectAccessMembers.allowedPolicies
+            })
+            .from(projectAccessMembers)
+            .where(and(eq(projectAccessMembers.tenantId, ctx.tenantId), eq(projectAccessMembers.actorId, ctx.actorId)))
+            .catch(() => [] as Array<{ projectId: string; allowedPolicies: string[] }>),
+          queryDb
+            .select({
+              projectId: temporaryAccessGrants.projectId,
+              policyIds: temporaryAccessGrants.policyIds
+            })
+            .from(temporaryAccessGrants)
+            .where(
+              and(
+                eq(temporaryAccessGrants.tenantId, ctx.tenantId),
+                eq(temporaryAccessGrants.actorId, ctx.actorId),
+                gt(temporaryAccessGrants.expiresAt, now)
+              )
+            )
+            .catch(() => [] as Array<{ projectId: string; policyIds: string[] }>)
+        ])
+      : await withTenantRls(
+          this.db,
+          {
+            ...ctx,
+            allowedProjects: ctx.allowedProjects.length > 0 ? ctx.allowedProjects : ["__scope_lookup__"],
+            allowedPolicies: ["public-org", "internal-project"]
+          },
+          (tx) =>
+            Promise.all([
+              tx
+                .select({ id: projects.id })
+                .from(projects)
+                .where(eq(projects.tenantId, ctx.tenantId))
+                .catch(() => [] as Array<{ id: string }>),
+              tx
+                .select({
+                  projectId: projectAccessMembers.projectId,
+                  allowedPolicies: projectAccessMembers.allowedPolicies
+                })
+                .from(projectAccessMembers)
+                .where(and(eq(projectAccessMembers.tenantId, ctx.tenantId), eq(projectAccessMembers.actorId, ctx.actorId)))
+                .catch(() => [] as Array<{ projectId: string; allowedPolicies: string[] }>),
+              tx
+                .select({
+                  projectId: temporaryAccessGrants.projectId,
+                  policyIds: temporaryAccessGrants.policyIds
+                })
+                .from(temporaryAccessGrants)
+                .where(
+                  and(
+                    eq(temporaryAccessGrants.tenantId, ctx.tenantId),
+                    eq(temporaryAccessGrants.actorId, ctx.actorId),
+                    gt(temporaryAccessGrants.expiresAt, now)
+                  )
+                )
+                .catch(() => [] as Array<{ projectId: string; policyIds: string[] }>)
+            ])
+        );
 
     const projectSet = new Set<string>([...ctx.allowedProjects, ...fallbackProjects]);
     const policySet = new Set<string>([...ctx.allowedPolicies, ...fallbackPolicies, "public-org", "internal-project"]);
@@ -527,7 +568,8 @@ export class PgAccessRbacRepo {
    */
   async findProjectByWorkspace(
     tenantId: string,
-    params: { workspaceRoot?: string; repoUrl?: string }
+    params: { workspaceRoot?: string; repoUrl?: string },
+    systemDb?: BrainDb
   ): Promise<{ projectId: string; name: string; matchedBy: string } | null> {
     const normalizeRepo = (raw: string) =>
       raw
@@ -541,18 +583,43 @@ export class PgAccessRbacRepo {
     const targetPath = params.workspaceRoot?.trim().toLowerCase() ?? "";
     const folderName = targetPath.split("/").filter(Boolean).pop() ?? "";
 
-    const [repoHeads, tenantProjects] = await Promise.all([
-      this.db
-        .select({ projectId: projectRepositoryHeads.projectId, repository: projectRepositoryHeads.repository })
-        .from(projectRepositoryHeads)
-        .where(eq(projectRepositoryHeads.tenantId, tenantId))
-        .catch(() => [] as Array<{ projectId: string; repository: string }>),
-      this.db
-        .select({ id: projects.id, name: projects.name, knowledgeRoot: projects.knowledgeRoot })
-        .from(projects)
-        .where(eq(projects.tenantId, tenantId))
-        .catch(() => [] as Array<{ id: string; name: string; knowledgeRoot: string }>)
-    ]);
+    const [repoHeads, tenantProjects] = systemDb
+      ? await Promise.all([
+          systemDb
+            .select({ projectId: projectRepositoryHeads.projectId, repository: projectRepositoryHeads.repository })
+            .from(projectRepositoryHeads)
+            .where(eq(projectRepositoryHeads.tenantId, tenantId))
+            .catch(() => [] as Array<{ projectId: string; repository: string }>),
+          systemDb
+            .select({ id: projects.id, name: projects.name, knowledgeRoot: projects.knowledgeRoot })
+            .from(projects)
+            .where(eq(projects.tenantId, tenantId))
+            .catch(() => [] as Array<{ id: string; name: string; knowledgeRoot: string }>)
+        ])
+      : await withTenantRls(
+      this.db,
+      {
+        tenantId,
+        actorId: "workspace-resolver",
+        actorType: "system",
+        roles: ["system"],
+        allowedProjects: ["__scope_lookup__"],
+        allowedPolicies: ["public-org", "internal-project"]
+      },
+      (tx) =>
+        Promise.all([
+          tx
+            .select({ projectId: projectRepositoryHeads.projectId, repository: projectRepositoryHeads.repository })
+            .from(projectRepositoryHeads)
+            .where(eq(projectRepositoryHeads.tenantId, tenantId))
+            .catch(() => [] as Array<{ projectId: string; repository: string }>),
+          tx
+            .select({ id: projects.id, name: projects.name, knowledgeRoot: projects.knowledgeRoot })
+            .from(projects)
+            .where(eq(projects.tenantId, tenantId))
+            .catch(() => [] as Array<{ id: string; name: string; knowledgeRoot: string }>)
+        ])
+    );
 
     if (targetRepo) {
       const repoMatch = repoHeads.find((h) => {

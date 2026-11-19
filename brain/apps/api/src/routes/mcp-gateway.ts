@@ -8,7 +8,7 @@ import type { AuditLogger } from "@brain/audit-engine";
 import { authenticateRequest, type AuthContext } from "@brain/auth";
 import type { ContextEngine } from "@brain/context-engine";
 import type { CrossServiceContractRegistry, PostgresCrossServiceRegistry } from "@brain/cross-service";
-import type { PgMcpAuthRepository, PgOperationalRepository } from "@brain/database";
+import { createDatabaseClient, type BrainDb, type PgMcpAuthRepository, type PgOperationalRepository } from "@brain/database";
 import type { KnowledgeGraphStore, PostgresGraphStore } from "@brain/graph";
 import type { PostgresKnowledgeRepository } from "@brain/knowledge";
 import { createBrainMcpServer, createRunnerSchedule } from "@brain/mcp-server";
@@ -54,6 +54,9 @@ function resolveOrigins(req: FastifyRequest): { apiOrigin: string; webOrigin: st
  */
 export function registerMcpGatewayRoutes(app: FastifyInstance, deps: McpGatewayDeps): void {
   const activeSessions = new Map<string, StreamableHTTPServerTransport>();
+  const systemDb: BrainDb | undefined = process.env.DATABASE_SYSTEM_URL
+    ? createDatabaseClient(process.env.DATABASE_SYSTEM_URL).db
+    : undefined;
 
   app.get("/gateway", async (req) => {
     const { apiOrigin, webOrigin } = resolveOrigins(req);
@@ -151,7 +154,7 @@ export function registerMcpGatewayRoutes(app: FastifyInstance, deps: McpGatewayD
     }
 
     let ctx = deps.opRepo
-      ? await deps.opRepo.resolveDynamicMcpScope(baseCtx, deps.allowedProjects, deps.allowedPolicies)
+      ? await deps.opRepo.resolveDynamicMcpScope(baseCtx, deps.allowedProjects, deps.allowedPolicies, systemDb)
       : baseCtx;
 
     if (tokenRecord && tokenRecord.allowedProjects.length > 0) {

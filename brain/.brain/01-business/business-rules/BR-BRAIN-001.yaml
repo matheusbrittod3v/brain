@@ -1,0 +1,11 @@
+id: BR-BRAIN-001
+title: Isolamento Multi-Tenant e Escopo Dinâmico por RBAC/RLS
+type: business_rule
+status: approved
+access_policy: internal-project
+knowledgeLayer: business
+description: >
+  Todo acesso ao conhecimento, grafo e ferramentas MCP deve respeitar tenantId,
+  allowedProjects e allowedPolicies resolvidos dinamicamente a partir do PostgreSQL
+  (projects, project_access_members, temporary_access_grants) e aplicados via RLS.
+  Nenhum segredo ou credencial deve ser persistido sem varredura prévia.

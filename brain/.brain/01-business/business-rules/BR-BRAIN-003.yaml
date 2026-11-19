@@ -1,0 +1,10 @@
+id: BR-BRAIN-003
+title: Cotas FinOps por Departamento e Downgrade Automático de Modelo
+type: business_rule
+status: approved
+access_policy: internal-project
+knowledgeLayer: business
+description: >
+  O Brain Runner monitora runner_token_usage_daily contra department_finops_quotas.
+  Ao atingir o limite configurado, o roteamento executa downgrade automático para
+  modelos econômicos ou locais (Ollama) e bloqueia execuções acima do teto rígido.

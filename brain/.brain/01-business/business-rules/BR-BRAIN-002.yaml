@@ -1,0 +1,10 @@
+id: BR-BRAIN-002
+title: Auditoria Imutável, Privacidade LGPD e Varredura de Segredos
+type: business_rule
+status: approved
+access_policy: internal-project
+knowledgeLayer: business
+description: >
+  Toda mutação ou consulta sensível via API REST ou MCP deve registrar evento na
+  trilha audit_logs com tenantId, actorId e metadados do cliente (mcpClientId/mcpClientName).
+  Conteúdos submetidos para ingestão passam por scanForSecrets antes da indexação.

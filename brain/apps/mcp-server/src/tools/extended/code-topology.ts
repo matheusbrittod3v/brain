@@ -11,6 +11,38 @@ import { describeMcpTool, type McpConnectionProfileName } from "../../connection
 import { inferKnowledgeFormat, inferKnowledgeLayer, okJson } from "../../helpers.js";
 import type { BrainRuntime } from "../../runtime.js";
 
+function parseFileFrontmatter(rel: string, content: string): {
+  id?: string;
+  title?: string;
+  type?: KnowledgeItem["type"];
+  knowledgeLayer?: string;
+} {
+  const fmMatch = content.match(/^---\r?\n([\s\S]*?)\r?\n---/);
+  const block = fmMatch ? fmMatch[1]! : /\.(ya?ml)$/i.test(rel) ? content.slice(0, 1500) : "";
+  if (!block) return {};
+  const pick = (key: string) => {
+    const m = block.match(new RegExp(`^${key}:\\s*(.+)$`, "m"));
+    return m?.[1]?.trim().replace(/^["']|["']$/g, "");
+  };
+  const rawType = pick("type") as KnowledgeItem["type"] | undefined;
+  const validTypes = new Set<KnowledgeItem["type"]>([
+    "business_rule", "requirement", "feature", "architecture_decision", "code_symbol",
+    "test", "service", "api_contract", "event_contract", "task", "process",
+    "integration", "risk", "memory", "document", "skill", "spec"
+  ]);
+  const inferredType = rawType && validTypes.has(rawType)
+    ? rawType
+    : rel.endsWith("SKILL.md")
+      ? "skill"
+      : undefined;
+  return {
+    id: pick("id"),
+    title: pick("title"),
+    type: inferredType,
+    knowledgeLayer: pick("knowledgeLayer")
+  };
+}
+
 function buildKnowledgeItem(params: {
   id: string;
   tenantId: string;
@@ -21,14 +53,16 @@ function buildKnowledgeItem(params: {
   sourceUri: string;
   sourceKind: "git" | "agent";
   accessPolicyId: string;
+  version?: number;
   metadata?: Record<string, unknown>;
 }): KnowledgeItem {
   const now = new Date().toISOString();
+  const ver = params.version ?? 1;
   return {
     id: params.id,
     tenantId: params.tenantId,
     projectId: params.projectId,
-    domainId: 0,
+    domainId: 1,
     type: params.type,
     title: params.title,
     content: params.content,
@@ -36,9 +70,9 @@ function buildKnowledgeItem(params: {
     sourceId: params.id,
     sourceOrigin: "internal",
     sourceKind: params.sourceKind,
-    sourceVersion: "1",
+    sourceVersion: String(ver),
     sourceUri: params.sourceUri,
-    version: 1,
+    version: ver,
     contentHash: createHash("sha256").update(params.content).digest("hex"),
     confidence: 1,
     trustLevel: "verified",
@@ -106,21 +140,31 @@ export function registerCodeTopologyTools(
           continue;
         }
         const rel = relative(root, file);
-        const id = `WS-${rel.replace(/[^a-zA-Z0-9_-]+/g, "-").slice(0, 80)}`;
+        const fm = parseFileFrontmatter(rel, content);
+        const id = fm.id || `WS-${rel.replace(/[^a-zA-Z0-9_-]+/g, "-").slice(0, 80)}`;
         const itemType: KnowledgeItem["type"] =
-          rel.endsWith(".md") || rel.endsWith(".yaml") || rel.endsWith(".yml") ? "document" : "code_symbol";
+          fm.type ?? (rel.endsWith(".md") || rel.endsWith(".yaml") || rel.endsWith(".yml") ? "document" : "code_symbol");
+        const trimmedContent = content.slice(0, 12000);
+        const targetTitle = fm.title || rel;
+        const existing = await runtime.retrieval.getItem(ctx, projectId, id);
+        if (existing && existing.content === trimmedContent && existing.title === targetTitle && existing.type === itemType) {
+          continue;
+        }
+        const versions = runtime.knowledge ? await runtime.knowledge.listVersions(ctx, projectId, id).catch(() => []) : [];
+        const maxVersion = versions.reduce((m, v) => Math.max(m, v.version), existing?.version ?? 0);
         const item = buildKnowledgeItem({
           id,
           tenantId: ctx.tenantId,
           projectId,
           type: itemType,
-          title: rel,
-          content: content.slice(0, 12000),
+          title: targetTitle,
+          content: trimmedContent,
           sourceUri: rel,
           sourceKind: "git",
           accessPolicyId: policy,
+          version: maxVersion + 1,
           metadata: {
-            knowledgeLayer: inferKnowledgeLayer({ type: itemType }),
+            knowledgeLayer: fm.knowledgeLayer || inferKnowledgeLayer({ type: itemType }),
             format: inferKnowledgeFormat({ content })
           }
         });

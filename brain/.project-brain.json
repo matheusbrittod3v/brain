@@ -1,0 +1,16 @@
+{
+  "schemaVersion": "1.0.0",
+  "tenantId": "default-org",
+  "projectId": "brain",
+  "knowledgeRoot": ".brain/",
+  "guardianMode": "advisory",
+  "accessPolicyId": "internal-project",
+  "detectedStack": {
+    "bun": true,
+    "typescript": true,
+    "nuxt": true,
+    "fastify": true,
+    "postgres": true,
+    "pgvector": true
+  }
+}
