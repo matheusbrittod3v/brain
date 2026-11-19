@@ -111,10 +111,15 @@ function signS3Request(params: {
     .map((seg) => encodeURIComponent(decodeURIComponent(seg)))
     .join("/");
 
+  const canonicalQueryString = [...params.url.searchParams.entries()]
+    .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
+    .map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(v)}`)
+    .join("&");
+
   const canonicalRequest = [
     params.method,
     canonicalUri || "/",
-    "",
+    canonicalQueryString,
     canonicalHeaders,
     signedHeaders,
     payloadHash
@@ -385,23 +390,66 @@ export async function deleteMinioObject(
   return res.ok || res.status === 204 || res.status === 404;
 }
 
+export async function getMinioObjectText(
+  key: string,
+  options: {
+    endpoint?: string;
+    bucket?: string;
+    accessKey?: string;
+    secretKey?: string;
+    region?: string;
+    maxBytes?: number;
+  } = {}
+): Promise<string | null> {
+  const endpoint = (options.endpoint ?? process.env.MINIO_ENDPOINT ?? "http://localhost:9000").replace(/\/+$/, "");
+  const bucket = options.bucket ?? process.env.MINIO_BUCKET ?? "brain-artifacts";
+  const accessKey = options.accessKey ?? process.env.MINIO_ROOT_USER ?? "brain_minio";
+  const secretKey = options.secretKey ?? process.env.MINIO_ROOT_PASSWORD ?? "brain_minio_password";
+  const region = options.region ?? "us-east-1";
+  const cleanKey = key.replace(/^\/+/, "");
+  const maxBytes = options.maxBytes ?? 1024 * 1024;
+
+  const url = new URL(`${endpoint}/${bucket}/${cleanKey}`);
+  const emptyBuf = Buffer.alloc(0);
+  const headers = signS3Request({
+    method: "GET",
+    url,
+    payload: emptyBuf,
+    accessKey,
+    secretKey,
+    region
+  });
+  const res = await fetch(url, {
+    method: "GET",
+    headers,
+    signal: AbortSignal.timeout(3000)
+  });
+  if (!res.ok) return null;
+  const contentLength = Number(res.headers.get("content-length") ?? "0");
+  if (contentLength > maxBytes) return null;
+  return res.text();
+}
+
+const TEXT_ARTIFACT_EXT = /\.(?:json|md|txt|ya?ml|csv|html|log|patch|diff|xml)$/i;
+
 export async function eraseMinioObjectsForSubject(input: {
   tenantId: string;
   projectId: string;
   subjectId: string;
+  explicitKeys?: readonly string[];
   endpoint?: string;
   bucket?: string;
   accessKey?: string;
   secretKey?: string;
-}): Promise<{ ok: boolean; reachable: boolean; deletedCount: number; failedCount: number }> {
+}): Promise<{ ok: boolean; reachable: boolean; matchedCount: number; deletedCount: number; failedCount: number }> {
   const endpoint = (input.endpoint ?? process.env.MINIO_ENDPOINT ?? "http://localhost:9000").replace(/\/+$/, "");
   try {
     const health = await fetch(`${endpoint}/minio/health/live`, { signal: AbortSignal.timeout(1500) });
     if (!health.ok) {
-      return { ok: false, reachable: false, deletedCount: 0, failedCount: 0 };
+      return { ok: false, reachable: false, matchedCount: 0, deletedCount: 0, failedCount: 0 };
     }
   } catch {
-    return { ok: false, reachable: false, deletedCount: 0, failedCount: 0 };
+    return { ok: false, reachable: false, matchedCount: 0, deletedCount: 0, failedCount: 0 };
   }
 
   try {
@@ -421,8 +469,30 @@ export async function eraseMinioObjectsForSubject(input: {
       for (const k of found) allKeys.add(k);
     }
 
+    const explicitSet = new Set((input.explicitKeys ?? []).map((k) => k.replace(/^\/+/, "")));
+    for (const ek of explicitSet) allKeys.add(ek);
+
     const needle = input.subjectId.toLowerCase();
-    const matchingKeys = [...allKeys].filter((k) => k.toLowerCase().includes(needle));
+    const matchingKeys: string[] = [];
+
+    for (const key of allKeys) {
+      if (explicitSet.has(key) || key.toLowerCase().includes(needle)) {
+        matchingKeys.push(key);
+        continue;
+      }
+      if (TEXT_ARTIFACT_EXT.test(key)) {
+        const text = await getMinioObjectText(key, {
+          endpoint,
+          bucket: input.bucket,
+          accessKey: input.accessKey,
+          secretKey: input.secretKey
+        });
+        if (text && text.toLowerCase().includes(needle)) {
+          matchingKeys.push(key);
+        }
+      }
+    }
+
     let deletedCount = 0;
     let failedCount = 0;
     for (const key of matchingKeys) {
@@ -435,8 +505,8 @@ export async function eraseMinioObjectsForSubject(input: {
       if (deleted) deletedCount += 1;
       else failedCount += 1;
     }
-    return { ok: failedCount === 0, reachable: true, deletedCount, failedCount };
+    return { ok: failedCount === 0, reachable: true, matchedCount: matchingKeys.length, deletedCount, failedCount };
   } catch {
-    return { ok: false, reachable: true, deletedCount: 0, failedCount: 1 };
+    return { ok: false, reachable: true, matchedCount: 0, deletedCount: 0, failedCount: 1 };
   }
 }

@@ -494,19 +494,21 @@ export function registerRunnerProviderRoutes(
       if (role === "collaborate") {
         const primaryProvider = finopsDowngrade.downgraded && finopsDowngrade.provider ? finopsDowngrade.provider : routing.primary.provider;
         const primaryModel = finopsDowngrade.downgraded && finopsDowngrade.model ? finopsDowngrade.model : routing.primary.model;
+        const secondaryProvider = finopsDowngrade.downgraded && finopsDowngrade.provider ? finopsDowngrade.provider : routing.secondary.provider;
+        const secondaryModel = finopsDowngrade.downgraded && finopsDowngrade.model ? finopsDowngrade.model : routing.secondary.model;
         const primaryDraft = await generateWithVercelAiSdk({
           provider: primaryProvider,
           model: primaryModel,
           apiKey: runtimeApiKeys.get(primaryProvider) || getStoredToken(primaryProvider),
           system: `Você é o Agente Principal (projeto '${req.params.projectId}'). Elabore uma análise inicial clara e objetiva para ser revisada pelo Submodelo.`,
           prompt: historyText,
-          fallbacks: routing.fallbacks,
+          fallbacks: finopsDowngrade.downgraded ? undefined : routing.fallbacks,
           timeoutMs: 90_000
         });
         const secondaryReview = await generateWithVercelAiSdk({
-          provider: routing.secondary.provider,
-          model: routing.secondary.model,
-          apiKey: runtimeApiKeys.get(routing.secondary.provider) || getStoredToken(routing.secondary.provider),
+          provider: secondaryProvider,
+          model: secondaryModel,
+          apiKey: runtimeApiKeys.get(secondaryProvider) || getStoredToken(secondaryProvider),
           system: `Você é o Submodelo / Agente Secundário (projeto '${req.params.projectId}'). Revise a análise do Agente Principal, aponte riscos, lacunas ou melhorias rápidas.`,
           prompt: `Pergunta do usuário:\n${historyText}\n\nAnálise do Principal:\n${primaryDraft.text}`,
           timeoutMs: 60_000
@@ -517,14 +519,14 @@ export function registerRunnerProviderRoutes(
           apiKey: runtimeApiKeys.get(primaryProvider) || getStoredToken(primaryProvider),
           system: `Você é o Agente Principal (projeto '${req.params.projectId}'). Consolide a resposta final incorporando os pontos válidos do Submodelo.`,
           prompt: `Pergunta:\n${historyText}\n\nSua análise inicial:\n${primaryDraft.text}\n\nRevisão do Submodelo (${secondaryReview.provider}/${secondaryReview.model}):\n${secondaryReview.text}`,
-          fallbacks: routing.fallbacks,
+          fallbacks: finopsDowngrade.downgraded ? undefined : routing.fallbacks,
           timeoutMs: 90_000
         });
         return {
           reply: consolidated.text,
           secondaryReply: secondaryReview.text,
-          secondaryProvider: secondaryReview.provider || routing.secondary.provider,
-          secondaryModel: secondaryReview.model || routing.secondary.model,
+          secondaryProvider: secondaryReview.provider || secondaryProvider,
+          secondaryModel: secondaryReview.model || secondaryModel,
           provider: consolidated.provider || primaryProvider,
           model: consolidated.model || primaryModel,
           finopsDowngraded: finopsDowngrade.downgraded,

@@ -61,6 +61,37 @@ export function registerPrivacyEnterpriseRoutes(
         503
       );
     }
+    const explicitS3Keys: string[] = [];
+    try {
+      const bucket = process.env.MINIO_BUCKET ?? "brain-artifacts";
+      const s3UriRegex = new RegExp(`s3://${bucket}/([^\\s"'\\)]+)`, "gi");
+      const pattern = `%${req.body.subjectId}%`;
+      const collectS3Keys = (raw: string) => {
+        let m: RegExpExecArray | null;
+        while ((m = s3UriRegex.exec(raw)) !== null) {
+          if (m[1]) explicitS3Keys.push(m[1]);
+        }
+      };
+      const runFind = async (runner: { (strings: TemplateStringsArray, ...values: Array<string | number | boolean | null>): PromiseLike<unknown> }) =>
+        runner`
+          SELECT source_uri, content, metadata::text AS meta_text
+          FROM knowledge_items
+          WHERE tenant_id = ${ctx.tenantId}
+            AND project_id = ${req.body.projectId}
+            AND (owner_id = ${req.body.subjectId} OR content ILIKE ${pattern} OR source_uri ILIKE ${pattern} OR metadata::text ILIKE ${pattern})
+        `;
+      const matchedItems = ("begin" in systemKnowledgeClient && typeof systemKnowledgeClient.begin === "function"
+        ? await systemKnowledgeClient.begin((tx) => runFind(tx))
+        : await runFind(systemKnowledgeClient as unknown as Parameters<typeof runFind>[0])) as Array<{ source_uri?: string; content?: string; meta_text?: string }>;
+      for (const row of matchedItems ?? []) {
+        if (row.source_uri) collectS3Keys(row.source_uri);
+        if (row.content) collectS3Keys(row.content);
+        if (row.meta_text) collectS3Keys(row.meta_text);
+      }
+    } catch {
+      // ignore extraction errors; MinIO content scan still runs
+    }
+
     const erased = await privacyEraseSubject(systemKnowledgeClient, {
       tenantId: ctx.tenantId,
       subjectId: req.body.subjectId,
@@ -97,6 +128,7 @@ export function registerPrivacyEnterpriseRoutes(
       tenantId: ctx.tenantId,
       projectId: req.body.projectId,
       subjectId: req.body.subjectId,
+      explicitKeys: explicitS3Keys,
       endpoint: process.env.BRAIN_OBJECT_STORAGE_URL ?? process.env.MINIO_ENDPOINT
     });
 
@@ -164,6 +196,8 @@ export function registerPrivacyEnterpriseRoutes(
       auditLogsAnonymized,
       objectStorageDeleted,
       objectStorageStatus,
+      matchedMinioObjects: minioResult.matchedCount,
+      deletedMinioObjects: minioResult.deletedCount,
       complete,
       limitations
     };

@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { Type } from "@sinclair/typebox";
 import type { FastifyInstance } from "fastify";
 import { BrainError } from "@brain/core";
+import { resolveActiveFinopsDowngrade } from "../../services/finops-quota.js";
 import { cancelRunnerSchedule, listRunnerSchedules } from "@brain/mcp-server";
 import { MAX_ARTIFACT_BYTES, uploadObjectToMinio, validateSafeArtifactName } from "../../services/minio-storage.js";
 import type { RunnerRouteDeps, RunnerSharedState } from "./security.js";
@@ -11,7 +12,7 @@ export function registerRunnerTaskRoutes(
   deps: RunnerRouteDeps,
   state: RunnerSharedState
 ) {
-  const { authenticateProjectRequest, enforceOpa, recordAudit, runner, opRepo } = deps;
+  const { authenticateProjectRequest, enforceOpa, recordAudit, runner, opRepo, projectModelUsage } = deps;
 
   app.post<{ Params: { projectId: string }; Body: { instruction: string; priority?: "low" | "normal" | "high" } }>(
     "/v1/projects/:projectId/runner/tasks",
@@ -30,14 +31,29 @@ export function registerRunnerTaskRoutes(
           429
         );
       }
+      const finopsDowngrade = await resolveActiveFinopsDowngrade({
+        ctx,
+        projectId: req.params.projectId,
+        opRepo,
+        projectModelUsage
+      });
       const task = runner.enqueue(ctx, { projectId: req.params.projectId, instruction: req.body.instruction, priority: req.body.priority });
       if (opRepo) await opRepo.saveRunnerTask(ctx, task);
+      const taskPayload = finopsDowngrade.downgraded
+        ? {
+            ...task,
+            finopsDowngraded: true,
+            effectiveProvider: finopsDowngrade.provider,
+            effectiveModel: finopsDowngrade.model,
+            downgradeReason: finopsDowngrade.reason
+          }
+        : { ...task, finopsDowngraded: false };
       void uploadObjectToMinio({
         key: `${ctx.tenantId}/${req.params.projectId}/runner-tasks/${task.taskId}/task-spec.json`,
-        body: JSON.stringify(task, null, 2),
+        body: JSON.stringify(taskPayload, null, 2),
         contentType: "application/json"
       });
-      return task;
+      return taskPayload;
     }
   );
 
