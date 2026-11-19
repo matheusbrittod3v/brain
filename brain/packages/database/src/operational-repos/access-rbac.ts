@@ -535,11 +535,12 @@ export class PgAccessRbacRepo {
             ])
         );
 
-    const projectSet = new Set<string>([...ctx.allowedProjects, ...fallbackProjects]);
+    const projectSet = new Set<string>([...ctx.allowedProjects]);
     const policySet = new Set<string>([...ctx.allowedPolicies, ...fallbackPolicies, "public-org", "internal-project"]);
 
     if (isAdmin) {
       for (const p of tenantProjects) projectSet.add(p.id);
+      for (const p of fallbackProjects) projectSet.add(p);
       policySet.add("confidential-business");
       policySet.add("restricted-security");
     } else {
@@ -551,8 +552,10 @@ export class PgAccessRbacRepo {
         projectSet.add(g.projectId);
         for (const pol of g.policyIds) policySet.add(pol);
       }
-      if (projectSet.size === 0 && ctx.roles.includes("developer")) {
+      // Se o usuário ainda não tem projetos vinculados, libera os projetos existentes do tenant para não bugar o sistema
+      if (projectSet.size === 0) {
         for (const p of tenantProjects) projectSet.add(p.id);
+        for (const p of fallbackProjects) projectSet.add(p);
       }
     }
 

@@ -122,6 +122,7 @@ export function createApiRuntimeStores(deps: {
       : undefined;
   const authRepo = operationalDatabaseClient ? new PgAuthRepository(operationalDatabaseClient.db) : undefined;
   const mcpAuthRepo = operationalDatabaseClient ? new PgMcpAuthRepository(operationalDatabaseClient.db) : undefined;
+  const systemDb = process.env.DATABASE_SYSTEM_URL ? createDatabaseClient(process.env.DATABASE_SYSTEM_URL).db : undefined;
   const pgTemporal =
     appPostgresClient && process.env.BRAIN_PG_STORES === "1"
       ? new PgTemporalKnowledgeRepository(appPostgresClient as never)
@@ -178,7 +179,7 @@ export function createApiRuntimeStores(deps: {
     const dbUser = authRepo ? await authRepo.findUserById(rawCtx.actorId) : null;
     const memUser = !dbUser && rawCtx.actorId !== "local-dev" ? usersStore.getUserById(rawCtx.actorId) : null;
     const freshUser = dbUser ?? memUser;
-    const ctx: AuthContext = freshUser
+    const baseCtx: AuthContext = freshUser
       ? {
           ...rawCtx,
           roles: freshUser.roles,
@@ -186,6 +187,9 @@ export function createApiRuntimeStores(deps: {
           allowedPolicies: freshUser.allowedPolicies
         }
       : rawCtx;
+    const ctx = opRepo
+      ? await opRepo.resolveDynamicMcpScope(baseCtx, freshUser ? [] : allowedProjects, allowedPolicies, systemDb)
+      : baseCtx;
     assertProjectAccess(ctx, projectId);
     if (opRepo) {
       return opRepo.resolveEffectiveAuthContext(ctx, projectId);

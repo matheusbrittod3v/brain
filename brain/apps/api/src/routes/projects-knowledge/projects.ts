@@ -4,6 +4,7 @@ import { join, relative } from "node:path";
 import type { FastifyInstance } from "fastify";
 import { authenticateRequest } from "@brain/auth";
 import { BrainError, paginateCursor, type KnowledgeItem } from "@brain/core";
+import { createDatabaseClient } from "@brain/database";
 import { scanForSecrets } from "@brain/ingestion";
 import { assertSecretScanClean, redactPiiWithAiWorker, rerankWithAiWorker } from "../../services/ai-worker.js";
 import { configuredWorkspaceRoot } from "../../services/jobs.js";
@@ -27,8 +28,13 @@ export function registerProjectCoreRoutes(app: FastifyInstance, deps: ProjectsKn
     retrieval
   } = deps;
 
+  const systemDb = process.env.DATABASE_SYSTEM_URL ? createDatabaseClient(process.env.DATABASE_SYSTEM_URL).db : undefined;
+
   app.get("/v1/projects", async (req) => {
-    const ctx = await authenticateRequest(req.headers.authorization, configuredApiKey, "default-org", allowedProjects, undefined, allowedPolicies);
+    const baseCtx = await authenticateRequest(req.headers.authorization, configuredApiKey, "default-org", allowedProjects, undefined, allowedPolicies);
+    const ctx = opRepo
+      ? await opRepo.resolveDynamicMcpScope(baseCtx, allowedProjects, allowedPolicies, systemDb)
+      : baseCtx;
     const projects = opRepo
       ? await opRepo.listProjects(ctx)
       : [...registeredProjects.values()].filter(
