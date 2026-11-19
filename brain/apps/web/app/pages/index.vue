@@ -67,11 +67,27 @@ async function loadWorkspaceData() {
   try {
     const pRes = await apiFetch<{ projects: Array<{ projectId: string; name: string; description?: string }> }>('/v1/projects')
     projectsList.value = pRes.projects ?? []
-    if (projectsList.value.length > 0 && !projectsList.value.some(p => p.projectId === projectId.value)) {
+    if (projectsList.value.length === 0) {
+      projectId.value = ''
+      overviewData.value = null
+      proposalsList.value = []
+      knowledgeItems.value = []
+      runnerTasks.value = []
+      finopsData.value = null
+      auditLogs.value = []
+      loadingData.value = false
+      return
+    }
+    if (!projectsList.value.some(p => p.projectId === projectId.value)) {
       const firstProj = projectsList.value[0]
       if (firstProj) projectId.value = firstProj.projectId
     }
   } catch { /* ignore */ }
+
+  if (!projectId.value) {
+    loadingData.value = false
+    return
+  }
 
   const activePid = encodeURIComponent(projectId.value)
   await Promise.allSettled([
@@ -320,11 +336,15 @@ defineShortcuts({
             <div class="flex items-center gap-1.5 ml-1">
               <span class="hidden sm:inline text-xs font-medium text-muted">Projeto:</span>
               <USelect
+                v-if="projectsList.length > 0"
                 v-model="projectId"
-                :items="projectsList.length > 0 ? projectsList.map(p => ({ label: `${p.projectId} — ${p.name}`, value: p.projectId })) : [projectId]"
+                :items="projectsList.map(p => ({ label: `${p.projectId} — ${p.name}`, value: p.projectId }))"
                 size="sm"
                 class="w-48 sm:w-60"
               />
+              <UBadge v-else color="neutral" variant="subtle" size="sm">
+                Sem projeto vinculado
+              </UBadge>
               <UButton v-if="hasPermission('projects:create')" size="xs" variant="soft" color="neutral" icon="i-lucide-folder-plus" title="Novo Projeto" @click="newProjectOpen = true" />
             </div>
           </template>
@@ -352,7 +372,28 @@ defineShortcuts({
 
       <template #body>
         <div class="max-w-7xl w-full mx-auto">
-          <Transition name="workspace-fade" mode="out-in">
+          <UCard v-if="!loadingData && projectsList.length === 0 && workspace !== 'profile'" class="border border-default">
+            <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+              <div class="space-y-1">
+                <h2 class="text-base font-semibold text-highlighted">Nenhum projeto vinculado</h2>
+                <p class="text-xs text-muted">
+                  Sua conta possui acesso ao sistema, mas não há projetos vinculados no momento. Nenhum dado de projeto está visível.
+                </p>
+              </div>
+              <div class="flex items-center gap-2 shrink-0">
+                <UButton
+                  size="sm"
+                  color="primary"
+                  variant="soft"
+                  icon="i-lucide-user-circle"
+                  @click="profileInitialTab = 'overview'; workspace = 'profile'"
+                >
+                  Abrir Perfil
+                </UButton>
+              </div>
+            </div>
+          </UCard>
+          <Transition v-else name="workspace-fade" mode="out-in">
             <!-- WORKSPACE: PROJECTS -->
             <ProjectsOverviewWorkspace
               v-if="workspace === 'projects'"

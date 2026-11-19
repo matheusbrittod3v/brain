@@ -4,7 +4,7 @@ import type { AppPostgresClient, AuditLogger } from "@brain/audit-engine";
 import type { AuthContext } from "@brain/auth";
 import type { KnowledgeItem } from "@brain/core";
 import type { CrossServiceContractRegistry, PostgresCrossServiceRegistry } from "@brain/cross-service";
-import type { PgOperationalRepository } from "@brain/database";
+import type { PgAuthRepository, PgOperationalRepository } from "@brain/database";
 import type { KnowledgeGraphStore, PostgresGraphStore } from "@brain/graph";
 import type { PostgresKnowledgeRepository } from "@brain/knowledge";
 import type { HybridRetrievalEngine, PostgresRetrievalEngine } from "@brain/retrieval";
@@ -25,6 +25,7 @@ export interface ProjectsKnowledgeDeps {
   allowedPolicies: readonly string[];
   registeredProjects: Map<string, { projectId: string; tenantId: string; name: string; description?: string; knowledgeRoot: string; createdAt: string }>;
   opRepo?: PgOperationalRepository;
+  authRepo?: PgAuthRepository;
   appPostgresClient?: AppPostgresClient;
   pgRetrieval?: PostgresRetrievalEngine;
   retrieval: HybridRetrievalEngine;

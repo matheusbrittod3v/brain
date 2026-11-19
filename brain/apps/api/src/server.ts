@@ -479,6 +479,7 @@ export function buildApp(
     allowedPolicies,
     registeredProjects,
     opRepo,
+    authRepo,
     appPostgresClient,
     pgRetrieval,
     retrieval,

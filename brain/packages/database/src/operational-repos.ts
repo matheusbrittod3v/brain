@@ -403,11 +403,17 @@ export class PgOperationalRepository extends PgRunnerHandoffsRepo {
   }
 
   async listProjects(ctx: AuthContext) {
+    if (ctx.allowedProjects.length === 0) return [];
+    const allowAll = ctx.allowedProjects.includes("*");
     return withTenantRls(this.db, ctx, async (tx) => {
       const rows = await tx
         .select()
         .from(projects)
-        .where(eq(projects.tenantId, ctx.tenantId))
+        .where(
+          allowAll
+            ? eq(projects.tenantId, ctx.tenantId)
+            : and(eq(projects.tenantId, ctx.tenantId), inArray(projects.id, ctx.allowedProjects))
+        )
         .orderBy(asc(projects.id));
       return rows.map((row) => ({
         projectId: row.id,

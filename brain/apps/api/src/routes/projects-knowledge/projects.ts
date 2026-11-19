@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { join, relative } from "node:path";
 import type { FastifyInstance } from "fastify";
-import { authenticateRequest } from "@brain/auth";
+import { authenticateRequest, usersStore, type AuthContext } from "@brain/auth";
 import { BrainError, paginateCursor, type KnowledgeItem } from "@brain/core";
 import { createDatabaseClient } from "@brain/database";
 import { scanForSecrets } from "@brain/ingestion";
@@ -24,6 +24,7 @@ export function registerProjectCoreRoutes(app: FastifyInstance, deps: ProjectsKn
     allowedPolicies,
     registeredProjects,
     opRepo,
+    authRepo,
     pgRetrieval,
     retrieval
   } = deps;
@@ -31,9 +32,20 @@ export function registerProjectCoreRoutes(app: FastifyInstance, deps: ProjectsKn
   const systemDb = process.env.DATABASE_SYSTEM_URL ? createDatabaseClient(process.env.DATABASE_SYSTEM_URL).db : undefined;
 
   app.get("/v1/projects", async (req) => {
-    const baseCtx = await authenticateRequest(req.headers.authorization, configuredApiKey, "default-org", allowedProjects, undefined, allowedPolicies);
+    const rawCtx = await authenticateRequest(req.headers.authorization, configuredApiKey, "default-org", allowedProjects, undefined, allowedPolicies);
+    const dbUser = authRepo ? await authRepo.findUserById(rawCtx.actorId) : null;
+    const memUser = !dbUser && rawCtx.actorId !== "local-dev" ? usersStore.getUserById(rawCtx.actorId) : null;
+    const freshUser = dbUser ?? memUser;
+    const baseCtx: AuthContext = freshUser
+      ? {
+          ...rawCtx,
+          roles: freshUser.roles,
+          allowedProjects: freshUser.allowedProjects,
+          allowedPolicies: freshUser.allowedPolicies
+        }
+      : rawCtx;
     const ctx = opRepo
-      ? await opRepo.resolveDynamicMcpScope(baseCtx, allowedProjects, allowedPolicies, systemDb)
+      ? await opRepo.resolveDynamicMcpScope(baseCtx, freshUser ? [] : allowedProjects, allowedPolicies, systemDb)
       : baseCtx;
     const projects = opRepo
       ? await opRepo.listProjects(ctx)

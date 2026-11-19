@@ -103,7 +103,7 @@ export function registerSystemRoutes(
         }
       : ctx;
     const scopedCtx = opRepo
-      ? await opRepo.resolveDynamicMcpScope(baseCtx, allowedProjects, allowedPolicies, systemDb)
+      ? await opRepo.resolveDynamicMcpScope(baseCtx, user ? [] : allowedProjects, allowedPolicies, systemDb)
       : baseCtx;
     const effectiveCtx =
       req.query.projectId && opRepo && scopedCtx.allowedProjects.includes(req.query.projectId)
