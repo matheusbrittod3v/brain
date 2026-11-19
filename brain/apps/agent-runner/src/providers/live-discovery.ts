@@ -42,6 +42,30 @@ export async function fetchProviderLiveModels(
         env: { ...process.env, PATH: `${extraPath}:${process.env.PATH || ""}` },
         timeout: 1500
       });
+      if (providerId === "antigravity-cli") {
+        try {
+          const { stdout } = await execFileAsync(bin, ["models"], {
+            env: { ...process.env, PATH: `${extraPath}:${process.env.PATH || ""}` },
+            timeout: 4000
+          });
+          const parsed: ModelCatalogItem[] = stdout
+            .split(/\r?\n/)
+            .map((line) => line.trim())
+            .filter((line) => line && !line.startsWith("Fetching "))
+            .map((line) => {
+              const [id, ...nameParts] = line.split("\t");
+              const modelId = (id || "").trim();
+              const name = nameParts.join(" ").trim() || modelId;
+              return { id: modelId, name, free: true };
+            })
+            .filter((m) => Boolean(m.id));
+          if (parsed.length > 0) {
+            return { provider: providerId, online: true, models: parsed };
+          }
+        } catch {
+          // Fall back to static spec.models when `agy models` is slow/unavailable
+        }
+      }
       return {
         provider: providerId,
         online: true,
@@ -114,12 +138,29 @@ export async function fetchProviderLiveModels(
       return { provider: providerId, online: true, models };
     }
 
-    if (providerId === "gemini") {
+    if (providerId === "gemini" || providerId === "antigravity") {
+      const headers: Record<string, string> = {};
+      if (apiKey) {
+        if (storedConn?.authType === "oauth" || storedConn?.authType === "local-import") {
+          headers.Authorization = `Bearer ${apiKey}`;
+        } else {
+          headers["x-goog-api-key"] = apiKey;
+        }
+      }
       const res = await fetch("https://generativelanguage.googleapis.com/v1beta/models", {
-        headers: apiKey ? { "x-goog-api-key": apiKey } : undefined,
+        headers: Object.keys(headers).length > 0 ? headers : undefined,
         signal: controller.signal
       });
-      if (!res.ok) return { provider: providerId, online: false, models: [], error: `HTTP ${res.status}` };
+      if (!res.ok) {
+        if (providerId === "antigravity" && storedConn?.accessToken) {
+          return {
+            provider: providerId,
+            online: true,
+            models: spec.models ? [...spec.models] : [{ id: "gemini-2.5-pro", name: "Gemini 2.5 Pro", free: true }]
+          };
+        }
+        return { provider: providerId, online: false, models: [], error: `HTTP ${res.status}` };
+      }
       const json = (await res.json()) as { models?: Array<{ name?: string; displayName?: string }> };
       const models: ModelCatalogItem[] = (json.models ?? [])
         .filter((m): m is { name: string; displayName?: string } => Boolean(m.name))

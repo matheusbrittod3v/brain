@@ -1,6 +1,5 @@
 <script setup lang="ts">
 import { z } from 'zod'
-import type * as echarts from 'echarts'
 
 const {
   apiKey,
@@ -56,7 +55,6 @@ const inspectedKnowledge = ref<{ title: string; content: string; type: string; s
 
 const searchQuery = ref('')
 const knowledgeTypeFilter = ref('all')
-const agentsSubTab = ref<'chat' | 'tasks' | 'models'>('chat')
 
 // Load all workspace data
 async function loadWorkspaceData() {
@@ -105,24 +103,6 @@ const filteredKnowledge = computed(() => {
 
 const knowledgeTypes = computed(() => ['all', ...new Set(knowledgeItems.value.map(k => k.type))])
 
-const overviewTypeChartOption = computed<echarts.EChartsOption>(() => {
-  const entries = Object.entries(overviewData.value?.summary?.byType ?? {})
-  return {
-    tooltip: { trigger: 'item' },
-    legend: { bottom: 0, textStyle: { color: '#94a3b8', fontSize: 11 } },
-    series: [
-      {
-        type: 'pie',
-        radius: ['48%', '72%'],
-        center: ['50%', '43%'],
-        itemStyle: { borderRadius: 6, borderColor: '#0f172a', borderWidth: 2 },
-        label: { show: false },
-        data: entries.map(([name, value]) => ({ name, value }))
-      }
-    ]
-  }
-})
-
 // Navigation Items gated by menu:* permissions
 type WorkspaceKey = typeof workspace.value
 const allNavItems = computed<Array<{ id: WorkspaceKey; label: string; icon: string; permission: string; badge?: number }>>(() => [
@@ -148,8 +128,10 @@ watch(navItems, (items) => {
   }
 })
 
-const navMenuItems = computed(() => [
-  navItems.value.map(item => ({
+const coreGroupIds = new Set<WorkspaceKey>(['projects', 'inbox', 'knowledge', 'search', 'agents', 'impact'])
+
+const navMenuItems = computed(() => {
+  const toMenuItem = (item: (typeof navItems.value)[number]) => ({
     label: item.label,
     icon: item.icon,
     badge: item.badge,
@@ -157,8 +139,26 @@ const navMenuItems = computed(() => [
     onSelect: () => {
       workspace.value = item.id
     }
-  }))
-])
+  })
+
+  const core = navItems.value.filter(i => coreGroupIds.has(i.id))
+  const gov = navItems.value.filter(i => !coreGroupIds.has(i.id))
+
+  const groups: Array<Array<Record<string, unknown>>> = []
+  if (core.length > 0) {
+    groups.push([
+      { label: 'Workspace', type: 'label' },
+      ...core.map(toMenuItem)
+    ])
+  }
+  if (gov.length > 0) {
+    groups.push([
+      { label: 'Governança', type: 'label' },
+      ...gov.map(toMenuItem)
+    ])
+  }
+  return groups
+})
 
 const commandGroups = computed(() => [
   {
@@ -246,43 +246,6 @@ async function decideProposal(proposal: { id: string; version?: number }, decisi
   }
 }
 
-// Runner Task Creation & Cancel
-const runnerSchema = z.object({
-  instruction: z.string().min(5, 'Descreva a tarefa (mín. 5 caracteres)'),
-  priority: z.enum(['low', 'normal', 'high'])
-})
-const runnerState = reactive({ instruction: '', priority: 'normal' as 'low' | 'normal' | 'high' })
-const dispatchingRunner = ref(false)
-
-async function onDispatchRunner() {
-  dispatchingRunner.value = true
-  try {
-    await apiFetch(`/v1/projects/${encodeURIComponent(projectId.value)}/runner/tasks`, {
-      method: 'POST',
-      body: JSON.stringify(runnerState)
-    })
-    notify('Tarefa delegada ao Brain Runner!')
-    runnerState.instruction = ''
-    await loadWorkspaceData()
-  } catch (err) {
-    notify('Erro ao delegar tarefa', err instanceof Error ? err.message : String(err), 'error')
-  } finally {
-    dispatchingRunner.value = false
-  }
-}
-
-async function cancelTask(taskId: string) {
-  try {
-    await apiFetch(`/v1/projects/${encodeURIComponent(projectId.value)}/runner/tasks/${encodeURIComponent(taskId)}/cancel`, {
-      method: 'POST'
-    })
-    notify('Tarefa cancelada', taskId, 'warning')
-    await loadWorkspaceData()
-  } catch (err) {
-    notify('Erro ao cancelar tarefa', err instanceof Error ? err.message : String(err), 'error')
-  }
-}
-
 defineShortcuts({
   meta_k: () => {
     paletteOpen.value = !paletteOpen.value
@@ -301,16 +264,16 @@ defineShortcuts({
       :max-size="20"
       :default-size="16"
       :collapsed-size="4.2"
-      class="bg-elevated/40"
+      class="bg-elevated/30 border-r border-default/80"
     >
       <template #header="{ collapsed }">
-        <div class="flex items-center gap-2.5 px-1 py-1 min-w-0">
-          <div class="shrink-0 w-8 h-8 rounded-lg bg-primary/15 border border-primary/30 flex items-center justify-center">
+        <div class="flex items-center gap-2.5 px-1.5 py-1 min-w-0">
+          <div class="shrink-0 w-8 h-8 rounded-xl bg-gradient-to-br from-indigo-500/25 to-sky-500/20 border border-indigo-500/35 flex items-center justify-center shadow-xs">
             <UIcon name="i-lucide-brain-circuit" class="w-4.5 h-4.5 text-primary" />
           </div>
           <div v-if="!collapsed" class="flex items-center gap-2 min-w-0">
-            <span class="font-bold text-base tracking-tight truncate">Brain</span>
-            <UBadge color="primary" variant="subtle" size="xs">Brain OS</UBadge>
+            <span class="font-bold text-base tracking-tight text-highlighted truncate">Brain</span>
+            <UBadge color="primary" variant="soft" size="xs" class="font-mono">OS</UBadge>
           </div>
         </div>
       </template>
@@ -326,7 +289,7 @@ defineShortcuts({
       </template>
 
       <template #footer="{ collapsed }">
-        <div class="w-full flex items-center justify-between gap-2 px-1">
+        <div class="w-full flex items-center justify-between gap-2 px-1 pt-2 border-t border-default/60">
           <UButton
             size="sm"
             variant="ghost"
@@ -336,29 +299,37 @@ defineShortcuts({
             @click="authModalTab = 'login'; authModalOpen = true"
           >
             <UAvatar :alt="currentUser.name || currentUser.email" size="2xs" />
-            <span v-if="!collapsed" class="truncate font-medium text-xs">{{ currentUser.name }}</span>
+            <div v-if="!collapsed" class="flex items-center justify-between flex-1 min-w-0 gap-1.5">
+              <span class="truncate font-medium text-xs text-highlighted">{{ currentUser.name }}</span>
+              <UBadge v-if="currentUser.roles[0]" color="neutral" variant="subtle" size="xs" class="shrink-0">
+                {{ currentUser.roles[0] }}
+              </UBadge>
+            </div>
           </UButton>
         </div>
       </template>
     </UDashboardSidebar>
 
-    <UDashboardPanel id="main-workspace">
+    <UDashboardPanel id="main-workspace" class="brain-workspace-bg">
       <template #header>
-        <UDashboardNavbar>
+        <UDashboardNavbar class="border-b border-default/70 backdrop-blur-sm">
           <template #leading>
             <UDashboardSidebarCollapse />
-            <USelect
-              v-model="projectId"
-              :items="projectsList.length > 0 ? projectsList.map(p => ({ label: `${p.projectId} — ${p.name}`, value: p.projectId })) : [projectId]"
-              size="sm"
-              class="w-48 sm:w-56 ml-1"
-            />
-            <UButton v-if="hasPermission('projects:create')" size="xs" variant="ghost" icon="i-lucide-folder-plus" title="Novo Projeto" @click="newProjectOpen = true" />
+            <div class="flex items-center gap-1.5 ml-1">
+              <span class="hidden sm:inline text-xs font-medium text-muted">Projeto:</span>
+              <USelect
+                v-model="projectId"
+                :items="projectsList.length > 0 ? projectsList.map(p => ({ label: `${p.projectId} — ${p.name}`, value: p.projectId })) : [projectId]"
+                size="sm"
+                class="w-48 sm:w-60"
+              />
+              <UButton v-if="hasPermission('projects:create')" size="xs" variant="soft" color="neutral" icon="i-lucide-folder-plus" title="Novo Projeto" @click="newProjectOpen = true" />
+            </div>
           </template>
 
           <template #right>
-            <UButton size="sm" variant="ghost" icon="i-lucide-search" color="neutral" @click="paletteOpen = true">
-              <span class="hidden sm:inline">Buscar</span>
+            <UButton size="sm" variant="outline" icon="i-lucide-search" color="neutral" class="gap-2" @click="paletteOpen = true">
+              <span class="hidden sm:inline text-muted">Buscar ou ir para...</span>
               <UKbd value="⌘K" size="sm" />
             </UButton>
 
@@ -381,69 +352,21 @@ defineShortcuts({
         <div class="max-w-7xl w-full mx-auto">
           <Transition name="workspace-fade" mode="out-in">
             <!-- WORKSPACE: PROJECTS -->
-            <div v-if="workspace === 'projects'" key="projects">
-          <UiPageHeader
-            :title="`Visão Geral — ${projectId}`"
-            description="Resumo executivo de conhecimento indexado, saúde arquitetural e alertas do projeto"
-            icon="i-lucide-folder-git-2"
-          >
-            <template #actions>
-              <UButton size="sm" variant="soft" icon="i-lucide-folder-plus" @click="newProjectOpen = true">Novo Projeto</UButton>
-              <UButton size="sm" variant="ghost" icon="i-lucide-refresh-cw" :loading="loadingData" @click="loadWorkspaceData">Atualizar</UButton>
-            </template>
-          </UiPageHeader>
-
-          <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
-            <UiStatCard label="Itens Indexados" :value="overviewData?.totalItems ?? 0" icon="i-lucide-database" tone="primary" :loading="loadingData" />
-            <UiStatCard label="Aprovados" :value="overviewData?.approvedCount ?? 0" icon="i-lucide-check-circle-2" tone="success" :loading="loadingData" />
-            <UiStatCard label="Rascunhos" :value="overviewData?.draftCount ?? 0" icon="i-lucide-file-edit" tone="warning" :loading="loadingData" />
-            <UiStatCard label="Saúde Arquitetural" :value="`${overviewData?.health?.healthScore ?? 100}%`" icon="i-lucide-heart-pulse" tone="info" :loading="loadingData" />
-          </div>
-
-          <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
-            <UCard>
-              <template #header>
-                <h3 class="font-semibold text-sm">Composição por Tipo de Conhecimento</h3>
-              </template>
-              <UiEmptyState
-                v-if="!Object.keys(overviewData?.summary?.byType ?? {}).length"
-                compact
-                icon="i-lucide-pie-chart"
-                title="Sem itens catalogados ainda"
-                description="Conecte um repositório Git ou faça ingestão de documentos para popular este projeto."
-              />
-              <EChartBox v-else :option="overviewTypeChartOption" height="240px" />
-            </UCard>
-
-            <UCard>
-              <template #header>
-                <div class="flex items-center justify-between">
-                  <h3 class="font-semibold text-sm">Alertas &amp; Governança</h3>
-                  <UBadge :color="overviewData?.alerts?.length ? 'warning' : 'success'" variant="subtle" size="xs">
-                    {{ overviewData?.alerts?.length ?? 0 }} alertas
-                  </UBadge>
-                </div>
-              </template>
-              <UiEmptyState
-                v-if="!overviewData?.alerts?.length"
-                compact
-                icon="i-lucide-shield-check"
-                title="Tudo saudável"
-                description="Nenhum conflito ou regra sem cobertura detectado neste projeto."
-              />
-              <div v-else class="space-y-2">
-                <UAlert
-                  v-for="(alert, idx) in overviewData.alerts"
-                  :key="idx"
-                  color="warning"
-                  variant="subtle"
-                  icon="i-lucide-alert-triangle"
-                  :description="alert"
-                />
-              </div>
-            </UCard>
-          </div>
-        </div>
+            <ProjectsOverviewWorkspace
+              v-if="workspace === 'projects'"
+              key="projects"
+              :project-id="projectId"
+              :projects-list="projectsList"
+              :overview-data="overviewData"
+              :proposals-count="proposalsList.length"
+              :runner-tasks="runnerTasks"
+              :finops="finopsData"
+              :audit-logs="auditLogs"
+              :loading="loadingData"
+              @new-project="newProjectOpen = true"
+              @refresh="loadWorkspaceData"
+              @navigate="(w) => workspace = w"
+            />
 
         <!-- WORKSPACE: INBOX -->
         <InboxWorkspace
@@ -464,100 +387,13 @@ defineShortcuts({
         />
 
         <!-- WORKSPACE: AGENTS -->
-        <div v-else-if="workspace === 'agents'">
-          <UiPageHeader
-            title="Agentes &amp; Brain Runner"
-            description="Delegue tarefas assíncronas ao Brain Runner e acompanhe a fila de execução"
-            icon="i-lucide-bot"
-          >
-            <template #actions>
-              <UButton size="sm" variant="ghost" icon="i-lucide-refresh-cw" :loading="loadingData" @click="loadWorkspaceData">Atualizar</UButton>
-            </template>
-          </UiPageHeader>
-
-          <div class="mb-4">
-            <UiSegmentedTabs
-              v-model="agentsSubTab"
-              :items="[
-                { label: 'Chat (GPT)', value: 'chat' },
-                { label: 'Execuções', value: 'tasks' },
-                { label: 'Modelos & Conexões (9Router)', value: 'models' }
-              ]"
-            />
-          </div>
-
-          <RunnerChatPanel v-if="agentsSubTab === 'chat'" />
-
-          <RunnerModelsPanel v-else-if="agentsSubTab === 'models'" />
-
-          <div v-else class="space-y-6">
-            <UCard v-if="hasPermission('runner:execute')">
-              <template #header>
-                <h2 class="font-semibold text-sm">Delegar Tarefa ao Brain Runner</h2>
-              </template>
-              <UForm :schema="runnerSchema" :state="runnerState" class="space-y-4" @submit="onDispatchRunner">
-                <UFormField label="Instrução para o Agente" name="instruction">
-                  <UTextarea v-model="runnerState.instruction" placeholder="Ex.: Analise o impacto da regra BR-010..." class="w-full" />
-                </UFormField>
-                <div class="flex items-center justify-between">
-                  <USelect v-model="runnerState.priority" :items="['low', 'normal', 'high']" size="sm" class="w-32" />
-                  <UButton type="submit" :loading="dispatchingRunner" icon="i-lucide-play">Executar</UButton>
-                </div>
-              </UForm>
-            </UCard>
-
-            <UCard>
-              <template #header>
-                <div class="flex items-center justify-between">
-                  <h2 class="font-semibold text-sm">Execuções Recentes</h2>
-                  <UBadge color="neutral" variant="subtle" size="xs">{{ runnerTasks.length }} tarefas</UBadge>
-                </div>
-              </template>
-              <UiEmptyState v-if="runnerTasks.length === 0" compact icon="i-lucide-bot" title="Nenhuma execução registrada" />
-              <UTable
-                v-else
-                :data="runnerTasks"
-                :columns="[
-                  { accessorKey: 'taskId', header: 'ID' },
-                  { accessorKey: 'instruction', header: 'Instrução' },
-                  { accessorKey: 'status', header: 'Status' },
-                  { accessorKey: 'priority', header: 'Prioridade' },
-                  { id: 'actions', header: '' }
-                ]"
-              >
-                <template #taskId-cell="{ row }">
-                  <span class="font-mono text-xs">{{ row.original.taskId }}</span>
-                </template>
-                <template #status-cell="{ row }">
-                  <UBadge
-                    :color="row.original.status === 'completed' ? 'success' : row.original.status === 'failed' || row.original.status === 'cancelled' ? 'error' : 'warning'"
-                    variant="subtle"
-                    size="xs"
-                  >
-                    {{ row.original.status }}
-                  </UBadge>
-                </template>
-                <template #priority-cell="{ row }">
-                  <UBadge :color="row.original.priority === 'high' ? 'error' : 'neutral'" variant="outline" size="xs">
-                    {{ row.original.priority }}
-                  </UBadge>
-                </template>
-                <template #actions-cell="{ row }">
-                  <UButton
-                    v-if="hasPermission('runner:cancel') && (row.original.status === 'queued' || row.original.status === 'running')"
-                    size="xs"
-                    color="error"
-                    variant="ghost"
-                    icon="i-lucide-square"
-                    @click="cancelTask(row.original.taskId)"
-                  >
-                    Cancelar
-                  </UButton>
-                </template>
-              </UTable>
-            </UCard>
-          </div>
-        </div>
+        <AgentsRunnerWorkspace
+          v-else-if="workspace === 'agents'"
+          key="agents"
+          :tasks="runnerTasks"
+          :loading="loadingData"
+          @refresh="loadWorkspaceData"
+        />
 
         <!-- WORKSPACE: SEARCH & GRAPH -->
         <SearchGraphWorkspace

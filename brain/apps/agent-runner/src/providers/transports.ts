@@ -68,10 +68,16 @@ export async function executeSingleTarget(
 
   if (mode === "cli") {
     const baseCmd = target.cliCommand || spec?.cliCommand || [target.provider];
-    const cmd =
-      target.provider === "codex-cli" && target.model && target.model !== "default" && !baseCmd.includes("--model")
-        ? [...baseCmd, "--model", target.model]
-        : baseCmd;
+    const hasModel = Boolean(target.model && target.model !== "default" && !baseCmd.includes("--model"));
+    let cmd = baseCmd;
+    if (hasModel) {
+      if (target.provider === "codex-cli") {
+        cmd = [...baseCmd, "--model", target.model];
+      } else if (["antigravity-cli", "claude-cli", "gemini-cli"].includes(target.provider) && baseCmd.length >= 1) {
+        const [bin, ...rest] = baseCmd;
+        cmd = [bin!, "--model", target.model, ...rest];
+      }
+    }
     const res = await runCliProvider(cmd, req.prompt, req.system, req.timeoutMs);
     return { ...res, provider: target.provider, model: target.model };
   }

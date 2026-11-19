@@ -1,5 +1,11 @@
 import type { FastifyInstance } from "fastify";
-import { assertPermission, authenticateRequest, type AuthContext, type SystemPermission } from "@brain/auth";
+import { assertPermission, authenticateRequest, hasPermission, type AuthContext, type SystemPermission } from "@brain/auth";
+
+const PERMISSION_FALLBACKS: Partial<Record<SystemPermission, SystemPermission>> = {
+  "runner:task:read": "runner:view",
+  "runner:task:create": "runner:execute",
+  "runner:task:cancel": "runner:cancel"
+};
 
 export function requiredPermissionForRoute(method: string, routeUrl: string): SystemPermission | null {
   const m = method.toUpperCase();
@@ -28,9 +34,20 @@ export function requiredPermissionForRoute(method: string, routeUrl: string): Sy
   if (sub.startsWith("graph")) return m === "GET" ? "knowledge:search" : "knowledge:write";
   if (sub.startsWith("ingest")) return "knowledge:write";
   if (sub.startsWith("runner")) {
-    if (m === "GET") return "runner:view";
-    if (sub.includes("cancel")) return "runner:cancel";
-    return "runner:execute";
+    if (m === "GET") return sub.startsWith("runner/tasks") ? "runner:task:read" : "runner:view";
+    if (sub.includes("cancel") && sub.startsWith("runner/tasks")) return "runner:task:cancel";
+    if (sub.startsWith("runner/mcp-servers")) return "runner:mcp:manage";
+    if (sub.startsWith("runner/plugins")) return "runner:plugin:manage";
+    if (
+      sub.startsWith("runner/providers") ||
+      sub.startsWith("runner/routing") ||
+      sub.startsWith("runner/connections") ||
+      sub.startsWith("runner/models")
+    ) {
+      return "runner:provider:configure";
+    }
+    if (sub.startsWith("runner/schedules")) return "runner:schedule:manage";
+    return "runner:task:create";
   }
   if (sub.startsWith("change/impact")) return "impact:analyze";
   if (sub.startsWith("integrations")) return m === "GET" ? "integrations:view" : "integrations:manage";
@@ -93,7 +110,12 @@ export function registerRbacGuard(
           deps.allowedPolicies
         );
     const required = requiredPermissionForRoute(req.method, routeUrl);
-    if (required) assertPermission(ctx, required);
+    if (required) {
+      const fallback = PERMISSION_FALLBACKS[required];
+      if (!hasPermission(ctx, required) && (!fallback || !hasPermission(ctx, fallback))) {
+        assertPermission(ctx, required);
+      }
+    }
   });
 }
 

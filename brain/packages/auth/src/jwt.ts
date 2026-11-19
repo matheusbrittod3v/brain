@@ -1,6 +1,27 @@
+import { randomUUID } from "node:crypto";
 import { BrainError } from "@brain/core";
 import { jwtVerify, SignJWT } from "jose";
 import type { ActorType, AuthContext, SystemPermission } from "./index.js";
+
+const revokedJtis = new Set<string>();
+const actorRevokedBeforeMs = new Map<string, number>();
+
+export function revokeJwtId(jti: string): void {
+  if (jti) revokedJtis.add(jti);
+}
+
+export function revokeActorSessions(actorId: string): void {
+  if (actorId) actorRevokedBeforeMs.set(actorId, Date.now());
+}
+
+export function isJwtRevoked(jti?: string, sub?: string, iatSeconds?: number): boolean {
+  if (jti && revokedJtis.has(jti)) return true;
+  if (sub && iatSeconds !== undefined) {
+    const cutoff = actorRevokedBeforeMs.get(sub);
+    if (cutoff && iatSeconds * 1000 <= cutoff) return true;
+  }
+  return false;
+}
 
 export interface UserJwtClaims {
   sub: string; // User ID
@@ -32,7 +53,7 @@ export function getJwtSecretKey(overrideSecret?: string): Uint8Array {
 export async function issueUserJwt(
   claims: UserJwtClaims,
   secretOverride?: string,
-  expiresIn = "24h"
+  expiresIn = process.env.BRAIN_JWT_TTL || "8h"
 ): Promise<string> {
   const key = getJwtSecretKey(secretOverride);
   return new SignJWT({
@@ -47,6 +68,7 @@ export async function issueUserJwt(
     actor_type: claims.actor_type ?? "human"
   })
     .setProtectedHeader({ alg: "HS256" })
+    .setJti(randomUUID())
     .setSubject(claims.sub)
     .setIssuer("brain-auth")
     .setAudience("brain-api")
@@ -67,6 +89,11 @@ export async function verifyUserJwt(token: string, secretOverride?: string): Pro
     });
 
     const sub = String(payload.sub ?? "");
+    const jti = typeof payload.jti === "string" ? payload.jti : undefined;
+    const iat = typeof payload.iat === "number" ? payload.iat : undefined;
+    if (isJwtRevoked(jti, sub, iat)) {
+      throw new BrainError("BRAIN_ERR_UNAUTHORIZED", "Sessão revogada. Faça login novamente.", 401);
+    }
     const tenantId = String(payload.tenant_id ?? "default-org");
     const roles = Array.isArray(payload.roles) ? (payload.roles as string[]) : ["developer"];
     const allowedProjects = Array.isArray(payload.allowed_projects) ? (payload.allowed_projects as string[]) : [];

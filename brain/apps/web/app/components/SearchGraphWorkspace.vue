@@ -10,6 +10,10 @@ const emit = defineEmits<{
 const query = ref('')
 const rootId = ref('')
 const relationFilter = ref<'all' | 'VERIFIED_BY' | 'IMPACTS' | 'DEPENDS_ON'>('all')
+const typeFilter = ref('all')
+const graphLayout = ref<'force' | 'circular'>('force')
+const showEdgeLabels = ref(false)
+const expandedGraph = ref(false)
 const loading = ref(false)
 
 interface SearchItem {
@@ -52,28 +56,77 @@ async function runSearchAndGraph() {
 onMounted(runSearchAndGraph)
 watch(projectId, runSearchAndGraph)
 
+const relationOptions = [
+  { label: 'Todas as relações', value: 'all' },
+  { label: 'VERIFIED_BY', value: 'VERIFIED_BY' },
+  { label: 'IMPACTS', value: 'IMPACTS' },
+  { label: 'DEPENDS_ON', value: 'DEPENDS_ON' }
+]
+
+const typeOptions = computed(() => {
+  const types = [...new Set([
+    ...graphNodes.value.map(n => n.type).filter((t): t is string => Boolean(t)),
+    ...searchHits.value.map(h => h.type).filter(Boolean)
+  ])]
+  return [
+    { label: 'Todos os tipos', value: 'all' },
+    ...types.map(t => ({ label: t, value: t }))
+  ]
+})
+
+const filteredNodes = computed(() => {
+  if (typeFilter.value === 'all') return graphNodes.value
+  return graphNodes.value.filter(n => n.type === typeFilter.value || n.id === rootId.value)
+})
+
+const filteredSearchHits = computed(() => {
+  if (typeFilter.value === 'all') return searchHits.value
+  return searchHits.value.filter(h => h.type === typeFilter.value)
+})
+
 const filteredEdges = computed(() => {
   if (relationFilter.value === 'all') return graphEdges.value
   return graphEdges.value.filter(e => e.relation === relationFilter.value)
 })
 
-const graphOption = computed<echarts.EChartsOption>(() => {
-  const nodes = graphNodes.value.slice(0, 60).map(n => ({
-    id: n.id,
-    name: n.title ? `${n.id}: ${n.title.slice(0, 22)}` : n.id,
-    symbolSize: n.id === rootId.value ? 28 : 18,
-    itemStyle: {
-      color: n.id === rootId.value
-        ? '#38bdf8'
-        : n.status === 'approved'
-          ? '#10b981'
-          : n.status === 'draft'
-            ? '#f59e0b'
-            : '#6366f1',
-      borderColor: '#0f172a',
-      borderWidth: 2
-    }
+const nodeFocusItems = computed(() => [
+  { label: 'Visão completa (sem foco)', value: '' },
+  ...graphNodes.value.slice(0, 50).map(n => ({
+    label: n.title ? `${n.id} — ${n.title.slice(0, 28)}` : n.id,
+    value: n.id
   }))
+])
+
+const graphOption = computed<echarts.EChartsOption>(() => {
+  const degreeMap = new Map<string, number>()
+  for (const e of filteredEdges.value) {
+    degreeMap.set(e.from, (degreeMap.get(e.from) ?? 0) + 1)
+    degreeMap.set(e.to, (degreeMap.get(e.to) ?? 0) + 1)
+  }
+
+  const nodes = filteredNodes.value.slice(0, 70).map((n) => {
+    const deg = degreeMap.get(n.id) ?? 0
+    const isRoot = n.id === rootId.value
+    return {
+      id: n.id,
+      name: n.title ? `${n.id}: ${n.title.slice(0, 22)}` : n.id,
+      value: deg,
+      symbolSize: isRoot ? 32 : Math.min(30, 16 + deg * 2.5),
+      itemStyle: {
+        color: isRoot
+          ? '#38bdf8'
+          : n.status === 'approved'
+            ? '#10b981'
+            : n.status === 'draft'
+              ? '#f59e0b'
+              : '#6366f1',
+        borderColor: isRoot ? '#e0f2fe' : '#0f172a',
+        borderWidth: isRoot ? 3 : 2,
+        shadowBlur: isRoot ? 14 : 6,
+        shadowColor: isRoot ? 'rgba(56, 189, 248, 0.55)' : 'rgba(15, 23, 42, 0.35)'
+      }
+    }
+  })
 
   const nodeIds = new Set(nodes.map(n => n.id))
   const links = filteredEdges.value
@@ -82,23 +135,49 @@ const graphOption = computed<echarts.EChartsOption>(() => {
       source: e.from,
       target: e.to,
       lineStyle: {
-        color: e.relation === 'VERIFIED_BY' ? '#10b981' : e.relation === 'IMPACTS' ? '#f59e0b' : '#6366f1',
+        color: e.relation === 'VERIFIED_BY' ? '#10b981' : e.relation === 'IMPACTS' ? '#f59e0b' : '#818cf8',
         width: 1.8,
-        curveness: 0.16
+        opacity: 0.78,
+        curveness: graphLayout.value === 'circular' ? 0.24 : 0.16
       },
-      label: { show: true, formatter: e.relation, fontSize: 9, color: '#94a3b8' }
+      label: {
+        show: showEdgeLabels.value,
+        formatter: e.relation,
+        fontSize: 9,
+        color: '#94a3b8'
+      }
     }))
 
   return {
-    tooltip: { trigger: 'item' },
+    tooltip: {
+      trigger: 'item',
+      backgroundColor: 'rgba(15, 23, 42, 0.94)',
+      borderColor: 'rgba(148, 163, 184, 0.25)',
+      textStyle: { color: '#f8fafc', fontSize: 12 }
+    },
     series: [
       {
         type: 'graph',
-        layout: 'force',
+        layout: graphLayout.value,
         roam: true,
         draggable: true,
-        force: { repulsion: 260, edgeLength: [80, 140] },
-        label: { show: true, position: 'bottom', color: '#cbd5e1', fontSize: 10 },
+        circular: { rotateLabel: true },
+        force: {
+          repulsion: 320,
+          gravity: 0.08,
+          edgeLength: [90, 160]
+        },
+        emphasis: {
+          focus: 'adjacency',
+          lineStyle: { width: 3.2, opacity: 1 }
+        },
+        label: {
+          show: true,
+          position: 'bottom',
+          color: '#cbd5e1',
+          fontSize: 10,
+          distance: 4
+        },
         edgeSymbol: ['none', 'arrow'],
         edgeSymbolSize: [4, 8],
         data: nodes,
@@ -110,10 +189,10 @@ const graphOption = computed<echarts.EChartsOption>(() => {
 </script>
 
 <template>
-  <div>
+  <div class="space-y-5">
     <UiPageHeader
-      title="Busca Híbrida & Grafo de Conhecimento"
-      description="Combina busca vetorial HNSW, BM25 e navegação de relações com zoom e arrasto"
+      title="Busca Híbrida &amp; Grafo de Conhecimento"
+      description="Combina busca vetorial HNSW, BM25 e navegação de relações com zoom, arrasto e foco por adjacência"
       icon="i-lucide-network"
     >
       <template #actions>
@@ -122,14 +201,20 @@ const graphOption = computed<echarts.EChartsOption>(() => {
           placeholder="Buscar regras, ADRs, código..."
           icon="i-lucide-search"
           size="sm"
-          class="w-64"
+          class="w-60"
           @keyup.enter="runSearchAndGraph"
         />
         <USelect
-          v-model="relationFilter"
-          :items="['all', 'VERIFIED_BY', 'IMPACTS', 'DEPENDS_ON']"
+          v-model="typeFilter"
+          :items="typeOptions"
           size="sm"
           class="w-36"
+        />
+        <USelect
+          v-model="relationFilter"
+          :items="relationOptions"
+          size="sm"
+          class="w-40"
         />
         <UButton size="sm" :loading="loading" icon="i-lucide-refresh-cw" @click="runSearchAndGraph">
           Atualizar
@@ -137,95 +222,132 @@ const graphOption = computed<echarts.EChartsOption>(() => {
       </template>
     </UiPageHeader>
 
-    <div class="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-6">
-      <UiStatCard label="Nós no Grafo" :value="graphNodes.length" icon="i-lucide-circle-dot" tone="primary" />
+    <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
+      <UiStatCard label="Nós Visíveis" :value="filteredNodes.length" icon="i-lucide-circle-dot" tone="primary" />
       <UiStatCard label="Arestas Filtradas" :value="filteredEdges.length" icon="i-lucide-git-branch" tone="info" />
-      <UiStatCard label="Resultados da Busca" :value="searchHits.length" icon="i-lucide-search-check" tone="success" />
+      <UiStatCard label="Resultados da Busca" :value="filteredSearchHits.length" icon="i-lucide-search-check" tone="success" />
     </div>
 
-    <div class="space-y-6">
-      <UCard>
-        <template #header>
-          <div class="flex flex-wrap items-center justify-between gap-2">
-            <div class="flex items-center gap-2">
-              <span class="font-semibold text-sm">Topologia de Conhecimento</span>
-              <UBadge v-if="rootId" color="info" variant="subtle" size="xs" class="font-mono">
-                Foco: {{ rootId }}
-              </UBadge>
-            </div>
-            <div class="flex items-center gap-3 text-[11px] text-muted">
+    <!-- Topologia -->
+    <UCard>
+      <template #header>
+        <div class="flex flex-col lg:flex-row lg:items-center justify-between gap-3">
+          <div class="flex flex-wrap items-center gap-2">
+            <span class="font-semibold text-sm">Topologia de Conhecimento</span>
+            <UBadge v-if="rootId" color="info" variant="subtle" size="xs" class="font-mono">
+              Foco: {{ rootId }}
+            </UBadge>
+            <div class="hidden sm:flex items-center gap-2.5 text-[11px] text-muted ml-2">
               <span class="inline-flex items-center gap-1"><span class="w-2 h-2 rounded-full bg-emerald-400" /> Aprovado</span>
               <span class="inline-flex items-center gap-1"><span class="w-2 h-2 rounded-full bg-amber-400" /> Rascunho</span>
+              <span class="inline-flex items-center gap-1"><span class="w-2 h-2 rounded-full bg-indigo-400" /> Outro</span>
               <span class="inline-flex items-center gap-1"><span class="w-2 h-2 rounded-full bg-sky-400" /> Foco</span>
-              <UButton v-if="rootId" size="xs" variant="ghost" @click="rootId = ''; runSearchAndGraph()">Limpar foco</UButton>
             </div>
           </div>
-        </template>
 
-        <UiEmptyState
-          v-if="graphNodes.length === 0"
-          icon="i-lucide-network"
-          title="Nenhum nó indexado no grafo"
-          description="Ingira regras de negócio, ADRs ou código-fonte neste projeto para visualizar a topologia."
-        />
-        <EChartBox v-else :option="graphOption" height="380px" />
-      </UCard>
+          <div class="flex flex-wrap items-center gap-2">
+            <USelect
+              v-model="rootId"
+              :items="nodeFocusItems"
+              size="xs"
+              class="w-48 font-mono"
+              @update:model-value="runSearchAndGraph"
+            />
+            <UiSegmentedTabs
+              v-model="graphLayout"
+              :items="[
+                { label: 'Orgânico', value: 'force', icon: 'i-lucide-sparkles' },
+                { label: 'Circular', value: 'circular', icon: 'i-lucide-circle-dashed' }
+              ]"
+            />
+            <UButton
+              size="xs"
+              :variant="showEdgeLabels ? 'soft' : 'outline'"
+              :color="showEdgeLabels ? 'primary' : 'neutral'"
+              icon="i-lucide-tag"
+              @click="showEdgeLabels = !showEdgeLabels"
+            >
+              Rótulos
+            </UButton>
+            <UButton
+              size="xs"
+              variant="ghost"
+              color="neutral"
+              :icon="expandedGraph ? 'i-lucide-minimize-2' : 'i-lucide-maximize-2'"
+              :title="expandedGraph ? 'Reduzir altura' : 'Expandir grafo'"
+              @click="expandedGraph = !expandedGraph"
+            />
+          </div>
+        </div>
+      </template>
 
-      <UCard>
-        <template #header>
-          <div class="flex items-center justify-between">
+      <UiEmptyState
+        v-if="filteredNodes.length === 0"
+        icon="i-lucide-network"
+        title="Nenhum nó indexado no grafo"
+        description="Ingira regras de negócio, ADRs ou código-fonte neste projeto para visualizar a topologia."
+      />
+      <EChartBox v-else :option="graphOption" :height="expandedGraph ? '540px' : '380px'" />
+    </UCard>
+
+    <!-- Resultados da Busca Híbrida -->
+    <UCard>
+      <template #header>
+        <div class="flex items-center justify-between">
+          <div>
             <h3 class="font-semibold text-sm">Resultados da Busca Híbrida</h3>
-            <UBadge color="neutral" variant="subtle" size="xs">{{ searchHits.length }} itens</UBadge>
+            <p class="text-xs text-muted">Passe o mouse nos nós do grafo para destacar conexões ou clique em Focar.</p>
+          </div>
+          <UBadge color="neutral" variant="subtle" size="xs">{{ filteredSearchHits.length }} itens</UBadge>
+        </div>
+      </template>
+
+      <UiEmptyState
+        v-if="filteredSearchHits.length === 0"
+        compact
+        icon="i-lucide-search-x"
+        title="Nenhum resultado encontrado"
+        description="Tente outro termo ou deixe a busca em branco para listar os itens recentes."
+      />
+      <UTable
+        v-else
+        :data="filteredSearchHits"
+        :columns="[
+          { accessorKey: 'id', header: 'ID' },
+          { accessorKey: 'title', header: 'Título' },
+          { accessorKey: 'type', header: 'Tipo' },
+          { accessorKey: 'status', header: 'Status' },
+          { accessorKey: 'score', header: 'Relevância' },
+          { id: 'actions', header: '' }
+        ]"
+      >
+        <template #id-cell="{ row }">
+          <span class="font-mono text-xs font-semibold text-highlighted">{{ row.original.id }}</span>
+        </template>
+        <template #type-cell="{ row }">
+          <UBadge color="neutral" variant="outline" size="xs">{{ row.original.type }}</UBadge>
+        </template>
+        <template #status-cell="{ row }">
+          <UBadge :color="row.original.status === 'approved' ? 'success' : 'warning'" variant="subtle" size="xs">
+            {{ row.original.status === 'approved' ? 'Aprovado' : row.original.status }}
+          </UBadge>
+        </template>
+        <template #score-cell="{ row }">
+          <span class="font-mono text-xs text-primary">
+            {{ row.original.score !== undefined ? `${(row.original.score * 100).toFixed(1)}%` : '—' }}
+          </span>
+        </template>
+        <template #actions-cell="{ row }">
+          <div class="flex justify-end gap-1">
+            <UButton size="xs" variant="ghost" icon="i-lucide-crosshair" @click="rootId = row.original.id; runSearchAndGraph()">
+              Focar
+            </UButton>
+            <UButton size="xs" variant="soft" icon="i-lucide-eye" @click="emit('inspect', row.original)">
+              Ler
+            </UButton>
           </div>
         </template>
-
-        <UiEmptyState
-          v-if="searchHits.length === 0"
-          compact
-          icon="i-lucide-search-x"
-          title="Nenhum resultado encontrado"
-          description="Tente outro termo ou deixe a busca em branco para listar os itens recentes."
-        />
-        <UTable
-          v-else
-          :data="searchHits"
-          :columns="[
-            { accessorKey: 'id', header: 'ID' },
-            { accessorKey: 'title', header: 'Título' },
-            { accessorKey: 'type', header: 'Tipo' },
-            { accessorKey: 'status', header: 'Status' },
-            { accessorKey: 'score', header: 'Score' },
-            { id: 'actions', header: '' }
-          ]"
-        >
-          <template #id-cell="{ row }">
-            <span class="font-mono text-xs font-semibold">{{ row.original.id }}</span>
-          </template>
-          <template #type-cell="{ row }">
-            <UBadge color="neutral" variant="outline" size="xs">{{ row.original.type }}</UBadge>
-          </template>
-          <template #status-cell="{ row }">
-            <UBadge :color="row.original.status === 'approved' ? 'success' : 'warning'" variant="subtle" size="xs">
-              {{ row.original.status }}
-            </UBadge>
-          </template>
-          <template #score-cell="{ row }">
-            <span class="font-mono text-xs text-muted">
-              {{ row.original.score !== undefined ? row.original.score.toFixed(3) : '—' }}
-            </span>
-          </template>
-          <template #actions-cell="{ row }">
-            <div class="flex justify-end gap-1">
-              <UButton size="xs" variant="ghost" icon="i-lucide-crosshair" @click="rootId = row.original.id; runSearchAndGraph()">
-                Focar
-              </UButton>
-              <UButton size="xs" variant="soft" icon="i-lucide-eye" @click="emit('inspect', row.original)">
-                Ler
-              </UButton>
-            </div>
-          </template>
-        </UTable>
-      </UCard>
-    </div>
+      </UTable>
+    </UCard>
   </div>
 </template>

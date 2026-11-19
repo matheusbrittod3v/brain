@@ -1,0 +1,321 @@
+import { createHash, randomUUID } from "node:crypto";
+import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { z } from "zod";
+import { assertPolicyAccess, assertProjectAccess, type AuthContext } from "@brain/auth";
+import { BrainError, type KnowledgeItem } from "@brain/core";
+import { scanForSecrets } from "@brain/ingestion";
+import { parseKnowledgeFile } from "@brain/knowledge";
+import { computeProjectHealthReport } from "@brain/knowledge-health";
+import { planAutonomousTasks } from "@brain/task-engine";
+import { TemporalKnowledgeEngine } from "@brain/temporal-knowledge";
+import { suggestLivingDocUpdates } from "@brain/workflow-orchestrator";
+import { describeMcpTool, type McpConnectionProfileName } from "../../connection-profile.js";
+import { okJson } from "../../helpers.js";
+import type { BrainRuntime } from "../../runtime.js";
+import { collectVerifiedByEdges } from "../../subagent-tools.js";
+
+export function registerExtendedIngestionTools(
+  server: McpServer,
+  runtime: BrainRuntime,
+  ctx: AuthContext,
+  auditPolicyId: string,
+  profile: McpConnectionProfileName
+): void {
+  server.tool(
+    "brain_ingest_knowledge",
+    describeMcpTool(profile, "Ingere arquivo ou snippet de conhecimento (Markdown/YAML) com scan de segredos e persistência SQL/retrieval."),
+    {
+      projectId: z.string().min(1),
+      filePath: z.string().min(1),
+      content: z.string().min(1),
+      accessPolicyId: z.string().optional()
+    },
+    async ({ projectId, filePath, content, accessPolicyId }) => {
+      assertProjectAccess(ctx, projectId);
+      const scan = scanForSecrets(content, { useGitleaks: process.env.BRAIN_DISABLE_GITLEAKS !== "1" });
+      if (!scan.clean) {
+        throw new BrainError("BRAIN_ERR_POLICY_DENIED", `Ingestão bloqueada por segredos detectados: ${scan.findings.join(", ")}`, 400);
+      }
+      const parsed = parseKnowledgeFile({
+        tenantId: ctx.tenantId,
+        projectId,
+        filePath,
+        rawContent: content
+      });
+      const resolvedPolicy = accessPolicyId ?? parsed.accessPolicyId ?? auditPolicyId;
+      assertPolicyAccess(ctx, resolvedPolicy);
+      const item: KnowledgeItem = { ...parsed, accessPolicyId: resolvedPolicy };
+      if (runtime.knowledge?.upsertItem) {
+        await runtime.knowledge.upsertItem(ctx, item);
+      }
+      if (runtime.retrieval.upsertItem) {
+        await runtime.retrieval.upsertItem(item);
+      }
+      const isTestItem = item.type === "test" || item.id.startsWith("TEST-") || /\.(?:spec|test)\.[cm]?[jt]sx?$|_test\.py$/i.test(item.sourceUri);
+      let relationsCreated = 0;
+      for (const targetId of item.relatedIds ?? []) {
+        if (!targetId || targetId === item.id) continue;
+        const targetIsTest = targetId.startsWith("TEST-");
+        const edge = isTestItem
+          ? {
+              tenantId: ctx.tenantId,
+              fromProjectId: projectId,
+              toProjectId: projectId,
+              fromItemId: targetId,
+              toItemId: item.id,
+              fromPolicyId: resolvedPolicy,
+              toPolicyId: resolvedPolicy,
+              relationType: "VERIFIED_BY" as const,
+              isInferred: false as const,
+              confidence: 1.0
+            }
+          : {
+              tenantId: ctx.tenantId,
+              fromProjectId: projectId,
+              toProjectId: projectId,
+              fromItemId: item.id,
+              toItemId: targetId,
+              fromPolicyId: resolvedPolicy,
+              toPolicyId: resolvedPolicy,
+              relationType: targetIsTest ? ("VERIFIED_BY" as const) : ("DEPENDS_ON" as const),
+              isInferred: false as const,
+              confidence: 1.0
+            };
+        await runtime.graph.addEdge(edge, ctx);
+        relationsCreated += 1;
+      }
+      runtime.retrieval.invalidateCache?.(ctx.tenantId, projectId);
+      await runtime.audit.record({
+        tenantId: ctx.tenantId,
+        projectId,
+        accessPolicyId: resolvedPolicy,
+        actorId: ctx.actorId,
+        actorType: ctx.actorType,
+        action: "create",
+        targetType: "knowledge_item",
+        targetId: item.id,
+        metadata: { filePath, type: item.type, relationsCreated }
+      });
+      return okJson({ ingested: true, relationsCreated, item: { id: item.id, title: item.title, type: item.type, status: item.status, accessPolicyId: resolvedPolicy } });
+    }
+  );
+
+  server.tool(
+    "brain_ingest_document",
+    describeMcpTool(profile, "Extrai texto de documento (PDF/DOCX/TXT via AI Worker) com scan de segredos e persiste como conhecimento."),
+    {
+      projectId: z.string().min(1),
+      filename: z.string().min(1),
+      contentBase64: z.string().min(1),
+      accessPolicyId: z.string().optional()
+    },
+    async ({ projectId, filename, contentBase64, accessPolicyId }) => {
+      assertProjectAccess(ctx, projectId);
+      const resolvedPolicy = accessPolicyId ?? auditPolicyId;
+      assertPolicyAccess(ctx, resolvedPolicy);
+      const rawBuffer = Buffer.from(contentBase64, "base64");
+      let extractedMarkdown = "";
+      const aiWorkerUrl = process.env.AI_WORKER_URL;
+      if (aiWorkerUrl) {
+        const res = await fetch(`${aiWorkerUrl.replace(/\/$/, "")}/parse-document`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ filename, content_base64: contentBase64 })
+        });
+        if (!res.ok) {
+          throw new BrainError("BRAIN_ERR_CONFLICT", `AI Worker /parse-document retornou HTTP ${res.status}`, 502);
+        }
+        const parsed = (await res.json()) as { markdown?: string };
+        extractedMarkdown = parsed.markdown ?? "";
+      } else if (/\.(md|txt|ya?ml|json)$/i.test(filename)) {
+        extractedMarkdown = rawBuffer.toString("utf8");
+      } else {
+        throw new BrainError("BRAIN_ERR_CONFLICT", "AI_WORKER_URL é necessário para converter documentos binários (PDF/DOCX).", 400);
+      }
+
+      const scan = scanForSecrets(extractedMarkdown, { useGitleaks: process.env.BRAIN_DISABLE_GITLEAKS !== "1" });
+      if (!scan.clean) {
+        throw new BrainError("BRAIN_ERR_POLICY_DENIED", `Documento bloqueado por segredos detectados: ${scan.findings.join(", ")}`, 400);
+      }
+      const now = new Date().toISOString();
+      const id = `DOC-${randomUUID().slice(0, 8)}`;
+      const item: KnowledgeItem = {
+        id,
+        tenantId: ctx.tenantId,
+        projectId,
+        domainId: 2,
+        type: "document",
+        title: filename,
+        content: extractedMarkdown,
+        status: "draft",
+        sourceId: `mcp-doc:${ctx.actorId}`,
+        sourceOrigin: "internal",
+        sourceKind: "agent",
+        sourceVersion: "doc-1",
+        sourceUri: `.brain/documents/${filename}`,
+        version: 1,
+        contentHash: createHash("sha256").update(extractedMarkdown).digest("hex"),
+        confidence: 0.9,
+        trustLevel: "self_authored",
+        isInferred: false,
+        tags: ["document-ingest"],
+        relatedIds: [],
+        accessPolicyId: resolvedPolicy,
+        createdAt: now,
+        updatedAt: now
+      };
+      if (runtime.knowledge?.upsertItem) {
+        await runtime.knowledge.upsertItem(ctx, item);
+      }
+      if (runtime.retrieval.upsertItem) {
+        await runtime.retrieval.upsertItem(item);
+      }
+      runtime.retrieval.invalidateCache?.(ctx.tenantId, projectId);
+      await runtime.audit.record({
+        tenantId: ctx.tenantId,
+        projectId,
+        accessPolicyId: resolvedPolicy,
+        actorId: ctx.actorId,
+        actorType: ctx.actorType,
+        action: "create",
+        targetType: "document_ingest",
+        targetId: id,
+        metadata: { filename }
+      });
+      return okJson({ ingested: true, itemId: id, filename, chars: extractedMarkdown.length });
+    }
+  );
+
+  server.tool(
+    "brain_knowledge_diff",
+    describeMcpTool(profile, "Compara duas versões (fromVersion vs toVersion) de um item de conhecimento."),
+    {
+      projectId: z.string().min(1),
+      itemId: z.string().min(1),
+      fromVersion: z.number().int().positive(),
+      toVersion: z.number().int().positive()
+    },
+    async ({ projectId, itemId, fromVersion, toVersion }) => {
+      assertProjectAccess(ctx, projectId);
+      if (!runtime.knowledge?.listVersions) {
+        throw new BrainError("BRAIN_ERR_STORAGE_UNAVAILABLE", "Histórico de versões indisponível neste runtime.", 503);
+      }
+      const versions = await runtime.knowledge.listVersions(ctx, projectId, itemId);
+      const before = versions.find((v) => v.version === fromVersion);
+      const after = versions.find((v) => v.version === toVersion);
+      if (!before || !after) {
+        throw new BrainError("BRAIN_ERR_NOT_FOUND", `Versão ${fromVersion} ou ${toVersion} não encontrada para '${itemId}'.`, 404);
+      }
+      const beforeLines = before.content.split(/\r?\n/);
+      const afterLines = after.content.split(/\r?\n/);
+      const beforeSet = new Set(beforeLines);
+      const afterSet = new Set(afterLines);
+      return okJson({
+        projectId,
+        itemId,
+        fromVersion,
+        toVersion,
+        titleChanged: before.title !== after.title,
+        statusChanged: before.status !== after.status,
+        addedLines: afterLines.filter((l) => !beforeSet.has(l)),
+        removedLines: beforeLines.filter((l) => !afterSet.has(l))
+      });
+    }
+  );
+
+  server.tool(
+    "brain_temporal_query",
+    describeMcpTool(profile, "Consulta o estado do conhecimento válido em uma data ISO-8601 UTC (Project Time Machine)."),
+    {
+      projectId: z.string().min(1),
+      atDate: z.string().min(1),
+      query: z.string().optional(),
+      limit: z.number().int().min(1).max(100).optional()
+    },
+    async ({ projectId, atDate, query, limit }) => {
+      assertProjectAccess(ctx, projectId);
+      const hits = await runtime.retrieval.search(ctx, {
+        projectId,
+        query: query ?? "",
+        atDate,
+        limit: limit ?? 25
+      });
+      const temporal = new TemporalKnowledgeEngine();
+      for (const hit of hits) temporal.recordVersion(hit.item);
+      const snapshot = temporal.queryAt(ctx, { projectId, atTimestamp: atDate });
+      return okJson({
+        projectId,
+        atDate,
+        count: snapshot.length,
+        items: snapshot.map((item) => ({
+          id: item.id,
+          title: item.title,
+          type: item.type,
+          status: item.status,
+          version: item.version,
+          validFrom: item.validFrom ?? item.createdAt,
+          validUntil: item.validUntil
+        }))
+      });
+    }
+  );
+
+  server.tool(
+    "brain_knowledge_health",
+    describeMcpTool(
+      profile,
+      "Retorna relatório estrutural de saúde do projeto (regras sem aresta VERIFIED_BY, itens >90d, conflitos). Nota: este healthScore mede vínculos no grafo; a Matriz Corporativa (Visões Corporativas) exige também execução de teste 'passed' (CI) além da aresta VERIFIED_BY."
+    ),
+    { projectId: z.string().min(1) },
+    async ({ projectId }) => {
+      assertProjectAccess(ctx, projectId);
+      const hits = await runtime.retrieval.search(ctx, { projectId, query: "", limit: 300 });
+      const items = hits.map((h) => h.item);
+      const verifiedEdges = await collectVerifiedByEdges(runtime.graph, ctx, projectId, items);
+      const report = computeProjectHealthReport(items, verifiedEdges);
+      return okJson({
+        projectId,
+        totalItems: items.length,
+        report,
+        coverageNote:
+          "healthScore reflete vínculos estruturais VERIFIED_BY no grafo. Para marcar como 'Coberta' na Matriz Corporativa (Visões Corporativas), é necessário também registrar execução de teste com status 'passed' no HEAD da main."
+      });
+    }
+  );
+
+  server.tool(
+    "brain_living_docs_suggest",
+    describeMcpTool(profile, "Sugere quais ADRs, contratos ou docs vivos devem ser revisados dado um conjunto de arquivos alterados."),
+    {
+      projectId: z.string().min(1),
+      changedFiles: z.array(z.string().min(1)).min(1)
+    },
+    async ({ projectId, changedFiles }) => {
+      assertProjectAccess(ctx, projectId);
+      const hits = await runtime.retrieval.search(ctx, { projectId, query: "", limit: 300 });
+      const suggestions = suggestLivingDocUpdates(changedFiles, hits.map((h) => h.item));
+      return okJson({ projectId, changedFiles, suggestions });
+    }
+  );
+
+  server.tool(
+    "brain_plan_tasks",
+    describeMcpTool(profile, "Quebra uma feature ou épico em histórias e tarefas ordenadas por prioridade e dependências."),
+    {
+      projectId: z.string().min(1),
+      epicDescription: z.string().min(1),
+      targetFiles: z.array(z.string()).optional(),
+      impactedRuleIds: z.array(z.string()).optional()
+    },
+    async ({ projectId, epicDescription, targetFiles, impactedRuleIds }) => {
+      assertProjectAccess(ctx, projectId);
+      const hits = await runtime.retrieval.search(ctx, { projectId, query: "", domains: [2], limit: 200 });
+      const tasks = planAutonomousTasks(epicDescription, hits.map((h) => h.item), {
+        targetFiles,
+        impactedRuleIds
+      });
+      return okJson({ projectId, count: tasks.length, tasks });
+    }
+  );
+}
+

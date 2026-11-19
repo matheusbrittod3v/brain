@@ -1,0 +1,523 @@
+import { fileURLToPath } from "node:url";
+import ts from "typescript";
+import { Parser, Language } from "web-tree-sitter";
+
+export interface CodeAnchor {
+  kind: "brain-rule" | "brain-adr";
+  targetId: string;
+  relationType: "GOVERNED_BY" | "DECIDED_BY" | "VERIFIED_BY";
+  filePath: string;
+  line: number;
+  isInferred: false;
+  confidence: 1.0;
+}
+
+const ANCHOR_REGEX = /@(brain-rule|brain-adr)\s+([A-Za-z0-9_-]+)/g;
+
+export function extractCodeAnchors(filePath: string, sourceCode: string): CodeAnchor[] {
+  const posixPath = filePath.replace(/\\/g, "/");
+  const isTestFile = /\.(spec|test)\.[cm]?[jt]sx?$|_test\.py$/.test(posixPath);
+  const lines = sourceCode.split(/\r?\n/);
+  const anchors: CodeAnchor[] = [];
+
+  lines.forEach((lineText, idx) => {
+    let match: RegExpExecArray | null;
+    ANCHOR_REGEX.lastIndex = 0;
+    while ((match = ANCHOR_REGEX.exec(lineText)) !== null) {
+      const kind = match[1] as "brain-rule" | "brain-adr";
+      const targetId = match[2];
+      const relationType =
+        kind === "brain-adr"
+          ? "DECIDED_BY"
+          : isTestFile
+            ? "VERIFIED_BY"
+            : "GOVERNED_BY";
+
+      anchors.push({
+        kind,
+        targetId,
+        relationType,
+        filePath: posixPath,
+        line: idx + 1,
+        isInferred: false,
+        confidence: 1.0
+      });
+    }
+  });
+
+  return anchors;
+}
+
+export interface CodeSymbol {
+  name: string;
+  kind: "function" | "method" | "class" | "interface" | "route";
+  filePath: string;
+  line: number;
+  endLine?: number;
+}
+
+export interface ExtractCodeSymbolsOptions {
+  treeSitterParser?: Parser;
+}
+
+interface PatternSpec {
+  kind: CodeSymbol["kind"];
+  regex: RegExp;
+}
+
+const ROUTE_REGEX = /\.(?:get|post|put|patch|delete)\(\s*["'`]([^"'`]+)["'`]/i;
+const PYTHON_ROUTE_REGEX = /@(?:app|router|bp|blueprint)\.(?:get|post|put|patch|delete|route)\(\s*["'`]([^"'`]+)["'`]/i;
+const GO_ROUTE_REGEX = /\.(?:GET|POST|PUT|PATCH|DELETE|HandleFunc|Handle|Get|Post|Put|Patch|Delete)\(\s*["'`]([^"'`]+)["'`]/;
+const JAVA_ROUTE_REGEX = /@(?:Get|Post|Put|Patch|Delete|Request)Mapping\(\s*(?:value\s*=\s*)?["']([^"']+)["']/;
+const RUST_ROUTE_REGEX = /#\[(?:get|post|put|patch|delete)\(\s*["']([^"']+)["']\s*\)\]|\.route\(\s*["']([^"']+)["']/;
+
+const GENERIC_PATTERNS: PatternSpec[] = [
+  { kind: "function", regex: /^\s*(?:export\s+)?(?:async\s+)?function\s+([A-Za-z0-9_]+)/ },
+  { kind: "function", regex: /^\s*(?:async\s+)?def\s+([A-Za-z0-9_]+)\s*\(/ },
+  { kind: "function", regex: /^\s*func\s+([A-Za-z0-9_]+)\s*\(/ },
+  { kind: "method", regex: /^\s*func\s+\([^)]+\)\s+([A-Za-z0-9_]+)\s*\(/ },
+  { kind: "class", regex: /^\s*(?:export\s+)?class\s+([A-Za-z0-9_]+)/ },
+  { kind: "interface", regex: /^\s*(?:export\s+)?interface\s+([A-Za-z0-9_]+)/ },
+  { kind: "route", regex: ROUTE_REGEX }
+];
+
+function computeBraceBlockEndLine(lines: string[], startIdx: number): number {
+  let depth = 0;
+  let seenBrace = false;
+  for (let i = startIdx; i < lines.length; i++) {
+    const line = lines[i]!;
+    for (const ch of line) {
+      if (ch === "{") {
+        depth++;
+        seenBrace = true;
+      } else if (ch === "}") {
+        depth--;
+        if (seenBrace && depth <= 0) {
+          return i + 1;
+        }
+      }
+    }
+  }
+  return startIdx + 1;
+}
+
+function computeIndentBlockEndLine(lines: string[], startIdx: number): number {
+  const baseIndent = lines[startIdx]!.search(/\S/);
+  let endIdx = startIdx;
+  for (let i = startIdx + 1; i < lines.length; i++) {
+    const line = lines[i]!;
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith("#")) continue;
+    const indent = line.search(/\S/);
+    if (indent <= baseIndent) {
+      break;
+    }
+    endIdx = i;
+  }
+  return endIdx + 1;
+}
+
+function extractTreeSitterSymbols(
+  posixPath: string,
+  sourceCode: string,
+  parser: Parser
+): CodeSymbol[] {
+  const tree = parser.parse(sourceCode);
+  if (!tree) throw new Error("Tree-sitter não retornou uma árvore de sintaxe.");
+  const symbols: CodeSymbol[] = [];
+
+  const visit = (node: { type: string; startPosition: { row: number }; endPosition: { row: number }; childForFieldName(name: string): { text: string } | null; children: unknown[] }) => {
+    const type = node.type;
+    let kind: CodeSymbol["kind"] | undefined;
+    if (type === "function_definition" || type === "function_declaration" || type === "function_item") {
+      kind = "function";
+    } else if (type === "method_declaration" || type === "method_definition") {
+      kind = "method";
+    } else if (type === "class_definition" || type === "class_declaration" || type === "struct_item" || type === "enum_item") {
+      kind = "class";
+    } else if (type === "interface_declaration" || type === "trait_item") {
+      kind = "interface";
+    }
+
+    if (kind) {
+      const nameNode = node.childForFieldName("name");
+      if (nameNode?.text) {
+        symbols.push({
+          name: nameNode.text,
+          kind,
+          filePath: posixPath,
+          line: node.startPosition.row + 1,
+          endLine: node.endPosition.row + 1
+        });
+      }
+    }
+
+    for (const child of node.children) {
+      visit(child as typeof node);
+    }
+  };
+
+  try {
+    if (tree.rootNode.hasError) throw new Error("Tree-sitter encontrou erro de sintaxe.");
+    visit(tree.rootNode as unknown as Parameters<typeof visit>[0]);
+    return symbols;
+  } finally {
+    tree.delete();
+  }
+}
+
+function extractPythonSymbols(posixPath: string, lines: string[]): CodeSymbol[] {
+  const symbols: CodeSymbol[] = [];
+  for (let idx = 0; idx < lines.length; idx++) {
+    const lineText = lines[idx]!;
+    const routeMatch = PYTHON_ROUTE_REGEX.exec(lineText);
+    if (routeMatch?.[1]) {
+      symbols.push({ name: routeMatch[1], kind: "route", filePath: posixPath, line: idx + 1, endLine: idx + 1 });
+      continue;
+    }
+    const classMatch = /^\s*class\s+([A-Za-z_][A-Za-z0-9_]*)/.exec(lineText);
+    if (classMatch?.[1]) {
+      symbols.push({
+        name: classMatch[1],
+        kind: "class",
+        filePath: posixPath,
+        line: idx + 1,
+        endLine: computeIndentBlockEndLine(lines, idx)
+      });
+      continue;
+    }
+    const defMatch = /^(\s*)(?:async\s+)?def\s+([A-Za-z_][A-Za-z0-9_]*)\s*\(/.exec(lineText);
+    if (defMatch?.[2]) {
+      const indent = defMatch[1]?.length ?? 0;
+      symbols.push({
+        name: defMatch[2],
+        kind: indent > 0 ? "method" : "function",
+        filePath: posixPath,
+        line: idx + 1,
+        endLine: computeIndentBlockEndLine(lines, idx)
+      });
+    }
+  }
+  return symbols;
+}
+
+function extractGoSymbols(posixPath: string, lines: string[]): CodeSymbol[] {
+  const symbols: CodeSymbol[] = [];
+  for (let idx = 0; idx < lines.length; idx++) {
+    const lineText = lines[idx]!;
+    const routeMatch = GO_ROUTE_REGEX.exec(lineText);
+    if (routeMatch?.[1]) {
+      symbols.push({ name: routeMatch[1], kind: "route", filePath: posixPath, line: idx + 1, endLine: idx + 1 });
+    }
+    const methodMatch = /^\s*func\s+\([^)]+\)\s+([A-Za-z_][A-Za-z0-9_]*)\s*\(/.exec(lineText);
+    if (methodMatch?.[1]) {
+      symbols.push({
+        name: methodMatch[1],
+        kind: "method",
+        filePath: posixPath,
+        line: idx + 1,
+        endLine: computeBraceBlockEndLine(lines, idx)
+      });
+      continue;
+    }
+    const funcMatch = /^\s*func\s+([A-Za-z_][A-Za-z0-9_]*)\s*\(/.exec(lineText);
+    if (funcMatch?.[1]) {
+      symbols.push({
+        name: funcMatch[1],
+        kind: "function",
+        filePath: posixPath,
+        line: idx + 1,
+        endLine: computeBraceBlockEndLine(lines, idx)
+      });
+      continue;
+    }
+    const ifaceMatch = /^\s*type\s+([A-Za-z_][A-Za-z0-9_]*)\s+interface\b/.exec(lineText);
+    if (ifaceMatch?.[1]) {
+      symbols.push({
+        name: ifaceMatch[1],
+        kind: "interface",
+        filePath: posixPath,
+        line: idx + 1,
+        endLine: computeBraceBlockEndLine(lines, idx)
+      });
+      continue;
+    }
+    const structMatch = /^\s*type\s+([A-Za-z_][A-Za-z0-9_]*)\s+struct\b/.exec(lineText);
+    if (structMatch?.[1]) {
+      symbols.push({
+        name: structMatch[1],
+        kind: "class",
+        filePath: posixPath,
+        line: idx + 1,
+        endLine: computeBraceBlockEndLine(lines, idx)
+      });
+    }
+  }
+  return symbols;
+}
+
+function extractJavaSymbols(posixPath: string, lines: string[]): CodeSymbol[] {
+  const symbols: CodeSymbol[] = [];
+  const JAVA_CONTROL_KEYWORDS = new Set(["if", "for", "while", "switch", "catch", "return", "new", "synchronized"]);
+  for (let idx = 0; idx < lines.length; idx++) {
+    const lineText = lines[idx]!;
+    const routeMatch = JAVA_ROUTE_REGEX.exec(lineText);
+    if (routeMatch?.[1]) {
+      symbols.push({ name: routeMatch[1], kind: "route", filePath: posixPath, line: idx + 1, endLine: idx + 1 });
+      continue;
+    }
+    const ifaceMatch = /^\s*(?:public|protected|private|static|abstract|\s)*interface\s+([A-Za-z_][A-Za-z0-9_]*)/.exec(lineText);
+    if (ifaceMatch?.[1]) {
+      symbols.push({
+        name: ifaceMatch[1],
+        kind: "interface",
+        filePath: posixPath,
+        line: idx + 1,
+        endLine: computeBraceBlockEndLine(lines, idx)
+      });
+      continue;
+    }
+    const classMatch = /^\s*(?:public|protected|private|static|final|abstract|\s)*(?:class|enum|record)\s+([A-Za-z_][A-Za-z0-9_]*)/.exec(lineText);
+    if (classMatch?.[1]) {
+      symbols.push({
+        name: classMatch[1],
+        kind: "class",
+        filePath: posixPath,
+        line: idx + 1,
+        endLine: computeBraceBlockEndLine(lines, idx)
+      });
+      continue;
+    }
+    const methodMatch = /^\s*(?:public|protected|private|static|final|synchronized|abstract|default|\s)+[\w<>[\], ?]+\s+([A-Za-z_][A-Za-z0-9_]*)\s*\([^;]*$/.exec(lineText);
+    if (methodMatch?.[1] && !JAVA_CONTROL_KEYWORDS.has(methodMatch[1])) {
+      symbols.push({
+        name: methodMatch[1],
+        kind: "method",
+        filePath: posixPath,
+        line: idx + 1,
+        endLine: computeBraceBlockEndLine(lines, idx)
+      });
+    }
+  }
+  return symbols;
+}
+
+function extractRustSymbols(posixPath: string, lines: string[]): CodeSymbol[] {
+  const symbols: CodeSymbol[] = [];
+  let implDepth = 0;
+  let inImpl = false;
+
+  for (let idx = 0; idx < lines.length; idx++) {
+    const lineText = lines[idx]!;
+    if (/^\s*impl(?:<[^>]+>)?\s+/.test(lineText)) {
+      inImpl = true;
+    }
+    const routeMatch = RUST_ROUTE_REGEX.exec(lineText);
+    if (routeMatch) {
+      const route = routeMatch[1] ?? routeMatch[2];
+      if (route) {
+        symbols.push({ name: route, kind: "route", filePath: posixPath, line: idx + 1, endLine: idx + 1 });
+      }
+    }
+    const traitMatch = /^\s*(?:pub(?:\([^)]+\))?\s+)?trait\s+([A-Za-z_][A-Za-z0-9_]*)/.exec(lineText);
+    if (traitMatch?.[1]) {
+      symbols.push({
+        name: traitMatch[1],
+        kind: "interface",
+        filePath: posixPath,
+        line: idx + 1,
+        endLine: computeBraceBlockEndLine(lines, idx)
+      });
+    } else {
+      const structMatch = /^\s*(?:pub(?:\([^)]+\))?\s+)?(?:struct|enum)\s+([A-Za-z_][A-Za-z0-9_]*)/.exec(lineText);
+      if (structMatch?.[1]) {
+        symbols.push({
+          name: structMatch[1],
+          kind: "class",
+          filePath: posixPath,
+          line: idx + 1,
+          endLine: computeBraceBlockEndLine(lines, idx)
+        });
+      } else {
+        const fnMatch = /^\s*(?:pub(?:\([^)]+\))?\s+)?(?:async\s+)?fn\s+([A-Za-z_][A-Za-z0-9_]*)\s*[<(]/.exec(lineText);
+        if (fnMatch?.[1]) {
+          symbols.push({
+            name: fnMatch[1],
+            kind: inImpl && implDepth > 0 ? "method" : "function",
+            filePath: posixPath,
+            line: idx + 1,
+            endLine: computeBraceBlockEndLine(lines, idx)
+          });
+        }
+      }
+    }
+
+    if (inImpl) {
+      for (const ch of lineText) {
+        if (ch === "{") implDepth++;
+        else if (ch === "}") {
+          implDepth--;
+          if (implDepth <= 0) {
+            inImpl = false;
+            implDepth = 0;
+          }
+        }
+      }
+    }
+  }
+  return symbols;
+}
+
+export function extractCodeSymbols(
+  filePath: string,
+  sourceCode: string,
+  options?: ExtractCodeSymbolsOptions
+): CodeSymbol[] {
+  const posixPath = filePath.replace(/\\/g, "/");
+  if (options?.treeSitterParser) {
+    const symbols = extractTreeSitterSymbols(posixPath, sourceCode, options.treeSitterParser);
+    const routes = extractCodeSymbols(posixPath, sourceCode).filter((symbol) => symbol.kind === "route");
+    return [...symbols, ...routes];
+  }
+  if (/\.[cm]?[jt]sx?$/.test(posixPath)) {
+    return extractTsAstSymbols(posixPath, sourceCode);
+  }
+  const lines = sourceCode.split(/\r?\n/);
+  if (/\.py$/.test(posixPath)) {
+    return extractPythonSymbols(posixPath, lines);
+  }
+  if (/\.go$/.test(posixPath)) {
+    return extractGoSymbols(posixPath, lines);
+  }
+  if (/\.java$/.test(posixPath)) {
+    return extractJavaSymbols(posixPath, lines);
+  }
+  if (/\.rs$/.test(posixPath)) {
+    return extractRustSymbols(posixPath, lines);
+  }
+
+  const symbols: CodeSymbol[] = [];
+  lines.forEach((lineText, idx) => {
+    for (const pat of GENERIC_PATTERNS) {
+      const m = pat.regex.exec(lineText);
+      if (m?.[1]) {
+        symbols.push({ name: m[1], kind: pat.kind, filePath: posixPath, line: idx + 1 });
+      }
+    }
+  });
+
+  return symbols;
+}
+
+export function extractTsAstSymbols(filePath: string, sourceCode: string): CodeSymbol[] {
+  const posixPath = filePath.replace(/\\/g, "/");
+  const sf = ts.createSourceFile(posixPath, sourceCode, ts.ScriptTarget.Latest, true);
+  const symbols: CodeSymbol[] = [];
+
+  const addSymbol = (name: string, kind: CodeSymbol["kind"], node: ts.Node) => {
+    const { line } = sf.getLineAndCharacterOfPosition(node.getStart(sf));
+    const { line: endLine } = sf.getLineAndCharacterOfPosition(node.getEnd());
+    symbols.push({ name, kind, filePath: posixPath, line: line + 1, endLine: endLine + 1 });
+  };
+
+  const visit = (node: ts.Node) => {
+    if (ts.isFunctionDeclaration(node) && node.name) {
+      addSymbol(node.name.text, "function", node);
+    } else if (ts.isMethodDeclaration(node) && ts.isIdentifier(node.name)) {
+      addSymbol(node.name.text, "method", node);
+    } else if (ts.isClassDeclaration(node) && node.name) {
+      addSymbol(node.name.text, "class", node);
+    } else if (ts.isInterfaceDeclaration(node)) {
+      addSymbol(node.name.text, "interface", node);
+    } else if (ts.isCallExpression(node) && ts.isPropertyAccessExpression(node.expression)) {
+      const method = node.expression.name.text;
+      if (["get", "post", "put", "patch", "delete"].includes(method) && node.arguments[0] && ts.isStringLiteral(node.arguments[0])) {
+        addSymbol(node.arguments[0].text, "route", node);
+      }
+    }
+    ts.forEachChild(node, visit);
+  };
+
+  visit(sf);
+  return symbols;
+}
+
+export function extractFileDependencies(filePath: string, sourceCode: string): string[] {
+  const posixPath = filePath.replace(/\\/g, "/");
+  const deps = new Set<string>();
+  if (/\.[cm]?[jt]sx?$/.test(posixPath)) {
+    const sf = ts.createSourceFile(posixPath, sourceCode, ts.ScriptTarget.Latest, true);
+    const visit = (node: ts.Node) => {
+      if (ts.isImportDeclaration(node) && ts.isStringLiteral(node.moduleSpecifier)) {
+        deps.add(node.moduleSpecifier.text);
+      } else if (ts.isExportDeclaration(node) && node.moduleSpecifier && ts.isStringLiteral(node.moduleSpecifier)) {
+        deps.add(node.moduleSpecifier.text);
+      } else if (
+        ts.isCallExpression(node) &&
+        ts.isIdentifier(node.expression) &&
+        node.expression.text === "require" &&
+        node.arguments[0] &&
+        ts.isStringLiteral(node.arguments[0])
+      ) {
+        deps.add(node.arguments[0].text);
+      }
+      ts.forEachChild(node, visit);
+    };
+    visit(sf);
+    return [...deps];
+  }
+
+  if (/\.go$/.test(posixPath)) {
+    const singleImport = /^\s*import\s+(?:[A-Za-z_][A-Za-z0-9_]*|\.|_)?\s*"([^"]+)"/gm;
+    let m: RegExpExecArray | null;
+    while ((m = singleImport.exec(sourceCode)) !== null) {
+      if (m[1]) deps.add(m[1]);
+    }
+    const blockImport = /import\s*\(([\s\S]*?)\)/g;
+    while ((m = blockImport.exec(sourceCode)) !== null) {
+      const block = m[1] ?? "";
+      const lineRegex = /^\s*(?:[A-Za-z_][A-Za-z0-9_]*|\.|_)?\s*"([^"]+)"/gm;
+      let lm: RegExpExecArray | null;
+      while ((lm = lineRegex.exec(block)) !== null) {
+        if (lm[1]) deps.add(lm[1]);
+      }
+    }
+    return [...deps];
+  }
+
+  const pyFrom = /^\s*from\s+([A-Za-z0-9_.]+)\s+import\b/gm;
+  let m: RegExpExecArray | null;
+  while ((m = pyFrom.exec(sourceCode)) !== null) {
+    if (m[1]) deps.add(m[1]);
+  }
+  const pyImport = /^\s*import\s+([^\n#]+)/gm;
+  while ((m = pyImport.exec(sourceCode)) !== null) {
+    const rawList = m[1] ?? "";
+    for (const part of rawList.split(",")) {
+      const mod = part.trim().split(/\s+as\s+/i)[0]?.trim();
+      if (mod && /^[A-Za-z0-9_.]+$/.test(mod)) {
+        deps.add(mod);
+      }
+    }
+  }
+  return [...deps];
+}
+
+let treeSitterInitialization: Promise<void> | undefined;
+
+export async function initTreeSitterLanguage(wasmPath: string): Promise<Parser> {
+  treeSitterInitialization ??= Parser.init();
+  await treeSitterInitialization;
+  const parser = new Parser();
+  const lang = await Language.load(wasmPath);
+  parser.setLanguage(lang);
+  return parser;
+}
+
+export type TreeSitterGrammar = "javascript" | "typescript" | "tsx" | "python" | "go" | "java" | "rust";
+
+export async function initBundledTreeSitterLanguage(grammar: TreeSitterGrammar): Promise<Parser> {
+  const wasmPath = fileURLToPath(import.meta.resolve(`@repomix/tree-sitter-wasms/out/tree-sitter-${grammar}.wasm`));
+  return initTreeSitterLanguage(wasmPath);
+}
+

@@ -3,6 +3,8 @@ import {
   EmailService,
   issueUserJwt,
   oauth2Manager,
+  resolveDefaultPermissionsForRoles,
+  revokeActorSessions,
   usersStore,
   verifyPassword,
   type AuthContext
@@ -124,7 +126,7 @@ export function registerAuthRoutes(
     if (deps.authRepo) {
       const dbUser = await deps.authRepo.findUserByEmail(email.toLowerCase());
       if (dbUser) {
-        const valid = await verifyPassword(password, dbUser.passwordHash);
+        const valid = await verifyPassword(dbUser.passwordHash, password);
         if (!valid) {
           throw new BrainError("BRAIN_ERR_UNAUTHORIZED", "Email ou senha inválidos.", 401);
         }
@@ -170,7 +172,11 @@ export function registerAuthRoutes(
         name: user.name,
         roles: user.roles,
         allowedProjects: user.allowedProjects,
-        allowedPolicies: user.allowedPolicies
+        allowedPolicies: user.allowedPolicies,
+        permissions:
+          user.customPermissions && user.customPermissions.length > 0
+            ? user.customPermissions
+            : resolveDefaultPermissionsForRoles(user.roles)
       }
     };
   });
@@ -385,5 +391,12 @@ export function registerAuthRoutes(
       expires_in: result.expiresIn,
       user: result.user
     };
+  });
+
+  // 9. Logout / Revogação de sessões do usuário autenticado
+  app.post("/v1/auth/logout", async (req) => {
+    const ctx = await deps.authenticateRequest(req.headers.authorization);
+    revokeActorSessions(ctx.actorId);
+    return { revoked: true, actorId: ctx.actorId };
   });
 }

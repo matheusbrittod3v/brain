@@ -56,7 +56,7 @@ export function useBrainApi() {
       const msg = (data as { message?: string; error?: { message?: string } })?.error?.message
         ?? (data as { message?: string })?.message
         ?? `HTTP ${res.status}`
-      throw new Error(msg)
+      throw Object.assign(new Error(msg), { status: res.status })
     }
     return data as T
   }
@@ -98,11 +98,14 @@ export function useBrainApi() {
         visibilityScope: me.visibilityScope,
         actorType: me.actorType
       }
-    } catch {
-      currentUser.value = null
-      apiKey.value = ''
-      if (import.meta.client) {
-        localStorage.removeItem('brain.apiKey')
+    } catch (err) {
+      const status = (err as { status?: number })?.status
+      if (status === 401) {
+        currentUser.value = null
+        apiKey.value = ''
+        if (import.meta.client) {
+          localStorage.removeItem('brain.apiKey')
+        }
       }
     }
   }
@@ -120,7 +123,8 @@ export function useBrainApi() {
         name: user.name ?? user.id,
         roles: user.roles ?? ['developer'],
         allowedProjects: user.allowedProjects ?? [],
-        allowedPolicies: user.allowedPolicies ?? []
+        allowedPolicies: user.allowedPolicies ?? [],
+        permissions: user.permissions ?? []
       }
     }
   }

@@ -145,10 +145,75 @@ const CLOUD_PROVIDERS: Record<string, ProviderSpec> = {
     baseUrl: "https://router.huggingface.co/v1",
     envKey: "HUGGINGFACE_API_KEY",
     hasFree: true
+  },
+  kimi: {
+    id: "kimi",
+    mode: "http",
+    format: "openai-compatible",
+    baseUrl: "https://api.moonshot.cn/v1",
+    envKey: "KIMI_API_KEY",
+    models: [
+      { id: "kimi-k2-0711-preview", name: "Kimi K2 Preview" },
+      { id: "kimi-latest", name: "Kimi Latest" },
+      { id: "moonshot-v1-32k", name: "Moonshot v1 32K" },
+      { id: "moonshot-v1-128k", name: "Moonshot v1 128K" }
+    ]
+  },
+  glm: {
+    id: "glm",
+    mode: "http",
+    format: "openai-compatible",
+    baseUrl: "https://open.bigmodel.cn/api/paas/v4",
+    envKey: "ZHIPU_API_KEY",
+    models: [
+      { id: "glm-4.5", name: "GLM 4.5" },
+      { id: "glm-4-flash", name: "GLM 4 Flash", free: true }
+    ]
+  },
+  minimax: {
+    id: "minimax",
+    mode: "http",
+    format: "openai-compatible",
+    baseUrl: "https://api.minimax.chat/v1",
+    envKey: "MINIMAX_API_KEY",
+    models: [
+      { id: "MiniMax-Text-01", name: "MiniMax Text 01" },
+      { id: "abab6.5s-chat", name: "ABAB 6.5s Chat" }
+    ]
+  },
+  perplexity: {
+    id: "perplexity",
+    mode: "http",
+    format: "openai-compatible",
+    baseUrl: "https://api.perplexity.ai",
+    envKey: "PERPLEXITY_API_KEY",
+    models: [
+      { id: "sonar-pro", name: "Sonar Pro" },
+      { id: "sonar", name: "Sonar" }
+    ]
+  },
+  dashscope: {
+    id: "dashscope",
+    mode: "http",
+    format: "openai-compatible",
+    baseUrl: "https://dashscope-intl.aliyuncs.com/compatible-mode/v1",
+    envKey: "DASHSCOPE_API_KEY"
   }
 };
 
 const OAUTH_GATEWAY_PROVIDERS: Record<string, ProviderSpec> = {
+  antigravity: {
+    id: "antigravity",
+    mode: "http",
+    format: "openai-compatible",
+    baseUrl: "https://generativelanguage.googleapis.com/v1beta/openai",
+    envKey: "ANTIGRAVITY_OAUTH_TOKEN",
+    hasFree: true,
+    models: [
+      { id: "gemini-2.5-pro", name: "Gemini 2.5 Pro (Antigravity)", free: true },
+      { id: "gemini-2.5-flash", name: "Gemini 2.5 Flash (Antigravity)", free: true }
+    ]
+  },
   codex: {
     id: "codex",
     mode: "http",
@@ -168,6 +233,45 @@ const OAUTH_GATEWAY_PROVIDERS: Record<string, ProviderSpec> = {
     format: "openai-compatible",
     baseUrl: "https://api.githubcopilot.com",
     envKey: "GITHUB_COPILOT_TOKEN"
+  },
+  "kimi-coding": {
+    id: "kimi-coding",
+    mode: "http",
+    format: "openai-compatible",
+    baseUrl: "https://api.kimi.com/coding/v1",
+    envKey: "KIMI_CODING_API_KEY",
+    hasFree: true,
+    models: [
+      { id: "kimi-for-coding", name: "Kimi For Coding", free: true },
+      { id: "kimi-k2-thinking", name: "Kimi K2 Thinking", free: true }
+    ]
+  },
+  qwen: {
+    id: "qwen",
+    mode: "http",
+    format: "openai-compatible",
+    baseUrl: "https://portal.qwen.ai/v1",
+    envKey: "QWEN_OAUTH_TOKEN",
+    hasFree: true,
+    models: [
+      { id: "qwen3-coder-plus", name: "Qwen3 Coder Plus", free: true },
+      { id: "qwen3-coder-flash", name: "Qwen3 Coder Flash", free: true },
+      { id: "coder-model", name: "Qwen Coder Model", free: true },
+      { id: "vision-model", name: "Qwen Vision Model", free: true }
+    ]
+  },
+  iflow: {
+    id: "iflow",
+    mode: "http",
+    format: "openai-compatible",
+    baseUrl: "https://apis.iflow.cn/v1",
+    envKey: "IFLOW_API_KEY",
+    hasFree: true,
+    models: [
+      { id: "qwen3-coder-plus", name: "iFlow Qwen3 Coder Plus", free: true },
+      { id: "deepseek-v3", name: "iFlow DeepSeek v3", free: true },
+      { id: "kimi-k2", name: "iFlow Kimi K2", free: true }
+    ]
   },
   "9router": {
     id: "9router",
@@ -193,6 +297,20 @@ const OAUTH_GATEWAY_PROVIDERS: Record<string, ProviderSpec> = {
 };
 
 const CLI_PROVIDERS: Record<string, ProviderSpec> = {
+  "antigravity-cli": {
+    id: "antigravity-cli",
+    mode: "cli",
+    hasFree: true,
+    cliCommand: ["agy", "-p"],
+    models: [
+      { id: "gemini-4-hydrogen-medium", name: "Gemini 4 Hydrogen (Medium)", free: true },
+      { id: "gemini-4-neon-medium", name: "Gemini 4 Neon (Medium)", free: true },
+      { id: "gemini-3.8-flash-medium", name: "Gemini 3.8 Flash (Medium)", free: true },
+      { id: "claude-sonnet-5-5-medium", name: "Claude Sonnet 5.5 (Medium)", free: true },
+      { id: "claude-opus-5-5-medium", name: "Claude Opus 5.5 (Medium)", free: true },
+      { id: "gpt-oss-120b-medium", name: "GPT-OSS 120B (Medium)", free: true }
+    ]
+  },
   "claude-cli": {
     id: "claude-cli",
     mode: "cli",

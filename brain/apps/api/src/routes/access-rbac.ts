@@ -4,6 +4,8 @@ import {
   assertPermission,
   DEFAULT_ROLES,
   PERMISSION_CATALOG,
+  revokeActorSessions,
+  usersStore,
   type SystemPermission
 } from "@brain/auth";
 import { BrainError } from "@brain/core";
@@ -17,7 +19,19 @@ export function registerAccessRbacRoutes(deps: ApiRouteDeps) {
     assertPermission(ctx, "roles:view");
     const dbUsers = authRepo ? await authRepo.listUsers(ctx.tenantId) : [];
     const members = opRepo ? await opRepo.listAccessMembers(ctx, req.params.projectId) : [];
-    const byId = new Map<string, { id: string; name: string; email?: string; roles: string[]; linkedAgentIds: string[]; source: string }>();
+    const byId = new Map<
+      string,
+      {
+        id: string
+        name: string
+        email?: string
+        roles: string[]
+        allowedProjects: string[]
+        allowedPolicies: string[]
+        linkedAgentIds: string[]
+        source: string
+      }
+    >();
 
     for (const u of dbUsers) {
       byId.set(u.id, {
@@ -25,6 +39,8 @@ export function registerAccessRbacRoutes(deps: ApiRouteDeps) {
         name: u.name,
         email: u.email,
         roles: u.roles,
+        allowedProjects: u.allowedProjects ?? [],
+        allowedPolicies: u.allowedPolicies ?? [],
         linkedAgentIds: u.linkedAgentIds ?? [],
         source: "registered"
       });
@@ -35,6 +51,8 @@ export function registerAccessRbacRoutes(deps: ApiRouteDeps) {
           id: m.actorId,
           name: m.actorId,
           roles: m.roles,
+          allowedProjects: [req.params.projectId],
+          allowedPolicies: m.allowedPolicies ?? ["public-org", "internal-project"],
           linkedAgentIds: [],
           source: "member"
         });
@@ -45,12 +63,99 @@ export function registerAccessRbacRoutes(deps: ApiRouteDeps) {
         id: ctx.actorId,
         name: ctx.actorId,
         roles: ctx.roles,
+        allowedProjects: ctx.allowedProjects,
+        allowedPolicies: ctx.allowedPolicies,
         linkedAgentIds: [],
         source: "session"
       });
     }
     return { projectId: req.params.projectId, users: [...byId.values()] };
   });
+
+  app.put<{
+    Params: { projectId: string; userId: string };
+    Body: {
+      allowedProjects?: string[];
+      allowedPolicies?: string[];
+      roles?: string[];
+      revokeActiveSessions?: boolean;
+    };
+  }>(
+    "/v1/projects/:projectId/access/users/:userId/scopes",
+    {
+      schema: {
+        params: Type.Object({ projectId: Type.String(), userId: Type.String() }),
+        body: Type.Object({
+          allowedProjects: Type.Optional(Type.Array(Type.String())),
+          allowedPolicies: Type.Optional(Type.Array(Type.String())),
+          roles: Type.Optional(Type.Array(Type.String())),
+          revokeActiveSessions: Type.Optional(Type.Boolean())
+        })
+      }
+    },
+    async (req) => {
+      const ctx = await authenticateProjectRequest(req.headers.authorization, req.params.projectId);
+      assertPermission(ctx, "users:assign_roles");
+
+      const targetId = req.params.userId;
+      const dbUser = authRepo ? await authRepo.findUserById(targetId) : null;
+      const memUser = !dbUser ? usersStore.getUserById(targetId) : null;
+      const existing = dbUser ?? memUser;
+
+      const nextProjects = req.body.allowedProjects ?? existing?.allowedProjects ?? [req.params.projectId];
+      const nextPolicies = req.body.allowedPolicies ?? existing?.allowedPolicies ?? ["public-org", "internal-project"];
+      const nextRoles = req.body.roles ?? existing?.roles ?? ["viewer"];
+
+      if (authRepo && dbUser) {
+        await authRepo.upsertUser({
+          id: dbUser.id,
+          tenantId: dbUser.tenantId,
+          email: dbUser.email,
+          name: dbUser.name,
+          passwordHash: dbUser.passwordHash,
+          emailVerified: dbUser.emailVerified,
+          roles: nextRoles,
+          allowedProjects: nextProjects,
+          allowedPolicies: nextPolicies,
+          customPermissions: dbUser.customPermissions as string[] | undefined
+        });
+      }
+      if (memUser) {
+        memUser.roles = [...nextRoles];
+        memUser.allowedProjects = [...nextProjects];
+        memUser.allowedPolicies = [...nextPolicies];
+        memUser.updatedAt = new Date().toISOString();
+      }
+      if (req.body.revokeActiveSessions !== false) {
+        revokeActorSessions(targetId);
+      }
+
+      await recordAudit(ctx, {
+        tenantId: ctx.tenantId,
+        projectId: req.params.projectId,
+        accessPolicyId: "internal-project",
+        actorId: ctx.actorId,
+        actorType: ctx.actorType,
+        action: "update",
+        targetType: "user_scopes",
+        targetId,
+        metadata: {
+          allowedProjects: nextProjects,
+          allowedPolicies: nextPolicies,
+          roles: nextRoles,
+          revokedSessions: req.body.revokeActiveSessions !== false
+        }
+      });
+
+      return {
+        userId: targetId,
+        allowedProjects: nextProjects,
+        allowedPolicies: nextPolicies,
+        roles: nextRoles,
+        sessionsRevoked: req.body.revokeActiveSessions !== false
+      };
+    }
+  );
 
   app.get<{ Params: { projectId: string } }>(
     "/v1/projects/:projectId/access/user-policies",

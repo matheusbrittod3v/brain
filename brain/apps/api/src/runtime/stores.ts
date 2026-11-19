@@ -7,7 +7,7 @@ import {
   type AuditLogger,
   type RlsSessionContext
 } from "@brain/audit-engine";
-import { assertProjectAccess, authenticateRequest, buildAbilityForContext, subject, type AuthContext } from "@brain/auth";
+import { assertProjectAccess, authenticateRequest, buildAbilityForContext, subject, usersStore, type AuthContext } from "@brain/auth";
 import { ContextEngine } from "@brain/context-engine";
 import { BrainError, type KnowledgeItem } from "@brain/core";
 import { CrossServiceContractRegistry, PostgresCrossServiceRegistry } from "@brain/cross-service";
@@ -175,12 +175,14 @@ export function createApiRuntimeStores(deps: {
   async function authenticateProjectRequest(headerValue: string | undefined, projectId: string) {
     const rawCtx = await authenticateRequest(headerValue, configuredApiKey, "default-org", allowedProjects, undefined, allowedPolicies);
     const dbUser = authRepo ? await authRepo.findUserById(rawCtx.actorId) : null;
-    const ctx: AuthContext = dbUser
+    const memUser = !dbUser && rawCtx.actorId !== "local-dev" ? usersStore.getUserById(rawCtx.actorId) : null;
+    const freshUser = dbUser ?? memUser;
+    const ctx: AuthContext = freshUser
       ? {
           ...rawCtx,
-          roles: dbUser.roles,
-          allowedProjects: dbUser.allowedProjects,
-          allowedPolicies: dbUser.allowedPolicies
+          roles: freshUser.roles,
+          allowedProjects: freshUser.allowedProjects,
+          allowedPolicies: freshUser.allowedPolicies
         }
       : rawCtx;
     assertProjectAccess(ctx, projectId);

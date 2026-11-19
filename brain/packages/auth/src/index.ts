@@ -61,6 +61,14 @@ export const PERMISSION_CATALOG = [
   { id: "runner:view", group: "Projetos & Runner", label: "Ver execuções do Brain Runner" },
   { id: "runner:execute", group: "Projetos & Runner", label: "Executar e delegar tarefas ao Runner" },
   { id: "runner:cancel", group: "Projetos & Runner", label: "Cancelar tarefas do Runner" },
+  { id: "runner:task:create", group: "Projetos & Runner", label: "Criar tarefas e chats no Runner" },
+  { id: "runner:task:read", group: "Projetos & Runner", label: "Consultar fila e resultados do Runner" },
+  { id: "runner:task:cancel", group: "Projetos & Runner", label: "Cancelar tarefas em execução" },
+  { id: "runner:schedule:manage", group: "Projetos & Runner", label: "Gerenciar agendamentos cron do Runner" },
+  { id: "runner:provider:configure", group: "Projetos & Runner", label: "Configurar provedores, OAuth e roteamento" },
+  { id: "runner:mcp:manage", group: "Projetos & Runner", label: "Instalar, testar e gerenciar servidores MCP" },
+  { id: "runner:plugin:manage", group: "Projetos & Runner", label: "Instalar, configurar e gerenciar plugins" },
+  { id: "runner:tool:use", group: "Projetos & Runner", label: "Executar ferramentas e MCPs no Runner" },
   // Impacto, Integrações, FinOps & Auditoria
   { id: "impact:analyze", group: "Operação & Governança", label: "Executar análise de impacto" },
   { id: "integrations:view", group: "Operação & Governança", label: "Ver status de integrações" },
@@ -139,6 +147,9 @@ export const DEFAULT_ROLES: RoleDefinition[] = [
       "proposals:create",
       "runner:view",
       "runner:execute",
+      "runner:task:create",
+      "runner:task:read",
+      "runner:tool:use",
       "impact:analyze",
       "templates:view"
     ],
@@ -158,6 +169,119 @@ export const DEFAULT_ROLES: RoleDefinition[] = [
       "knowledge:read",
       "knowledge:search",
       "templates:view"
+    ],
+    allowedPolicies: ["public-org", "internal-project"],
+    isSystem: true
+  },
+  {
+    roleId: "project-reader",
+    name: "Leitor do Projeto",
+    description: "Consulta projeto e conhecimento permitido; sem execução ou edição.",
+    permissions: [
+      "menu:projects",
+      "menu:knowledge",
+      "menu:search",
+      "menu:templates",
+      "knowledge:view",
+      "knowledge:read",
+      "knowledge:search",
+      "templates:view"
+    ],
+    allowedPolicies: ["public-org", "internal-project"],
+    isSystem: true
+  },
+  {
+    roleId: "runner-operator",
+    name: "Operador do Runner",
+    description: "Cria, acompanha e cancela tarefas do Runner; sem administrar usuários, modelos ou políticas.",
+    permissions: [
+      "menu:projects",
+      "menu:agents",
+      "runner:view",
+      "runner:execute",
+      "runner:cancel",
+      "runner:task:create",
+      "runner:task:read",
+      "runner:task:cancel",
+      "runner:tool:use"
+    ],
+    allowedPolicies: ["public-org", "internal-project"],
+    isSystem: true
+  },
+  {
+    roleId: "service-agent",
+    name: "Agente de Serviço",
+    description: "Executa ações específicas por API/MCP em projetos e políticas explicitamente autorizados.",
+    permissions: [
+      "knowledge:view",
+      "knowledge:read",
+      "knowledge:search",
+      "runner:view",
+      "runner:execute",
+      "runner:task:create",
+      "runner:task:read",
+      "runner:tool:use"
+    ],
+    allowedPolicies: ["public-org", "internal-project"],
+    isSystem: true
+  },
+  {
+    roleId: "integration-manager",
+    name: "Gestor de Integrações",
+    description: "Configura conectores, provedores, MCPs e plugins; sem aprovar conhecimento ou mudanças.",
+    permissions: [
+      "menu:agents",
+      "menu:operations",
+      "integrations:view",
+      "integrations:manage",
+      "runner:view",
+      "runner:provider:configure",
+      "runner:mcp:manage",
+      "runner:plugin:manage"
+    ],
+    allowedPolicies: ["public-org", "internal-project"],
+    isSystem: true
+  },
+  {
+    roleId: "domain-approver",
+    name: "Aprovador de Domínio",
+    description: "Aprova propostas e conhecimento apenas nos domínios sob sua responsabilidade.",
+    permissions: [
+      "menu:inbox",
+      "menu:knowledge",
+      "proposals:view",
+      "proposals:decide",
+      "knowledge:view",
+      "knowledge:read",
+      "knowledge:approve"
+    ],
+    allowedPolicies: ["public-org", "internal-project", "confidential-business"],
+    isSystem: true
+  },
+  {
+    roleId: "auditor",
+    name: "Auditor",
+    description: "Consulta auditoria, FinOps e execuções; sem alterar dados ou permissões.",
+    permissions: [
+      "menu:operations",
+      "audit:view",
+      "finops:view",
+      "runner:view",
+      "runner:task:read",
+      "roles:view"
+    ],
+    allowedPolicies: ["public-org", "internal-project"],
+    isSystem: true
+  },
+  {
+    roleId: "access-admin",
+    name: "Administrador de Acesso",
+    description: "Gerencia usuários, papéis e concessões; sem acesso automático a conteúdo confidencial.",
+    permissions: [
+      "menu:access",
+      "roles:view",
+      "roles:manage",
+      "users:assign_roles"
     ],
     allowedPolicies: ["public-org", "internal-project"],
     isSystem: true
