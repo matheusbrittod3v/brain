@@ -633,21 +633,10 @@ function handleNodeClick(item: any) {
 
         <!-- 6. Mermaid Code View -->
         <div v-else-if="viewMode === 'mermaid'" class="p-5 space-y-3">
-          <div class="flex items-center justify-between">
-            <div class="text-xs text-muted">
-              Código Mermaid gerado em tempo real a partir das 5 camadas e dos itens ativos no Hub.
-            </div>
-            <UButton
-              size="xs"
-              variant="solid"
-              color="primary"
-              :icon="copied ? 'i-lucide-check' : 'i-lucide-copy'"
-              @click="copyMermaid"
-            >
-              {{ copied ? 'Copiado!' : 'Copiar Diagrama' }}
-            </UButton>
+          <div class="text-xs text-muted">
+            Diagrama Mermaid gerado em tempo real a partir das 5 camadas e dos itens ativos no Hub.
           </div>
-          <pre class="p-4 rounded-xl bg-elevated border border-default text-default font-mono text-xs overflow-x-auto max-h-[460px] leading-relaxed select-all"><code>{{ generatedMermaidCode }}</code></pre>
+          <MermaidDiagram :code="generatedMermaidCode" />
         </div>
       </div>
     </UCard>

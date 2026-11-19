@@ -526,13 +526,8 @@ function exportGraphJson() {
 
         <!-- 6. Mermaid Code View -->
         <div v-else-if="graphViewMode === 'mermaid'" class="p-5 space-y-3">
-          <div class="flex items-center justify-between">
-            <span class="text-xs text-muted">Código Mermaid do grafo ativo</span>
-            <UButton size="xs" variant="solid" color="primary" :icon="mermaidCopied ? 'i-lucide-check' : 'i-lucide-copy'" @click="copyMermaid">
-              {{ mermaidCopied ? 'Copiado!' : 'Copiar Mermaid' }}
-            </UButton>
-          </div>
-          <pre class="p-4 rounded-xl bg-elevated border border-default text-default font-mono text-xs overflow-x-auto max-h-[420px] select-all"><code>{{ generatedMermaid }}</code></pre>
+          <span class="text-xs text-muted">Diagrama Mermaid do grafo ativo</span>
+          <MermaidDiagram :code="generatedMermaid" />
         </div>
       </div>
     </UCard>

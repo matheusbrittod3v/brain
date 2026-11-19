@@ -198,13 +198,8 @@ async function copyMermaid(code: string) {
         </div>
 
         <div v-if="selectedFlow.mermaidDiagram" class="space-y-1.5">
-          <div class="flex items-center justify-between">
-            <span class="text-xs font-semibold text-muted">Diagrama Mermaid do Ciclo de Vida</span>
-            <UButton size="xs" variant="soft" :icon="copied ? 'i-lucide-check' : 'i-lucide-copy'" @click="copyMermaid(selectedFlow.mermaidDiagram)">
-              {{ copied ? 'Copiado!' : 'Copiar Mermaid' }}
-            </UButton>
-          </div>
-          <pre class="p-3 rounded-lg bg-elevated border border-default text-default font-mono text-xs overflow-x-auto max-h-56 select-all"><code>{{ selectedFlow.mermaidDiagram }}</code></pre>
+          <div class="text-xs font-semibold text-muted">Diagrama Mermaid do Ciclo de Vida</div>
+          <MermaidDiagram :code="selectedFlow.mermaidDiagram" max-height-class="max-h-96" />
         </div>
       </div>
     </div>
