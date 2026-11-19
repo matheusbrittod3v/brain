@@ -221,7 +221,9 @@ export function registerCodeTopologyTools(
       if (!runtime.opRepo) {
         return okJson({ recorded: false, reason: "PostgreSQL operational repository unavailable." });
       }
-      const resolvedTestItemId = testItemId?.trim() || `${suiteName}:${testName}`;
+      const rawTestItemId = testItemId?.trim() || `${suiteName}:${testName}`;
+      const resolvedTestItemId =
+        rawTestItemId.replace(/[\s,\r\n\0]+/g, "-").replace(/-+/g, "-").replace(/^-|-$/g, "").slice(0, 120) || "test-item";
       let resolvedSha = commitSha?.trim() ?? "";
       if (!/^[0-9a-fA-F]{40,64}$/.test(resolvedSha)) {
         try {

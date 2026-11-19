@@ -205,13 +205,12 @@ export function registerCoreGovernanceTools(
       let hitRateUpdated = 0;
       let hitRate = null;
       const evidenceWarnings: string[] = [];
-      if ((uniqueUsedItemIds.length > 0 || (editedPaths?.length ?? 0) > 0 || Boolean(taskId)) && (!sessionId || !runtime.opRepo)) throw new BrainError("BRAIN_ERR_INVALID_INPUT", "sessionId e persistência de sessão são necessários para registrar evidência.", 400);
       if (uniqueUsedItemIds.length > 0 && sessionId && runtime.opRepo) {
         const result = await runtime.opRepo.recordContextEvidence(ctx, projectId, sessionId, uniqueUsedItemIds, "citation");
         hitRateUpdated = result.newlyHit.length;
         hitRate = result.rate;
         runtime.retrieval.invalidateCache?.(ctx.tenantId, projectId);
-      } else if (runtime.knowledge?.incrementHitCounts) {
+      } else if (uniqueUsedItemIds.length > 0 && runtime.knowledge?.incrementHitCounts) {
         for (const id of uniqueUsedItemIds) {
           const item = await runtime.retrieval.getItem(ctx, projectId, id);
           if (!item) throw new BrainError("BRAIN_ERR_NOT_FOUND", `Item '${id}' não encontrado ou sem permissão.`, 404);
@@ -219,7 +218,7 @@ export function registerCoreGovernanceTools(
         const updated = await runtime.knowledge.incrementHitCounts(ctx, projectId, uniqueUsedItemIds);
         hitRateUpdated = updated.length;
         runtime.retrieval.invalidateCache?.(ctx.tenantId, projectId);
-      } else {
+      } else if (uniqueUsedItemIds.length > 0) {
         for (const id of uniqueUsedItemIds) runtime.retrieval.recordHitBoost(projectId, id);
         hitRateUpdated = uniqueUsedItemIds.length;
       }
