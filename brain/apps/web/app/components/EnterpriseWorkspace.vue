@@ -1,5 +1,5 @@
 <script setup lang="ts">
-const { projectId, apiFetch, notify } = useBrainApi()
+const { projectId, apiFetch, notify, liveSyncTick } = useBrainApi()
 
 const activeTab = ref<'radar' | 'debt' | 'compare'>('radar')
 const ringFilter = ref<'all' | 'adopt' | 'trial' | 'assess' | 'hold'>('all')
@@ -87,7 +87,7 @@ async function loadEnterprise() {
 }
 
 onMounted(loadEnterprise)
-watch(projectId, () => {
+watch([projectId, liveSyncTick], () => {
   loadEnterprise()
   if (activeTab.value === 'debt') loadTechDebt()
 })

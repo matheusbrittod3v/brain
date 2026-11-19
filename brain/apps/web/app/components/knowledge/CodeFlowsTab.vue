@@ -25,7 +25,7 @@ const props = defineProps<{
   projectId: string
 }>()
 
-const { apiFetch, notify } = useBrainApi()
+const { apiFetch, notify, liveSyncTick } = useBrainApi()
 const flows = ref<CodeFlowItem[]>([])
 const loading = ref(false)
 const selectedFlowId = ref<string | null>(null)
@@ -63,7 +63,7 @@ async function loadFlows() {
 }
 
 onMounted(loadFlows)
-watch(() => props.projectId, loadFlows)
+watch([() => props.projectId, liveSyncTick], loadFlows)
 
 function addStep() {
   form.steps.push({ layer: 'domain', componentOrClass: '', fnName: '', filePath: '', inputs: '', outputs: '', sideEffects: '' })

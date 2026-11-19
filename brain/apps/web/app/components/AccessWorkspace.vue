@@ -9,7 +9,7 @@ import type {
 } from './access/types'
 import type { AccessTokenRow } from './access/TokensTab.vue'
 
-const { projectId, apiFetch, notify, hasPermission, currentUser } = useBrainApi()
+const { projectId, apiFetch, notify, hasPermission, currentUser, liveSyncTick } = useBrainApi()
 
 const activeTab = ref('assignments')
 const loading = ref(false)
@@ -116,7 +116,7 @@ async function loadAccessData() {
 }
 
 onMounted(loadAccessData)
-watch(projectId, loadAccessData)
+watch([projectId, liveSyncTick], loadAccessData)
 
 function openAssignSlideover(userId?: string) {
   assignTargetUserId.value = userId

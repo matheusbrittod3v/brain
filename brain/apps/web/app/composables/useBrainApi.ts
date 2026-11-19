@@ -79,6 +79,7 @@ export function useBrainApi() {
   }
 
   async function refreshAuthSession() {
+    const authChecked = useState<boolean>('brain.authChecked', () => false)
     try {
       const cfg = await apiFetch<AuthConfig>('/v1/auth/config')
       authConfig.value = cfg
@@ -88,6 +89,7 @@ export function useBrainApi() {
 
     if (!apiKey.value) {
       currentUser.value = null
+      authChecked.value = true
       return
     }
 
@@ -136,6 +138,7 @@ export function useBrainApi() {
       }
     } finally {
       authRestoring.value = false
+      authChecked.value = true
     }
   }
 
@@ -189,6 +192,12 @@ export function useBrainApi() {
     notify('Sessão encerrada', undefined, 'warning')
   }
 
+  const authChecked = useState<boolean>('brain.authChecked', () => false)
+  const liveSyncTick = useState<number>('brain.liveSyncTick', () => 0)
+  function triggerLiveRefresh() {
+    liveSyncTick.value += 1
+  }
+
   return {
     apiUrl,
     apiKey,
@@ -198,6 +207,9 @@ export function useBrainApi() {
     authModalOpen,
     authModalTab,
     authRestoring,
+    authChecked,
+    liveSyncTick,
+    triggerLiveRefresh,
     apiFetch,
     notify,
     refreshAuthSession,

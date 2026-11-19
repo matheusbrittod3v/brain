@@ -3,7 +3,7 @@ import type * as echarts from 'echarts'
 import IntentSearchModal from './daily/IntentSearchModal.vue'
 import Search3DGraph, { type GraphNodeItem } from './Search3DGraph.vue'
 
-const { projectId, apiFetch, notify } = useBrainApi()
+const { projectId, apiFetch, notify, liveSyncTick } = useBrainApi()
 
 const emit = defineEmits<{
   inspect: [item: { title: string; content: string; type?: string; status?: string }]
@@ -130,7 +130,7 @@ async function runSearchAndGraph() {
 }
 
 onMounted(runSearchAndGraph)
-watch(projectId, runSearchAndGraph)
+watch([projectId, liveSyncTick], runSearchAndGraph)
 
 const relationOptions = [
   { label: 'Todas as relações', value: 'all' },

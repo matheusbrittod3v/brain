@@ -1,5 +1,5 @@
 <script setup lang="ts">
-const { apiFetch, notify } = useBrainApi()
+const { apiFetch, notify, liveSyncTick } = useBrainApi()
 
 interface McpTokenItem {
   id: string
@@ -106,6 +106,7 @@ async function copyText(text: string, title: string) {
 }
 
 onMounted(loadTokens)
+watch(liveSyncTick, loadTokens)
 </script>
 
 <template>

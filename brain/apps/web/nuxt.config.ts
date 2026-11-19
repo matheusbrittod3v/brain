@@ -12,7 +12,7 @@ export default defineNuxtConfig({
   css: ['~/assets/css/main.css'],
 
   routeRules: {
-    '/': { prerender: true },
+    '/': { ssr: false },
     '/mcp': { proxy: `${process.env.NUXT_PUBLIC_API_BASE || 'http://localhost:3333'}/mcp` },
     '/mcp/**': { proxy: `${process.env.NUXT_PUBLIC_API_BASE || 'http://localhost:3333'}/mcp/**` },
     '/.well-known/**': { proxy: `${process.env.NUXT_PUBLIC_API_BASE || 'http://localhost:3333'}/.well-known/**` },

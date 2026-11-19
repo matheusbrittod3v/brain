@@ -8,6 +8,8 @@ const {
   authModalOpen,
   authModalTab,
   authRestoring,
+  authChecked,
+  triggerLiveRefresh,
   apiFetch,
   notify,
   refreshAuthSession,
@@ -59,10 +61,10 @@ const searchQuery = ref('')
 const knowledgeTypeFilter = ref('all')
 
 // Load all workspace data
-async function loadWorkspaceData() {
+async function loadWorkspaceData(silent = false) {
   await refreshAuthSession()
-  if (!apiKey.value) return
-  loadingData.value = true
+  if (!apiKey.value || !currentUser.value) return
+  if (!silent) loadingData.value = true
   const pid = encodeURIComponent(projectId.value)
 
   try {
@@ -107,11 +109,38 @@ async function loadWorkspaceData() {
   loadingData.value = false
 }
 
-onMounted(loadWorkspaceData)
+let livePollTimer: ReturnType<typeof setInterval> | null = null
+
+function handleLiveSync() {
+  if (!apiKey.value || !currentUser.value) return
+  if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return
+  triggerLiveRefresh()
+  void loadWorkspaceData(true)
+}
+
+onMounted(() => {
+  void loadWorkspaceData()
+  window.addEventListener('focus', handleLiveSync)
+  document.addEventListener('visibilitychange', handleLiveSync)
+  livePollTimer = setInterval(handleLiveSync, 15000)
+})
+
+onBeforeUnmount(() => {
+  window.removeEventListener('focus', handleLiveSync)
+  document.removeEventListener('visibilitychange', handleLiveSync)
+  if (livePollTimer) clearInterval(livePollTimer)
+})
+
+watch(workspace, () => {
+  if (apiKey.value && currentUser.value) {
+    triggerLiveRefresh()
+    void loadWorkspaceData(true)
+  }
+})
 
 watch([projectId, apiKey], () => {
   if (import.meta.client) localStorage.setItem('brain.projectId', projectId.value)
-  loadWorkspaceData()
+  void loadWorkspaceData()
 })
 
 const filteredKnowledge = computed(() => {
@@ -274,17 +303,17 @@ defineShortcuts({
 </script>
 
 <template>
-  <!-- Loading de transição enquanto restaura sessão pré-existente (sem piscar a landing page) -->
-  <div v-if="authRestoring && apiKey" class="min-h-screen w-full flex flex-col items-center justify-center bg-slate-950 text-slate-100">
+  <!-- Gate neutro até validar sessão no backend (sem piscar login ou painel antes da hora) -->
+  <div v-if="!authChecked || (authRestoring && apiKey)" class="min-h-screen w-full flex flex-col items-center justify-center bg-slate-950 text-slate-100">
     <div class="w-12 h-12 rounded-2xl bg-gradient-to-br from-indigo-500/25 to-sky-500/20 border border-indigo-500/35 flex items-center justify-center shadow-lg animate-pulse mb-3">
       <UIcon name="i-lucide-brain-circuit" class="w-6 h-6 text-primary" />
     </div>
     <div class="text-xs font-mono text-slate-400 flex items-center gap-2">
       <UIcon name="i-lucide-loader-2" class="size-3.5 animate-spin text-primary" />
-      Carregando sessão do Brain...
+      Verificando sessão do Brain...
     </div>
   </div>
-  <LandingAuthGate v-else-if="!apiKey || !currentUser" @authenticated="loadWorkspaceData" />
+  <LandingAuthGate v-else-if="!apiKey || !currentUser" @authenticated="loadWorkspaceData()" />
   <UDashboardGroup v-else unit="rem">
     <UDashboardSidebar
       v-model:collapsed="sidebarCollapsed"

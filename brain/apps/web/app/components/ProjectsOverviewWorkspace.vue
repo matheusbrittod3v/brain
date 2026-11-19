@@ -44,7 +44,7 @@ const emit = defineEmits<{
   navigate: [workspace: 'inbox' | 'knowledge' | 'search' | 'agents' | 'impact' | 'operations']
 }>()
 
-const { apiFetch, notify, hasPermission } = useBrainApi()
+const { apiFetch, notify, hasPermission, liveSyncTick } = useBrainApi()
 
 const currentProject = computed(() =>
   props.projectsList?.find(p => p.projectId === props.projectId)
@@ -102,7 +102,7 @@ async function toggleProjectShared() {
 }
 
 onMounted(loadSharedProjects)
-watch(() => props.projectId, loadSharedProjects)
+watch([() => props.projectId, liveSyncTick], loadSharedProjects)
 
 const totalItems = computed(() => props.overviewData?.totalItems ?? 0)
 const approvedCount = computed(() => props.overviewData?.approvedCount ?? 0)
