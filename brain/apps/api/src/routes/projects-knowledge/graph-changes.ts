@@ -320,5 +320,125 @@ export function registerGraphAndChangeRoutes(app: FastifyInstance, deps: Project
     });
     return { created: created.length, relations: created };
   });
+
+  app.get<{ Params: { projectId: string } }>("/v1/projects/:projectId/code-flows", async (req) => {
+    const ctx = await authenticateProjectRequest(req.headers.authorization, req.params.projectId);
+    const hits = await queryAwareRetrieval.search(ctx, { projectId: req.params.projectId, query: "", limit: 200 });
+    const flows = hits
+      .map((h) => h.item)
+      .filter((i) => i.status !== "deprecated" && (Boolean(i.metadata?.codeFlow) || i.type === "process"))
+      .map((i) => {
+        const cf = i.metadata?.codeFlow as { entrypoint?: string; steps?: unknown[]; mermaidDiagram?: string; layers?: string[] } | undefined;
+        return {
+          id: i.id,
+          title: i.title,
+          summary: i.summary ?? "",
+          entrypoint: cf?.entrypoint ?? "",
+          layers: cf?.layers ?? [],
+          steps: cf?.steps ?? [],
+          mermaidDiagram: cf?.mermaidDiagram ?? "",
+          relatedIds: i.relatedIds ?? [],
+          updatedAt: i.updatedAt
+        };
+      });
+    return { projectId: req.params.projectId, flows };
+  });
+
+  app.post<{
+    Params: { projectId: string };
+    Body: {
+      flowId?: string;
+      title: string;
+      entrypoint: string;
+      description: string;
+      relatedRuleIds?: string[];
+      steps: Array<{
+        order?: number;
+        layer: string;
+        componentOrClass?: string;
+        fnName: string;
+        filePath?: string;
+        inputs?: string;
+        outputs?: string;
+        sideEffects?: string;
+      }>;
+    };
+  }>("/v1/projects/:projectId/code-flows", async (req) => {
+    const ctx = await authenticateProjectRequest(req.headers.authorization, req.params.projectId);
+    await enforcePolicy(ctx, { projectId: req.params.projectId, accessPolicyId: "internal-project", action: "write" });
+    const { flowId, title, entrypoint, description, relatedRuleIds = [], steps = [] } = req.body ?? {};
+    if (!title?.trim() || !entrypoint?.trim() || steps.length === 0) {
+      throw new BrainError("BRAIN_ERR_CONFLICT", "title, entrypoint e ao menos 1 step são obrigatórios.", 400);
+    }
+
+    const normalizedSteps = steps.map((s, idx) => ({
+      order: s.order ?? idx + 1,
+      layer: s.layer.trim(),
+      componentOrClass: s.componentOrClass?.trim(),
+      fnName: s.fnName.trim(),
+      filePath: s.filePath?.trim(),
+      inputs: s.inputs?.trim(),
+      outputs: s.outputs?.trim(),
+      sideEffects: s.sideEffects?.trim()
+    }));
+
+    const autoMermaid = [
+      "flowchart TD",
+      ...normalizedSteps.map((s) => {
+        const cls = s.componentOrClass ? `${s.componentOrClass}.` : "";
+        const label = `[${s.layer}] ${cls}${s.fnName}`.replace(/["\[\]]/g, "");
+        return `  S${s.order}["${s.order}. ${label}"]`;
+      }),
+      ...normalizedSteps.slice(0, -1).map((s, i) => `  S${s.order} --> S${normalizedSteps[i + 1]!.order}`)
+    ].join("\n");
+
+    const id =
+      flowId?.trim().replace(/[\s,\r\n\0]+/g, "-") ||
+      `FLOW-${title.replace(/[^a-zA-Z0-9_-]+/g, "-").replace(/^-|-$/g, "").toUpperCase().slice(0, 48)}`;
+
+    const stepLines = normalizedSteps
+      .map((s) => `${s.order}. [${s.layer}] ${s.componentOrClass ? `${s.componentOrClass}.` : ""}${s.fnName}${s.filePath ? ` (${s.filePath})` : ""}`)
+      .join("\n");
+
+    const item = parseKnowledgeFile({
+      tenantId: ctx.tenantId,
+      projectId: req.params.projectId,
+      filePath: `.brain/05-flows/${id}.md`,
+      rawContent: `---\nid: ${id}\ntitle: "${title.replace(/"/g, "'")}"\ntype: process\nstatus: approved\naccess_policy: internal-project\n---\n# ${title}\nEntrypoint: ${entrypoint}\n\n${description}\n\n## Ciclo de Vida\n${stepLines}\n\n\`\`\`mermaid\n${autoMermaid}\n\`\`\``
+    });
+    item.relatedIds = relatedRuleIds;
+    item.metadata = {
+      ...item.metadata,
+      knowledgeLayer: "code",
+      codeFlow: {
+        entrypoint,
+        steps: normalizedSteps,
+        mermaidDiagram: autoMermaid,
+        layers: [...new Set(normalizedSteps.map((s) => s.layer))]
+      }
+    };
+    await upsertKnowledgeItem(ctx, item);
+
+    for (const ruleId of relatedRuleIds) {
+      const cleanRuleId = ruleId.trim();
+      if (!cleanRuleId) continue;
+      const edge = {
+        tenantId: ctx.tenantId,
+        fromProjectId: req.params.projectId,
+        toProjectId: req.params.projectId,
+        fromItemId: id,
+        toItemId: cleanRuleId,
+        fromPolicyId: "internal-project",
+        toPolicyId: "internal-project",
+        relationType: (cleanRuleId.startsWith("BR-") || cleanRuleId.startsWith("ADR-") ? "GOVERNED_BY" : "IMPLEMENTS") as "GOVERNED_BY" | "IMPLEMENTS",
+        isInferred: false as const,
+        confidence: 1.0
+      };
+      graph.addEdge(edge);
+      if (pgGraph) await pgGraph.addEdge(ctx, edge);
+    }
+
+    return { registered: true, flowId: id, mermaidDiagram: autoMermaid, stepsCount: normalizedSteps.length };
+  });
 }
 

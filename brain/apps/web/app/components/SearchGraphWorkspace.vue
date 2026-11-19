@@ -666,6 +666,8 @@ function exportGraphJson() {
       </div>
     </UCard>
 
+    <KnowledgeCodeFlowsTab :project-id="projectId" />
+
     <IntentSearchModal v-model:open="intentModalOpen" :project-id="projectId" />
   </div>
 </template>

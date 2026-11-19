@@ -405,4 +405,179 @@ export function registerCodeTopologyTools(
       return okJson({ registered: true, contract: item });
     }
   );
+
+  server.tool(
+    "brain_register_code_flow",
+    describeMcpTool(
+      profile,
+      "Registra o fluxo completo de uma função ou processo do sistema (ciclo de vida início-ao-fim entre camadas, classes, funções, inputs/outputs e diagrama Mermaid)."
+    ),
+    {
+      projectId: z.string().min(1),
+      flowId: z.string().optional(),
+      title: z.string().min(1),
+      entrypoint: z.string().min(1),
+      description: z.string().min(1),
+      accessPolicyId: z.string().optional(),
+      relatedRuleIds: z.array(z.string()).optional(),
+      mermaidDiagram: z.string().optional(),
+      steps: z
+        .array(
+          z.object({
+            order: z.number().int().positive().optional(),
+            layer: z.string().min(1),
+            componentOrClass: z.string().optional(),
+            fnName: z.string().min(1),
+            filePath: z.string().optional(),
+            inputs: z.string().optional(),
+            outputs: z.string().optional(),
+            sideEffects: z.string().optional()
+          })
+        )
+        .min(1)
+    },
+    async ({ projectId, flowId, title, entrypoint, description, accessPolicyId, relatedRuleIds, mermaidDiagram, steps }) => {
+      assertProjectAccess(ctx, projectId);
+      const policy = accessPolicyId ?? auditPolicyId;
+      assertPolicyAccess(ctx, policy);
+
+      const normalizedSteps = steps.map((s, idx) => ({
+        order: s.order ?? idx + 1,
+        layer: s.layer.trim(),
+        componentOrClass: s.componentOrClass?.trim(),
+        fnName: s.fnName.trim(),
+        filePath: s.filePath?.trim(),
+        inputs: s.inputs?.trim(),
+        outputs: s.outputs?.trim(),
+        sideEffects: s.sideEffects?.trim()
+      }));
+
+      const autoMermaid =
+        mermaidDiagram?.trim() ||
+        [
+          "flowchart TD",
+          ...normalizedSteps.map((s) => {
+            const nodeId = `S${s.order}`;
+            const cls = s.componentOrClass ? `${s.componentOrClass}.` : "";
+            const label = `[${s.layer}] ${cls}${s.fnName}`.replace(/["\[\]]/g, "");
+            return `  ${nodeId}["${s.order}. ${label}"]`;
+          }),
+          ...normalizedSteps.slice(0, -1).map((s, i) => `  S${s.order} --> S${normalizedSteps[i + 1]!.order}`)
+        ].join("\n");
+
+      const id =
+        flowId?.trim().replace(/[\s,\r\n\0]+/g, "-") ||
+        `FLOW-${title.replace(/[^a-zA-Z0-9_-]+/g, "-").replace(/^-|-$/g, "").toUpperCase().slice(0, 48)}`;
+
+      const stepLines = normalizedSteps
+        .map((s) => {
+          const cls = s.componentOrClass ? `${s.componentOrClass}.` : "";
+          const loc = s.filePath ? ` (${s.filePath})` : "";
+          const io = [s.inputs ? `in: ${s.inputs}` : "", s.outputs ? `out: ${s.outputs}` : "", s.sideEffects ? `efeitos: ${s.sideEffects}` : ""]
+            .filter(Boolean)
+            .join(" | ");
+          return `${s.order}. [${s.layer}] ${cls}${s.fnName}${loc}${io ? ` — ${io}` : ""}`;
+        })
+        .join("\n");
+
+      const content = [
+        `# ${title}`,
+        `Entrypoint: ${entrypoint}`,
+        "",
+        description,
+        "",
+        "## Ciclo de Vida (Início ao Fim)",
+        stepLines,
+        "",
+        "```mermaid",
+        autoMermaid,
+        "```"
+      ].join("\n");
+
+      const item = buildKnowledgeItem({
+        id,
+        tenantId: ctx.tenantId,
+        projectId,
+        type: "process",
+        title,
+        content,
+        sourceUri: `.brain/05-flows/${id}.md`,
+        sourceKind: "agent",
+        accessPolicyId: policy,
+        metadata: {
+          knowledgeLayer: "code",
+          codeFlow: {
+            entrypoint,
+            steps: normalizedSteps,
+            mermaidDiagram: autoMermaid,
+            layers: [...new Set(normalizedSteps.map((s) => s.layer))]
+          }
+        }
+      });
+      item.summary = `${entrypoint} (${normalizedSteps.length} etapas)`;
+      item.relatedIds = relatedRuleIds ?? [];
+
+      if (runtime.knowledge) await runtime.knowledge.upsertItem(ctx, item);
+      if (runtime.retrieval.upsertItem) await runtime.retrieval.upsertItem(item);
+      if (runtime.enqueueEmbedding) await runtime.enqueueEmbedding(item).catch(() => null);
+
+      for (const ruleId of relatedRuleIds ?? []) {
+        const cleanRuleId = ruleId.trim();
+        if (!cleanRuleId) continue;
+        await Promise.resolve(
+          runtime.graph.addEdge({
+            tenantId: ctx.tenantId,
+            fromProjectId: projectId,
+            toProjectId: projectId,
+            fromItemId: id,
+            toItemId: cleanRuleId,
+            fromPolicyId: policy,
+            toPolicyId: policy,
+            relationType: cleanRuleId.startsWith("BR-") || cleanRuleId.startsWith("ADR-") ? "GOVERNED_BY" : "IMPLEMENTS",
+            isInferred: false,
+            confidence: 1
+          })
+        );
+      }
+
+      runtime.retrieval.invalidateCache?.(ctx.tenantId, projectId);
+      return okJson({ registered: true, flowId: id, stepsCount: normalizedSteps.length, layers: [...new Set(normalizedSteps.map((s) => s.layer))], mermaidDiagram: autoMermaid });
+    }
+  );
+
+  server.tool(
+    "brain_list_code_flows",
+    describeMcpTool(profile, "Lista os fluxos de funções e ciclos de vida de sistema registrados no projeto, com etapas por camada e diagramas Mermaid."),
+    {
+      projectId: z.string().min(1),
+      layer: z.string().optional(),
+      query: z.string().optional()
+    },
+    async ({ projectId, layer, query }) => {
+      assertProjectAccess(ctx, projectId);
+      const hits = await runtime.retrieval.search(ctx, { projectId, query: query ?? "", limit: 200 });
+      const flows = hits
+        .map((h) => h.item)
+        .filter((i) => i.status !== "deprecated" && (Boolean(i.metadata?.codeFlow) || i.type === "process"))
+        .filter((i) => {
+          if (!layer) return true;
+          const cf = i.metadata?.codeFlow as { layers?: string[] } | undefined;
+          return cf?.layers?.some((l) => l.toLowerCase() === layer.toLowerCase()) ?? false;
+        })
+        .map((i) => {
+          const cf = i.metadata?.codeFlow as { entrypoint?: string; steps?: unknown[]; mermaidDiagram?: string; layers?: string[] } | undefined;
+          return {
+            id: i.id,
+            title: i.title,
+            summary: i.summary ?? "",
+            entrypoint: cf?.entrypoint ?? "",
+            layers: cf?.layers ?? [],
+            steps: cf?.steps ?? [],
+            mermaidDiagram: cf?.mermaidDiagram ?? "",
+            relatedIds: i.relatedIds ?? []
+          };
+        });
+      return okJson({ projectId, total: flows.length, flows });
+    }
+  );
 }
