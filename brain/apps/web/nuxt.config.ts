@@ -9,10 +9,17 @@ export default defineNuxtConfig({
     enabled: true
   },
 
+  app: {
+    head: {
+      style: [
+        { innerHTML: 'html,body{background-color:#020617;color:#f1f5f9;margin:0;}' }
+      ]
+    }
+  },
+
   css: ['~/assets/css/main.css'],
 
   routeRules: {
-    '/': { ssr: false },
     '/mcp': { proxy: `${process.env.NUXT_PUBLIC_API_BASE || 'http://localhost:3333'}/mcp` },
     '/mcp/**': { proxy: `${process.env.NUXT_PUBLIC_API_BASE || 'http://localhost:3333'}/mcp/**` },
     '/.well-known/**': { proxy: `${process.env.NUXT_PUBLIC_API_BASE || 'http://localhost:3333'}/.well-known/**` },
