@@ -61,7 +61,18 @@ export type KnowledgeType =
   | "slo_target"
   | "runbook"
   | "incident_postmortem"
-  | "pending_decision";
+  | "pending_decision"
+  // Novos tipos de conhecimento do dia a dia
+  | "implementation_pattern"
+  | "limit_constraint"
+  | "role_responsibility"
+  | "compatibility_matrix"
+  | "code_vocabulary"
+  | "experiment_record"
+  | "known_exception"
+  | "mock_data_sample"
+  | "external_dependency"
+  | "acceptance_criteria";
 
 export interface KnowledgeProvenance {
   origin: "git" | "manual" | "agent" | "connector" | "import";

@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import type * as echarts from 'echarts'
+import IntentSearchModal from './daily/IntentSearchModal.vue'
 
 const { projectId, apiFetch, notify } = useBrainApi()
 
@@ -15,6 +16,7 @@ const graphLayout = ref<'force' | 'circular'>('force')
 const showEdgeLabels = ref(false)
 const expandedGraph = ref(false)
 const loading = ref(false)
+const intentModalOpen = ref(false)
 
 interface SearchExplain {
   lexicalScore: number
@@ -288,6 +290,9 @@ const graphOption = computed<echarts.EChartsOption>(() => {
           size="sm"
           class="w-40"
         />
+        <UButton size="sm" variant="soft" color="warning" icon="i-lucide-sparkles" @click="intentModalOpen = true">
+          Por Intenção / Exemplos
+        </UButton>
         <UButton size="sm" variant="soft" color="primary" icon="i-lucide-share-2" @click="loadDependencyMap">
           Mapa de Dependências
         </UButton>
@@ -481,5 +486,11 @@ const graphOption = computed<echarts.EChartsOption>(() => {
         </template>
       </UTable>
     </UCard>
+
+    <IntentSearchModal
+      v-model:open="intentModalOpen"
+      :project-id="projectId"
+      @inspect="(item) => emit('inspect', item)"
+    />
   </div>
 </template>

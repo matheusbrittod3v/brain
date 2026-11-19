@@ -1,5 +1,7 @@
 <script setup lang="ts">
 import type * as echarts from 'echarts'
+import DailyChangesModal from './daily/DailyChangesModal.vue'
+import InteractiveTourModal from './daily/InteractiveTourModal.vue'
 
 const props = defineProps<{
   projectId: string
@@ -202,6 +204,8 @@ const recentLogs = computed(() => (props.auditLogs ?? []).slice(0, 5))
 const onboardingOpen = ref(false)
 const loadingOnboarding = ref(false)
 const onboardingGuide = ref<any>(null)
+const dailyChangesOpen = ref(false)
+const interactiveTourOpen = ref(false)
 
 async function openOnboarding() {
   onboardingOpen.value = true
@@ -236,6 +240,24 @@ async function openOnboarding() {
           @click="toggleProjectShared"
         >
           {{ isCurrentShared ? 'Compartilhável Global (Ativo)' : 'Tornar Compartilhável (Global MCP)' }}
+        </UButton>
+        <UButton
+          size="sm"
+          variant="soft"
+          color="warning"
+          icon="i-lucide-history"
+          @click="dailyChangesOpen = true"
+        >
+          O Que Mudou?
+        </UButton>
+        <UButton
+          size="sm"
+          variant="soft"
+          color="neutral"
+          icon="i-lucide-compass"
+          @click="interactiveTourOpen = true"
+        >
+          Tour Interativo
         </UButton>
         <UButton
           size="sm"
@@ -488,5 +510,9 @@ async function openOnboarding() {
         </div>
       </template>
     </UModal>
+
+    <!-- Modais de Mudanças Diárias e Tour Interativo -->
+    <DailyChangesModal v-model:open="dailyChangesOpen" :project-id="projectId" />
+    <InteractiveTourModal v-model:open="interactiveTourOpen" :project-id="projectId" />
   </div>
 </template>

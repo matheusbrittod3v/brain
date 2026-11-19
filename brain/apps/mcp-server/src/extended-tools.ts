@@ -10,6 +10,7 @@ import { registerExtendedSkillsSpecsTools } from "./tools/extended/skills-specs.
 import { registerPlatformOpsTools } from "./tools/extended/platform-ops.js";
 import { registerCodeTopologyTools } from "./tools/extended/code-topology.js";
 import { registerIntelligenceTools } from "./tools/extended/intelligence-tools.js";
+import { registerDailyIntelligenceTools } from "./tools/extended/daily-tools.js";
 
 export function registerExtendedMcpTools(
   server: McpServer,
@@ -25,5 +26,6 @@ export function registerExtendedMcpTools(
   registerPlatformOpsTools(server, runtime, ctx, auditPolicyId, profile);
   registerCodeTopologyTools(server, runtime, ctx, auditPolicyId, profile);
   registerIntelligenceTools(server, runtime, ctx, auditPolicyId, profile);
+  registerDailyIntelligenceTools(server, runtime, ctx, auditPolicyId, profile);
   registerSubagentMcpTools(server, runtime, ctx, auditPolicyId, profile);
 }

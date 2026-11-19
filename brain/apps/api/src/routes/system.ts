@@ -23,6 +23,7 @@ import { registerMcpGatewayRoutes } from "./mcp-gateway.js";
 import { registerSystemSettingsRoutes } from "./system-settings.js";
 import { registerEvolutionPrioritiesRoutes } from "./evolution-priorities.js";
 import { registerKnowledgeIntelligenceRoutes } from "./knowledge-intelligence.js";
+import { registerKnowledgeDailyRoutes } from "./knowledge-daily.js";
 
 export type DeveloperProfileData = {
   tenantId: string;
@@ -220,6 +221,7 @@ export function registerSystemRoutes(
   registerSystemSettingsRoutes(app, deps);
   registerEvolutionPrioritiesRoutes(app, deps);
   registerKnowledgeIntelligenceRoutes(app, deps);
+  registerKnowledgeDailyRoutes(app, deps);
   registerMcpGatewayRoutes(app, deps);
 
   return { getDeveloperProfile };

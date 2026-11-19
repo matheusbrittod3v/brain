@@ -5,6 +5,7 @@ import KnowledgeLayersTopologyTab from './knowledge/LayersTopologyTab.vue'
 import SkillsTab from './knowledge/SkillsTab.vue'
 import SpecsTab from './knowledge/SpecsTab.vue'
 import UploadModal from './knowledge/UploadModal.vue'
+import DiscussionImporterModal from './daily/DiscussionImporterModal.vue'
 import {
   KNOWLEDGE_LAYERS,
   computeKnowledgeQuality,
@@ -34,6 +35,7 @@ const layerFilter = ref<'all' | KnowledgeLayer>('all')
 const fetchedSkills = ref<KnowledgeItemRow[]>([])
 const syncingBrain = ref(false)
 const uploadOpen = ref(false)
+const discussionOpen = ref(false)
 const createOpen = ref(false)
 const createInitialType = ref('doc')
 const inspected = ref<KnowledgeItemRow | null>(null)
@@ -122,6 +124,9 @@ const typeOptions = computed(() => [
     'api_contract', 'event_contract', 'runbook', 'document', 'requirement',
     'glossary_term', 'product_capability', 'data_model', 'use_case', 'journey',
     'risk_control', 'slo_target', 'incident_postmortem', 'pending_decision',
+    'implementation_pattern', 'limit_constraint', 'role_responsibility', 'compatibility_matrix',
+    'code_vocabulary', 'experiment_record', 'known_exception', 'mock_data_sample',
+    'external_dependency', 'acceptance_criteria',
     ...props.items.map(i => i.type)
   ])
 ])
@@ -234,6 +239,16 @@ async function handleRefresh() {
           @click="openCreateModal('spec')"
         >
           Nova Spec
+        </UButton>
+        <UButton
+          v-if="hasPermission('knowledge:write')"
+          size="sm"
+          variant="soft"
+          color="warning"
+          icon="i-lucide-messages-square"
+          @click="discussionOpen = true"
+        >
+          Extrair de Discussão
         </UButton>
         <UButton
           v-if="hasPermission('knowledge:write')"
@@ -433,6 +448,12 @@ async function handleRefresh() {
       :can-write="hasPermission('knowledge:write')"
       @close="inspected = null"
       @updated="(updatedItem) => { inspected = updatedItem; handleRefresh() }"
+    />
+
+    <DiscussionImporterModal
+      v-model:open="discussionOpen"
+      :project-id="projectId"
+      @imported="handleRefresh"
     />
   </div>
 </template>
