@@ -12,7 +12,7 @@ import {
 } from "@brain/auth";
 import type { ContextEngine } from "@brain/context-engine";
 import type { CrossServiceContractRegistry, PostgresCrossServiceRegistry } from "@brain/cross-service";
-import type { PgAuthRepository, PgMcpAuthRepository, PgOperationalRepository } from "@brain/database";
+import type { PgAuthRepository, PgMcpAuthRepository, PgOperationalRepository, PgSystemSettingsRepository } from "@brain/database";
 import type { KnowledgeGraphStore, PostgresGraphStore } from "@brain/graph";
 import { scanForSecrets } from "@brain/ingestion";
 import type { PostgresKnowledgeRepository } from "@brain/knowledge";
@@ -20,6 +20,7 @@ import type { PostgresMemoryManager } from "@brain/memory";
 import type { AsyncRetrievalEngine, PostgresRetrievalEngine } from "@brain/retrieval";
 import { assertSecretScanClean } from "../services/ai-worker.js";
 import { registerMcpGatewayRoutes } from "./mcp-gateway.js";
+import { registerSystemSettingsRoutes } from "./system-settings.js";
 
 export type DeveloperProfileData = {
   tenantId: string;
@@ -44,6 +45,7 @@ export function registerSystemRoutes(
     opRepo?: PgOperationalRepository;
     authRepo?: PgAuthRepository;
     mcpAuthRepo?: PgMcpAuthRepository;
+    systemSettingsRepo?: PgSystemSettingsRepository;
     pgGraph?: PostgresGraphStore;
     graph: KnowledgeGraphStore;
     queryAwareRetrieval: AsyncRetrievalEngine;
@@ -207,7 +209,8 @@ export function registerSystemRoutes(
     return { deleted };
   });
 
-  // Universal Agent Gateway + MCP Streamable HTTP + OAuth Discovery
+  // System Settings persisted in PostgreSQL + Universal Agent Gateway + MCP Streamable HTTP
+  registerSystemSettingsRoutes(app, deps);
   registerMcpGatewayRoutes(app, deps);
 
   return { getDeveloperProfile };

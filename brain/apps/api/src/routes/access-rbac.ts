@@ -126,6 +126,9 @@ export function registerAccessRbacRoutes(deps: ApiRouteDeps) {
         memUser.allowedPolicies = [...nextPolicies];
         memUser.updatedAt = new Date().toISOString();
       }
+      if (opRepo) {
+        await opRepo.syncUserProjectMemberships(ctx, targetId, nextProjects).catch(() => undefined);
+      }
       if (req.body.revokeActiveSessions !== false) {
         revokeActorSessions(targetId);
       }

@@ -1,4 +1,4 @@
-import { and, asc, eq, gt } from "drizzle-orm";
+import { and, asc, eq, gt, notInArray } from "drizzle-orm";
 import {
   applyUserFineGrainedPolicy,
   applyUserRoleAssignment,
@@ -78,6 +78,30 @@ export class PgAccessRbacRepo {
       });
       if (!row) throw new BrainError("BRAIN_ERR_STORAGE_UNAVAILABLE", "Member access record was not persisted.", 503);
       return row;
+    });
+  }
+
+  /**
+   * Removes stale project_access_members rows when a user is unlinked from projects.
+   */
+  async syncUserProjectMemberships(ctx: AuthContext, actorId: string, allowedProjects: readonly string[], systemDb?: BrainDb): Promise<void> {
+    const targetDb = systemDb ?? this.db;
+    const condition = allowedProjects.length > 0
+      ? and(
+          eq(projectAccessMembers.tenantId, ctx.tenantId),
+          eq(projectAccessMembers.actorId, actorId),
+          notInArray(projectAccessMembers.projectId, [...allowedProjects])
+        )
+      : and(
+          eq(projectAccessMembers.tenantId, ctx.tenantId),
+          eq(projectAccessMembers.actorId, actorId)
+        );
+    if (systemDb) {
+      await targetDb.delete(projectAccessMembers).where(condition);
+      return;
+    }
+    await withTenantRls(this.db, ctx, async (tx) => {
+      await tx.delete(projectAccessMembers).where(condition);
     });
   }
 

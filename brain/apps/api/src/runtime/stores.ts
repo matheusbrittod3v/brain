@@ -11,7 +11,7 @@ import { assertProjectAccess, authenticateRequest, buildAbilityForContext, subje
 import { ContextEngine } from "@brain/context-engine";
 import { BrainError, type KnowledgeItem } from "@brain/core";
 import { CrossServiceContractRegistry, PostgresCrossServiceRegistry } from "@brain/cross-service";
-import { createDatabaseClient, PgAuthRepository, PgMcpAuthRepository, PgOperationalRepository } from "@brain/database";
+import { createDatabaseClient, PgAuthRepository, PgMcpAuthRepository, PgOperationalRepository, PgSystemSettingsRepository } from "@brain/database";
 import { KnowledgeGraphStore, PostgresGraphStore } from "@brain/graph";
 import { PostgresKnowledgeRepository, type SystemKnowledgeSqlClient } from "@brain/knowledge";
 import { PostgresMemoryManager } from "@brain/memory";
@@ -122,6 +122,7 @@ export function createApiRuntimeStores(deps: {
       : undefined;
   const authRepo = operationalDatabaseClient ? new PgAuthRepository(operationalDatabaseClient.db) : undefined;
   const mcpAuthRepo = operationalDatabaseClient ? new PgMcpAuthRepository(operationalDatabaseClient.db) : undefined;
+  const systemSettingsRepo = operationalDatabaseClient ? new PgSystemSettingsRepository(operationalDatabaseClient.db) : undefined;
   const systemDb = process.env.DATABASE_SYSTEM_URL ? createDatabaseClient(process.env.DATABASE_SYSTEM_URL).db : undefined;
   const pgTemporal =
     appPostgresClient && process.env.BRAIN_PG_STORES === "1"
@@ -226,6 +227,7 @@ export function createApiRuntimeStores(deps: {
     operationalDb: operationalDatabaseClient?.db,
     authRepo,
     mcpAuthRepo,
+    systemSettingsRepo,
     pgTemporal,
     pgCrossService,
     upsertKnowledgeItem,

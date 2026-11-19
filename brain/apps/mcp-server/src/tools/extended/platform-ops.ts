@@ -183,4 +183,45 @@ export function registerPlatformOpsTools(
       return okJson({ projectId, entries: radar });
     }
   );
+
+  server.tool(
+    "brain_system_settings_get",
+    describeMcpTool(profile, "Lista as configurações globais persistidas no PostgreSQL (embeddings, runner, github, smtp, policies) com segredos mascarados."),
+    { category: z.string().min(1).optional() },
+    async ({ category }) => {
+      if (!runtime.systemSettings) {
+        return okJson({ items: [], reason: "PgSystemSettingsRepository unavailable." });
+      }
+      const items = await runtime.systemSettings.listSettings(ctx.tenantId, category, true);
+      return okJson({ tenantId: ctx.tenantId, count: items.length, items });
+    }
+  );
+
+  server.tool(
+    "brain_system_settings_set",
+    describeMcpTool(profile, "Cria ou atualiza uma configuração global no PostgreSQL (requer papel admin/owner/tech-lead)."),
+    {
+      category: z.string().min(1),
+      key: z.string().min(1),
+      value: z.unknown(),
+      isSecret: z.boolean().optional()
+    },
+    async ({ category, key, value, isSecret }) => {
+      if (!ctx.roles.some((r) => ["admin", "owner", "tech-lead"].includes(r.toLowerCase()))) {
+        return okJson({ saved: false, reason: "Apenas administradores podem alterar configurações globais." });
+      }
+      if (!runtime.systemSettings) {
+        return okJson({ saved: false, reason: "PgSystemSettingsRepository unavailable." });
+      }
+      const saved = await runtime.systemSettings.upsertSetting(
+        ctx.tenantId,
+        category.trim(),
+        key.trim(),
+        value,
+        Boolean(isSecret),
+        ctx.actorId
+      );
+      return okJson({ saved: true, setting: { ...saved, value: saved.isSecret ? "***" : saved.value } });
+    }
+  );
 }

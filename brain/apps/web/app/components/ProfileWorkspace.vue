@@ -1,9 +1,9 @@
 <script setup lang="ts">
 const props = defineProps<{
-  initialTab?: 'overview' | 'oauth' | 'tokens'
+  initialTab?: 'overview' | 'oauth' | 'tokens' | 'settings'
 }>()
 
-const activeTab = ref<'overview' | 'oauth' | 'tokens'>(props.initialTab ?? 'overview')
+const activeTab = ref<'overview' | 'oauth' | 'tokens' | 'settings'>(props.initialTab ?? 'overview')
 
 watch(
   () => props.initialTab,
@@ -15,7 +15,8 @@ watch(
 const tabs = [
   { value: 'overview', label: 'Conta & Permissões', icon: 'i-lucide-user-circle' },
   { value: 'oauth', label: 'OAuth2 IA & MCP', icon: 'i-lucide-shield-check' },
-  { value: 'tokens', label: 'Tokens MCP & Codex', icon: 'i-lucide-key-round' }
+  { value: 'tokens', label: 'Tokens MCP & Codex', icon: 'i-lucide-key-round' },
+  { value: 'settings', label: 'Configurações (DB)', icon: 'i-lucide-settings-2' }
 ]
 </script>
 
@@ -23,7 +24,7 @@ const tabs = [
   <div class="space-y-6">
     <UiPageHeader
       title="Perfil do Usuário & Conexões MCP"
-      description="Gerencie sua conta, autorizações OAuth2 para agentes (Codex, Cursor, Claude) e tokens revogáveis."
+      description="Gerencie sua conta, autorizações OAuth2 para agentes (Codex, Cursor, Claude), tokens e parâmetros globais."
       icon="i-lucide-user-cog"
     />
 
@@ -32,5 +33,6 @@ const tabs = [
     <ProfileOverviewTab v-if="activeTab === 'overview'" @open-tab="activeTab = $event" />
     <ProfileOAuthTab v-else-if="activeTab === 'oauth'" />
     <ProfileMcpTokensTab v-else-if="activeTab === 'tokens'" />
+    <ProfileSettingsTab v-else />
   </div>
 </template>

@@ -101,11 +101,10 @@ export class UsersStore {
     const userId = `usr_${randomUUID().replace(/-/g, "").slice(0, 16)}`;
     const requireVerification = this.isEmailVerificationRequired();
 
-    // Default project / policies from env or standard defaults
-    const defaultProjects = (process.env.BRAIN_ALLOWED_PROJECTS || "local-project,brain,staf-web")
-      .split(",")
-      .map((p) => p.trim())
-      .filter(Boolean);
+    // Default project / policies: empty projects by default so unlinked users stay unlinked cleanly
+    const defaultProjects = process.env.BRAIN_ALLOWED_PROJECTS
+      ? process.env.BRAIN_ALLOWED_PROJECTS.split(",").map((p) => p.trim()).filter(Boolean)
+      : [];
     const defaultPolicies = (process.env.BRAIN_ALLOWED_POLICIES || "public-org,internal-project")
       .split(",")
       .map((p) => p.trim())

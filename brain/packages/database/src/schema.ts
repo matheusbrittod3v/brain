@@ -595,4 +595,18 @@ export const authMcpTokens = pgTable("auth_mcp_tokens", {
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull()
 });
 
+export const systemSettings = pgTable(
+  "system_settings",
+  {
+    tenantId: text("tenant_id").default("default-org").notNull(),
+    category: text("category").notNull(),
+    key: text("key").notNull(),
+    value: jsonb("value").notNull(),
+    isSecret: boolean("is_secret").default(false).notNull(),
+    updatedBy: text("updated_by").default("system").notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull()
+  },
+  (t) => [primaryKey({ columns: [t.tenantId, t.category, t.key] })]
+);
+
 

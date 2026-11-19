@@ -8,7 +8,7 @@ import type { AuditLogger } from "@brain/audit-engine";
 import { authenticateRequest, type AuthContext } from "@brain/auth";
 import type { ContextEngine } from "@brain/context-engine";
 import type { CrossServiceContractRegistry, PostgresCrossServiceRegistry } from "@brain/cross-service";
-import { createDatabaseClient, type BrainDb, type PgMcpAuthRepository, type PgOperationalRepository } from "@brain/database";
+import { createDatabaseClient, type BrainDb, type PgMcpAuthRepository, type PgOperationalRepository, type PgSystemSettingsRepository } from "@brain/database";
 import type { KnowledgeGraphStore, PostgresGraphStore } from "@brain/graph";
 import type { PostgresKnowledgeRepository } from "@brain/knowledge";
 import { createBrainMcpServer, createRunnerSchedule } from "@brain/mcp-server";
@@ -24,6 +24,7 @@ export interface McpGatewayDeps {
   allowedPolicies: readonly string[];
   recordAudit: (ctx: AuthContext, event: Parameters<AuditLogger["record"]>[0]) => Promise<unknown>;
   opRepo?: PgOperationalRepository;
+  systemSettingsRepo?: PgSystemSettingsRepository;
   mcpAuthRepo?: PgMcpAuthRepository;
   pgGraph?: PostgresGraphStore;
   graph: KnowledgeGraphStore;
@@ -229,6 +230,7 @@ export function registerMcpGatewayRoutes(app: FastifyInstance, deps: McpGatewayD
               })
           : undefined,
       opRepo: deps.opRepo,
+      systemSettings: deps.systemSettingsRepo,
       memory: deps.pgMemory,
       knowledge: deps.pgKnowledge,
       crossServiceRegistry: deps.pgCrossService ?? deps.crossService,

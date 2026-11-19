@@ -17,7 +17,7 @@ import {
 } from "@brain/context-engine";
 import type { KnowledgeItem } from "@brain/core";
 import { CrossServiceContractRegistry, PostgresCrossServiceRegistry } from "@brain/cross-service";
-import { createDatabaseClient, PgOperationalRepository } from "@brain/database";
+import { createDatabaseClient, PgOperationalRepository, PgSystemSettingsRepository } from "@brain/database";
 import { KnowledgeGraphStore, PostgresGraphStore, type GraphStoreContract } from "@brain/graph";
 import type { AnalyzeDistributedImpactOptions } from "@brain/impact-analysis";
 import { PostgresKnowledgeRepository, type KnowledgeRepository } from "@brain/knowledge";
@@ -69,6 +69,7 @@ export interface BrainRuntime {
   scheduleRunnerTask?: (input: RunnerSchedulePayload & { cron: string }) => Promise<{ scheduleId: string }>;
   enqueueEmbedding?: (item: KnowledgeItem) => Promise<string | null>;
   opRepo?: PgOperationalRepository;
+  systemSettings?: PgSystemSettingsRepository;
   memory?: Pick<PostgresMemoryManager, "listVisible">;
   knowledge?: Pick<KnowledgeRepository, "listVersions" | "upsertItem"> & {
     incrementHitCounts?: (ctx: AuthContext, projectId: string, itemIds: readonly string[]) => Promise<Array<{ itemId: string; hitCount: number }>>;
@@ -108,6 +109,7 @@ export function createBrainRuntime(
 
 export interface CreateSqlBrainRuntimeOptions {
   opRepo?: PgOperationalRepository;
+  systemSettings?: PgSystemSettingsRepository;
   databaseUrl?: string;
   workspaceRoot?: string;
   workspaceRoots?: Readonly<Record<string, string>>;
