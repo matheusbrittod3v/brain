@@ -107,7 +107,7 @@ export function registerRbacGuard(
 
     const params = req.params as { projectId?: string } | undefined;
     const query = req.query as { projectId?: string } | undefined;
-    const pid = params?.projectId ?? query?.projectId;
+    const pid = routeUrl === "/v1/auth/me" ? undefined : (params?.projectId ?? query?.projectId);
     const ctx = pid
       ? await deps.authenticateProjectRequest(req.headers.authorization, pid)
       : await authenticateRequest(

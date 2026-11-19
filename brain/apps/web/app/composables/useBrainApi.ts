@@ -87,6 +87,12 @@ export function useBrainApi() {
         visibilityScope?: string
         actorType?: string
       }>(`/v1/auth/me?projectId=${encodeURIComponent(projectId.value)}`)
+      if (me.allowedProjects && me.allowedProjects.length > 0 && !me.allowedProjects.includes(projectId.value)) {
+        projectId.value = me.allowedProjects[0]!
+        if (import.meta.client) {
+          localStorage.setItem('brain.projectId', projectId.value)
+        }
+      }
       currentUser.value = {
         id: me.actorId ?? me.id ?? 'local',
         email: me.email,
@@ -117,6 +123,12 @@ export function useBrainApi() {
       localStorage.setItem('brain.apiUrl', apiUrl.value)
     }
     if (user?.id) {
+      if (user.allowedProjects && user.allowedProjects.length > 0 && !user.allowedProjects.includes(projectId.value)) {
+        projectId.value = user.allowedProjects[0]!
+        if (import.meta.client) {
+          localStorage.setItem('brain.projectId', projectId.value)
+        }
+      }
       currentUser.value = {
         id: user.id,
         email: user.email,

@@ -12,7 +12,7 @@ import {
 } from "@brain/auth";
 import type { ContextEngine } from "@brain/context-engine";
 import type { CrossServiceContractRegistry, PostgresCrossServiceRegistry } from "@brain/cross-service";
-import type { PgAuthRepository, PgMcpAuthRepository, PgOperationalRepository, PgSystemSettingsRepository } from "@brain/database";
+import { createDatabaseClient, type PgAuthRepository, type PgMcpAuthRepository, type PgOperationalRepository, type PgSystemSettingsRepository } from "@brain/database";
 import type { KnowledgeGraphStore, PostgresGraphStore } from "@brain/graph";
 import { scanForSecrets } from "@brain/ingestion";
 import type { PostgresKnowledgeRepository } from "@brain/knowledge";
@@ -85,6 +85,8 @@ export function registerSystemRoutes(
     registeredProjects
   } = deps;
 
+  const systemDb = process.env.DATABASE_SYSTEM_URL ? createDatabaseClient(process.env.DATABASE_SYSTEM_URL).db : undefined;
+
   app.get("/v1/health", async () => ({ service: "brain-api", status: "ok", version: "0.1.0", deploymentMode }));
 
   app.get<{ Querystring: { projectId?: string } }>("/v1/auth/me", async (req) => {
@@ -100,10 +102,13 @@ export function registerSystemRoutes(
           allowedPolicies: dbUser.allowedPolicies
         }
       : ctx;
+    const scopedCtx = opRepo
+      ? await opRepo.resolveDynamicMcpScope(baseCtx, allowedProjects, allowedPolicies, systemDb)
+      : baseCtx;
     const effectiveCtx =
-      req.query.projectId && opRepo
-        ? await opRepo.resolveEffectiveAuthContext(baseCtx, req.query.projectId)
-        : baseCtx;
+      req.query.projectId && opRepo && scopedCtx.allowedProjects.includes(req.query.projectId)
+        ? await opRepo.resolveEffectiveAuthContext(scopedCtx, req.query.projectId)
+        : scopedCtx;
     const visibilityScope = effectiveCtx.roles.some((r) => ["admin", "appsec", "cto"].includes(r))
       ? "org"
       : effectiveCtx.roles.some((r) => ["tech-lead", "po", "reviewer"].includes(r))
