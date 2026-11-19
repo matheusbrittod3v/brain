@@ -198,6 +198,24 @@ const coverageChartOption = computed<echarts.EChartsOption>(() => ({
 }))
 
 const recentLogs = computed(() => (props.auditLogs ?? []).slice(0, 5))
+
+const onboardingOpen = ref(false)
+const loadingOnboarding = ref(false)
+const onboardingGuide = ref<any>(null)
+
+async function openOnboarding() {
+  onboardingOpen.value = true
+  if (!onboardingGuide.value) {
+    loadingOnboarding.value = true
+    try {
+      onboardingGuide.value = await apiFetch(`/v1/projects/${encodeURIComponent(props.projectId)}/intelligence/onboarding-guide`)
+    } catch (err) {
+      notify('Erro ao carregar onboarding', err instanceof Error ? err.message : String(err), 'error')
+    } finally {
+      loadingOnboarding.value = false
+    }
+  }
+}
 </script>
 
 <template>
@@ -218,6 +236,16 @@ const recentLogs = computed(() => (props.auditLogs ?? []).slice(0, 5))
           @click="toggleProjectShared"
         >
           {{ isCurrentShared ? 'Compartilhável Global (Ativo)' : 'Tornar Compartilhável (Global MCP)' }}
+        </UButton>
+        <UButton
+          size="sm"
+          variant="soft"
+          color="primary"
+          icon="i-lucide-book-open"
+          :loading="loadingOnboarding"
+          @click="openOnboarding"
+        >
+          Guia de Onboarding
         </UButton>
         <UButton size="sm" variant="soft" icon="i-lucide-folder-plus" @click="emit('newProject')">
           Novo Projeto
@@ -438,5 +466,27 @@ const recentLogs = computed(() => (props.auditLogs ?? []).slice(0, 5))
         </div>
       </UCard>
     </div>
+
+    <!-- Modal de Onboarding de Projeto -->
+    <UModal v-model:open="onboardingOpen" :title="onboardingGuide?.title || 'Guia de Onboarding do Projeto'" class="max-w-2xl">
+      <template #body>
+        <div v-if="loadingOnboarding" class="p-8 text-center text-xs text-muted">Gerando guia de onboarding...</div>
+        <div v-else-if="onboardingGuide" class="space-y-4 max-h-[70vh] overflow-y-auto">
+          <div v-for="(sec, idx) in onboardingGuide.sections" :key="idx" class="p-4 rounded-xl border border-default bg-elevated/40 space-y-2">
+            <h4 class="font-semibold text-xs text-primary">{{ sec.title }}</h4>
+            <p v-if="sec.content" class="text-xs text-highlighted whitespace-pre-wrap">{{ sec.content }}</p>
+            <ul v-if="sec.items" class="space-y-1">
+              <li v-for="it in sec.items" :key="it.id" class="text-xs flex items-center justify-between">
+                <span>{{ it.title || it.id }}</span>
+                <UBadge v-if="it.status" color="neutral" variant="outline" size="xs">{{ it.status }}</UBadge>
+              </li>
+            </ul>
+            <ol v-if="sec.steps" class="list-decimal pl-4 space-y-1">
+              <li v-for="(st, sIdx) in sec.steps" :key="sIdx" class="text-xs text-highlighted">{{ st }}</li>
+            </ol>
+          </div>
+        </div>
+      </template>
+    </UModal>
   </div>
 </template>

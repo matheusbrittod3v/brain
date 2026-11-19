@@ -85,11 +85,11 @@ export function inferKnowledgeLayer(item: { type: string; tags?: string[] }): Kn
     if (KNOWLEDGE_LAYERS.some(l => l.id === val)) return val
   }
   const t = item.type.toLowerCase()
-  if (['architecture_decision', 'diagram', 'topology', 'system_architecture'].includes(t)) return 'architecture'
-  if (['business_rule', 'domain_flow'].includes(t)) return 'business'
-  if (['code_symbol', 'api_contract', 'schema', 'test'].includes(t)) return 'code'
-  if (['spec', 'requirement', 'ux_flow'].includes(t)) return 'product'
-  if (['runbook', 'pipeline', 'security_policy'].includes(t)) return 'operations'
+  if (['architecture_decision', 'diagram', 'topology', 'system_architecture', 'pending_decision'].includes(t)) return 'architecture'
+  if (['business_rule', 'domain_flow', 'glossary_term'].includes(t)) return 'business'
+  if (['code_symbol', 'api_contract', 'schema', 'test', 'data_model'].includes(t)) return 'code'
+  if (['spec', 'requirement', 'ux_flow', 'product_capability', 'use_case', 'journey'].includes(t)) return 'product'
+  if (['runbook', 'pipeline', 'security_policy', 'risk_control', 'slo_target', 'incident_postmortem'].includes(t)) return 'operations'
   return 'general'
 }
 

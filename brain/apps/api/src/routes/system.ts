@@ -22,6 +22,7 @@ import { assertSecretScanClean } from "../services/ai-worker.js";
 import { registerMcpGatewayRoutes } from "./mcp-gateway.js";
 import { registerSystemSettingsRoutes } from "./system-settings.js";
 import { registerEvolutionPrioritiesRoutes } from "./evolution-priorities.js";
+import { registerKnowledgeIntelligenceRoutes } from "./knowledge-intelligence.js";
 
 export type DeveloperProfileData = {
   tenantId: string;
@@ -218,6 +219,7 @@ export function registerSystemRoutes(
   // System Settings persisted in PostgreSQL + Universal Agent Gateway + MCP Streamable HTTP
   registerSystemSettingsRoutes(app, deps);
   registerEvolutionPrioritiesRoutes(app, deps);
+  registerKnowledgeIntelligenceRoutes(app, deps);
   registerMcpGatewayRoutes(app, deps);
 
   return { getDeveloperProfile };

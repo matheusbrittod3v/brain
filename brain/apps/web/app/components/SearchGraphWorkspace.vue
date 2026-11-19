@@ -54,6 +54,26 @@ const benchmarkSummary = ref<BenchmarkSummary | null>(null)
 const zeroHitQueries = ref<Array<{ query: string; count: number }>>([])
 const staleItemsCount = ref(0)
 const untestedRulesCount = ref(0)
+const isDependencyMapMode = ref(false)
+
+async function loadDependencyMap() {
+  if (!projectId.value) return
+  loading.value = true
+  try {
+    const res = await apiFetch<{
+      nodes: Array<{ id: string; label: string; type: string; category: string }>
+      edges: Array<{ from: string; to: string; relation: string }>
+    }>(`/v1/projects/${encodeURIComponent(projectId.value)}/intelligence/dependency-map`)
+    graphNodes.value = res.nodes.map(n => ({ id: n.id, title: n.label, type: n.type }))
+    graphEdges.value = res.edges
+    isDependencyMapMode.value = true
+    notify('Mapa de Dependências Navegável', `${res.nodes.length} nós e ${res.edges.length} conexões`, 'success')
+  } catch (err) {
+    notify('Erro ao carregar dependências', err instanceof Error ? err.message : String(err), 'error')
+  } finally {
+    loading.value = false
+  }
+}
 
 async function runBenchmarkEvaluation() {
   if (!projectId.value) return
@@ -268,6 +288,9 @@ const graphOption = computed<echarts.EChartsOption>(() => {
           size="sm"
           class="w-40"
         />
+        <UButton size="sm" variant="soft" color="primary" icon="i-lucide-share-2" @click="loadDependencyMap">
+          Mapa de Dependências
+        </UButton>
         <UButton size="sm" :loading="loading" icon="i-lucide-refresh-cw" @click="runSearchAndGraph">
           Atualizar
         </UButton>

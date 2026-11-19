@@ -10,6 +10,7 @@ interface ChatMessage {
   model?: string
   latencyMs?: number
   totalTokens?: number
+  citations?: Array<{ id: string; title: string; type: string; layer: string }>
 }
 
 interface ProviderOption {
@@ -23,6 +24,7 @@ const { projectId, apiFetch, notify } = useBrainApi()
 const messages = ref<ChatMessage[]>([])
 const input = ref('')
 const sending = ref(false)
+const groundWithKnowledge = ref(true)
 const chatRole = ref<'primary' | 'secondary' | 'collaborate'>('primary')
 const useCustomTarget = ref(false)
 const manualModelInput = ref(false)
@@ -129,6 +131,33 @@ async function sendMessage(textOverride?: string) {
 
   sending.value = true
   try {
+    if (groundWithKnowledge.value) {
+      const startTime = Date.now()
+      const res = await apiFetch(`/v1/projects/${encodeURIComponent(projectId.value)}/intelligence/chat-qa`, {
+        method: 'POST',
+        body: JSON.stringify({
+          question: text,
+          history: messages.value.slice(-6).map((m) => ({ role: m.role, content: m.content }))
+        })
+      }) as {
+        answer: string
+        citations?: Array<{ id: string; title: string; type: string; layer: string }>
+        retrievedCount?: number
+      }
+
+      messages.value.push({
+        id: `a-${Date.now()}`,
+        role: 'assistant',
+        content: res.answer,
+        provider: 'brain-intelligence',
+        model: 'grounded-retrieval',
+        latencyMs: Date.now() - startTime,
+        citations: res.citations ?? []
+      })
+      scrollToBottom()
+      return
+    }
+
     const payload: Record<string, unknown> = {
       role: chatRole.value,
       messages: messages.value.map((m) => ({ role: m.role, content: m.content }))
@@ -208,14 +237,22 @@ watch(projectId, () => {
         </div>
 
         <div class="flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-default/60">
-          <UiSegmentedTabs
-            v-model="chatRole"
-            :items="[
-              { label: 'Principal', value: 'primary', icon: 'i-lucide-bot' },
-              { label: 'Submodelo', value: 'secondary', icon: 'i-lucide-sparkles' },
-              { label: 'Principal ↔ Sub', value: 'collaborate', icon: 'i-lucide-git-compare' }
-            ]"
-          />
+          <div class="flex items-center gap-3">
+            <UiSegmentedTabs
+              v-model="chatRole"
+              :items="[
+                { label: 'Principal', value: 'primary', icon: 'i-lucide-bot' },
+                { label: 'Submodelo', value: 'secondary', icon: 'i-lucide-sparkles' },
+                { label: 'Principal ↔ Sub', value: 'collaborate', icon: 'i-lucide-git-compare' }
+              ]"
+            />
+            <div class="flex items-center gap-1.5 px-2 py-1 rounded bg-elevated border border-default text-xs">
+              <USwitch v-model="groundWithKnowledge" size="xs" />
+              <span class="font-medium text-xs cursor-pointer select-none" @click="groundWithKnowledge = !groundWithKnowledge">
+                Q&A Grounding
+              </span>
+            </div>
+          </div>
 
           <UButton
             size="xs"
@@ -308,6 +345,27 @@ watch(projectId, () => {
             <div>{{ m.secondaryReply }}</div>
           </div>
           <div>{{ m.content }}</div>
+
+          <div v-if="m.citations && m.citations.length > 0" class="mt-2.5 pt-2 border-t border-default/50 space-y-1.5">
+            <div class="flex items-center gap-1 text-[11px] font-semibold text-primary">
+              <UIcon name="i-lucide-book-open" class="size-3.5" />
+              <span>Fontes Citadas ({{ m.citations.length }}):</span>
+            </div>
+            <div class="flex flex-wrap gap-1">
+              <UBadge
+                v-for="c in m.citations"
+                :key="c.id"
+                size="xs"
+                variant="subtle"
+                color="neutral"
+                class="font-mono text-[10px]"
+                :title="`Tipo: ${c.type} | Camada: ${c.layer}`"
+              >
+                {{ c.type }}: {{ c.title }}
+              </UBadge>
+            </div>
+          </div>
+
           <div v-if="m.role === 'assistant'" class="flex items-center justify-between gap-2 mt-2 pt-1.5 border-t border-default/50 text-[10px] text-muted font-mono">
             <div class="flex items-center gap-2">
               <span>{{ m.provider }}/{{ m.model }}</span>

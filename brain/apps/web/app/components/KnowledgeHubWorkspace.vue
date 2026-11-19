@@ -39,6 +39,44 @@ const createInitialType = ref('doc')
 const inspected = ref<KnowledgeItemRow | null>(null)
 const inspectorTab = ref<'read' | 'edit' | 'versions' | 'relations'>('read')
 
+const decisionsTimeline = ref<Array<{ id: string; title: string; status: string; version: number; date: string; rationale: string }>>([])
+const loadingDecisions = ref(false)
+async function loadDecisions() {
+  if (!projectId.value) return
+  loadingDecisions.value = true
+  try {
+    const res = await apiFetch<{ timeline: typeof decisionsTimeline.value }>(`/v1/projects/${encodeURIComponent(projectId.value)}/intelligence/decision-timeline`)
+    decisionsTimeline.value = res.timeline ?? []
+  } catch {
+    decisionsTimeline.value = []
+  } finally {
+    loadingDecisions.value = false
+  }
+}
+
+const docDriftSuggestions = ref<Array<{ documentId: string; title: string; reason: string; urgency: string; suggestedSection: string }>>([])
+const loadingDrift = ref(false)
+async function loadDrift() {
+  if (!projectId.value) return
+  loadingDrift.value = true
+  try {
+    const res = await apiFetch<{ suggestions: typeof docDriftSuggestions.value }>(
+      `/v1/projects/${encodeURIComponent(projectId.value)}/intelligence/doc-drift-suggestions`,
+      { method: 'POST', body: JSON.stringify({ changedFiles: ['apps/api/src/server.ts', 'packages/core/src/index.ts'] }) }
+    )
+    docDriftSuggestions.value = res.suggestions ?? []
+  } catch {
+    docDriftSuggestions.value = []
+  } finally {
+    loadingDrift.value = false
+  }
+}
+
+watch(activeSubTab, (tab) => {
+  if (tab === 'decisions' && decisionsTimeline.value.length === 0) loadDecisions()
+  if (tab === 'drift' && docDriftSuggestions.value.length === 0) loadDrift()
+})
+
 async function loadSkills() {
   if (!projectId.value) {
     fetchedSkills.value = []
@@ -67,7 +105,9 @@ const subTabs = computed(() => [
   { label: 'Todo Conhecimento', value: 'all', icon: 'i-lucide-library', badge: props.items.length },
   { label: 'Topologia & Camadas', value: 'layers', icon: 'i-lucide-network', badge: KNOWLEDGE_LAYERS.length },
   { label: 'Skills MCP (Agentes)', value: 'skills', icon: 'i-lucide-sparkles', badge: skillsList.value.length },
-  { label: 'Specs & Planejamento', value: 'specs', icon: 'i-lucide-file-code-2', badge: specsList.value.length }
+  { label: 'Specs & Planejamento', value: 'specs', icon: 'i-lucide-file-code-2', badge: specsList.value.length },
+  { label: 'Histórico de Decisões', value: 'decisions', icon: 'i-lucide-history' },
+  { label: 'Sugestões de Docs', value: 'drift', icon: 'i-lucide-file-diff' }
 ])
 
 const layerFilterItems = [
@@ -77,7 +117,13 @@ const layerFilterItems = [
 
 const typeOptions = computed(() => [
   'all',
-  ...new Set(['skill', 'spec', 'business_rule', 'architecture_decision', 'diagram', 'topology', 'api_contract', 'runbook', 'document', 'requirement', ...props.items.map(i => i.type)])
+  ...new Set([
+    'skill', 'spec', 'business_rule', 'architecture_decision', 'diagram', 'topology',
+    'api_contract', 'event_contract', 'runbook', 'document', 'requirement',
+    'glossary_term', 'product_capability', 'data_model', 'use_case', 'journey',
+    'risk_control', 'slo_target', 'incident_postmortem', 'pending_decision',
+    ...props.items.map(i => i.type)
+  ])
 ])
 
 const createTypeOptions = computed(() => typeOptions.value.filter(t => t !== 'all'))
@@ -317,6 +363,52 @@ async function handleRefresh() {
         @approve="quickApprove"
         @open="(item, tab) => openInspector(item, tab)"
       />
+
+      <!-- Histórico de Decisões & Timeline ADR -->
+      <UCard v-else-if="activeSubTab === 'decisions'">
+        <template #header>
+          <div class="flex items-center justify-between">
+            <h3 class="font-semibold text-sm">Histórico de Decisões de Arquitetura &amp; Regras</h3>
+            <UButton size="xs" variant="soft" icon="i-lucide-refresh-cw" :loading="loadingDecisions" @click="loadDecisions">Atualizar</UButton>
+          </div>
+        </template>
+        <div v-if="loadingDecisions" class="p-8 text-center text-xs text-muted">Carregando linha do tempo...</div>
+        <div v-else-if="!decisionsTimeline.length" class="p-8 text-center text-xs text-muted">Nenhuma decisão de arquitetura registrada.</div>
+        <div v-else class="space-y-3">
+          <div v-for="d in decisionsTimeline" :key="d.id" class="p-3.5 rounded-xl border border-default bg-elevated/40 space-y-1">
+            <div class="flex items-center justify-between">
+              <span class="font-mono text-xs font-bold text-primary">{{ d.id }}</span>
+              <UBadge :color="d.status === 'approved' ? 'success' : 'warning'" variant="subtle" size="xs">{{ d.status }} · v{{ d.version }}</UBadge>
+            </div>
+            <div class="text-xs font-semibold text-highlighted">{{ d.title }}</div>
+            <p class="text-[11px] text-muted">{{ d.rationale }}</p>
+            <div class="text-[10px] text-muted pt-1">{{ new Date(d.date).toLocaleString('pt-BR') }}</div>
+          </div>
+        </div>
+      </UCard>
+
+      <!-- Sugestões de Documentação Desatualizada (Drift) -->
+      <UCard v-else-if="activeSubTab === 'drift'">
+        <template #header>
+          <div class="flex items-center justify-between">
+            <h3 class="font-semibold text-sm">Sugestões de Documentação (Drift após Mudanças no Código)</h3>
+            <UButton size="xs" variant="soft" icon="i-lucide-refresh-cw" :loading="loadingDrift" @click="loadDrift">Reanalisar Drift</UButton>
+          </div>
+        </template>
+        <div v-if="loadingDrift" class="p-8 text-center text-xs text-muted">Analisando defasagem entre código e docs...</div>
+        <div v-else-if="!docDriftSuggestions.length" class="p-8 text-center text-xs text-muted">Documentação 100% alinhada com o código.</div>
+        <div v-else class="space-y-3">
+          <div v-for="s in docDriftSuggestions" :key="s.documentId" class="p-3.5 rounded-xl border border-default bg-elevated/40 space-y-1">
+            <div class="flex items-center justify-between">
+              <span class="font-mono text-xs font-bold">{{ s.documentId }}</span>
+              <UBadge :color="s.urgency === 'high' ? 'error' : 'warning'" variant="subtle" size="xs">Urgência: {{ s.urgency }}</UBadge>
+            </div>
+            <div class="text-xs font-semibold text-highlighted">{{ s.title }}</div>
+            <p class="text-[11px] text-muted">{{ s.reason }}</p>
+            <p class="text-[11px] text-primary"><span class="font-bold">Sugestão:</span> {{ s.suggestedSection }}</p>
+          </div>
+        </div>
+      </UCard>
     </div>
 
     <UploadModal

@@ -50,7 +50,29 @@ export type KnowledgeType =
   | "memory"
   | "document"
   | "skill"
-  | "spec";
+  | "spec"
+  // Novos tipos de conhecimento
+  | "glossary_term"
+  | "product_capability"
+  | "data_model"
+  | "use_case"
+  | "journey"
+  | "risk_control"
+  | "slo_target"
+  | "runbook"
+  | "incident_postmortem"
+  | "pending_decision";
+
+export interface KnowledgeProvenance {
+  origin: "git" | "manual" | "agent" | "connector" | "import";
+  author: string;
+  sourceUri?: string;
+  sourceVersion?: string;
+  confidence: number;
+  lastValidatedAt: string;
+  validator?: string;
+  validationStatus: "valid" | "stale" | "pending_review";
+}
 
 export type BrainErrorCode =
   | "BRAIN_ERR_UNAUTHORIZED"
