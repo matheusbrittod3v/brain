@@ -85,7 +85,7 @@ export function registerMcpGatewayRoutes(app: FastifyInstance, deps: McpGatewayD
     };
   });
 
-  app.get("/.well-known/oauth-protected-resource", async (req) => {
+  const protectedResourceMetadata = async (req: FastifyRequest) => {
     const { apiOrigin } = resolveOrigins(req);
     return {
       resource: `${apiOrigin}/mcp`,
@@ -93,13 +93,13 @@ export function registerMcpGatewayRoutes(app: FastifyInstance, deps: McpGatewayD
       bearer_methods_supported: ["header"],
       scopes_supported: ["projects:all", "knowledge:read", "knowledge:write", "runner:execute"]
     };
-  });
+  };
 
-  app.get("/.well-known/oauth-authorization-server", async (req) => {
-    const { apiOrigin, webOrigin } = resolveOrigins(req);
+  const authorizationServerMetadata = async (req: FastifyRequest) => {
+    const { apiOrigin } = resolveOrigins(req);
     return {
       issuer: apiOrigin,
-      authorization_endpoint: `${webOrigin}/auth/oauth`,
+      authorization_endpoint: `${apiOrigin}/oauth/authorize`,
       token_endpoint: `${apiOrigin}/oauth/token`,
       registration_endpoint: `${apiOrigin}/oauth/register`,
       device_authorization_endpoint: `${apiOrigin}/v1/auth/oauth/device/code`,
@@ -108,6 +108,19 @@ export function registerMcpGatewayRoutes(app: FastifyInstance, deps: McpGatewayD
       token_endpoint_auth_methods_supported: ["none"],
       code_challenge_methods_supported: ["S256"]
     };
+  };
+
+  app.get("/.well-known/oauth-protected-resource", protectedResourceMetadata);
+  app.get("/.well-known/oauth-protected-resource/mcp", protectedResourceMetadata);
+  app.get("/.well-known/oauth-authorization-server", authorizationServerMetadata);
+  app.get("/.well-known/oauth-authorization-server/mcp", authorizationServerMetadata);
+
+  app.get("/oauth/authorize", async (req, reply) => {
+    const { webOrigin } = resolveOrigins(req);
+    const rawUrl = req.raw.url || "/oauth/authorize";
+    const qIdx = rawUrl.indexOf("?");
+    const querySuffix = qIdx >= 0 ? rawUrl.slice(qIdx) : "";
+    reply.redirect(`${webOrigin}/auth/oauth${querySuffix}`, 302);
   });
 
   const handleMcpRequest = async (req: FastifyRequest, reply: FastifyReply) => {

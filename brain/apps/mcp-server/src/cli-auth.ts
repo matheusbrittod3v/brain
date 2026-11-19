@@ -288,11 +288,28 @@ export async function runStdioHttpProxy(initialCredentials: StoredMcpCredentials
 
       const contentType = res.headers.get("content-type") ?? "";
       const bodyText = await res.text();
-      if (!res.ok && !bodyText) {
-        if (msgId !== null) {
-          process.stdout.write(`${JSON.stringify({ jsonrpc: "2.0", id: msgId, error: { code: -32001, message: `HTTP ${res.status} from ${endpoint}` } })}\n`);
+      if (!res.ok) {
+        let isJsonRpc = false;
+        if (bodyText.trim().startsWith("{")) {
+          try {
+            const parsed = JSON.parse(bodyText) as Record<string, unknown>;
+            isJsonRpc = parsed.jsonrpc === "2.0" && (typeof parsed.error !== "string");
+          } catch {
+            isJsonRpc = false;
+          }
         }
-        continue;
+        if (!isJsonRpc) {
+          if (msgId !== null) {
+            process.stdout.write(
+              `${JSON.stringify({
+                jsonrpc: "2.0",
+                id: msgId,
+                error: { code: -32001, message: bodyText.trim() || `HTTP ${res.status} from ${endpoint}` }
+              })}\n`
+            );
+          }
+          continue;
+        }
       }
 
       if (contentType.includes("text/event-stream")) {
