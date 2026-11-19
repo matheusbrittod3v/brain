@@ -1,3 +1,4 @@
+import { execSync } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
 import { readdir, readFile } from "node:fs/promises";
 import { join, relative } from "node:path";
@@ -209,32 +210,80 @@ export function registerCodeTopologyTools(
       projectId: z.string().min(1),
       suiteName: z.string().min(1),
       testName: z.string().min(1),
+      testItemId: z.string().optional(),
+      commitSha: z.string().optional(),
       status: z.enum(["passed", "failed", "skipped"]),
       ruleIds: z.array(z.string()).optional(),
       durationMs: z.number().optional()
     },
-    async ({ projectId, suiteName, testName, status, ruleIds, durationMs }) => {
+    async ({ projectId, suiteName, testName, testItemId, commitSha, status, ruleIds, durationMs }) => {
       assertProjectAccess(ctx, projectId);
       if (!runtime.opRepo) {
         return okJson({ recorded: false, reason: "PostgreSQL operational repository unavailable." });
       }
+      const resolvedTestItemId = testItemId?.trim() || `${suiteName}:${testName}`;
+      let resolvedSha = commitSha?.trim() ?? "";
+      if (!/^[0-9a-fA-F]{40,64}$/.test(resolvedSha)) {
+        try {
+          resolvedSha = execSync("git rev-parse HEAD", { cwd: runtime.workspaceRoot || process.cwd(), encoding: "utf8" }).trim();
+        } catch {
+          resolvedSha = "0".repeat(40);
+        }
+      }
+
+      const existingTest = await runtime.retrieval.getItem(ctx, projectId, resolvedTestItemId);
+      if (!existingTest) {
+        const testItem = buildKnowledgeItem({
+          id: resolvedTestItemId,
+          tenantId: ctx.tenantId,
+          projectId,
+          type: "test",
+          title: `${suiteName} — ${testName}`,
+          content: `Teste automatizado (${suiteName} > ${testName}) cobrindo: ${(ruleIds ?? []).join(", ") || "geral"}.`,
+          sourceUri: suiteName,
+          sourceKind: "agent",
+          accessPolicyId: auditPolicyId,
+          metadata: { knowledgeLayer: "code", suiteName, testName, ruleIds: ruleIds ?? [] }
+        });
+        if (runtime.knowledge) await runtime.knowledge.upsertItem(ctx, testItem);
+        if (runtime.retrieval.upsertItem) await runtime.retrieval.upsertItem(testItem);
+        if (runtime.enqueueEmbedding) await runtime.enqueueEmbedding(testItem).catch(() => null);
+      }
+
+      for (const ruleId of ruleIds ?? []) {
+        await Promise.resolve(
+          runtime.graph.addEdge({
+            tenantId: ctx.tenantId,
+            fromProjectId: projectId,
+            toProjectId: projectId,
+            fromItemId: resolvedTestItemId,
+            toItemId: ruleId,
+            fromPolicyId: auditPolicyId,
+            toPolicyId: auditPolicyId,
+            relationType: "VERIFIED_BY",
+            isInferred: false,
+            confidence: 1
+          })
+        ).catch(() => null);
+      }
+
       await runtime.opRepo.recordTestExecutionResults(ctx, {
         projectId,
         provider: "mcp",
         runId: randomUUID(),
-        commitSha: "workspace",
+        commitSha: resolvedSha,
         receivedBy: ctx.actorId,
         executedAt: new Date(),
         results: [
           {
-            testItemId: `${suiteName}:${testName}`,
+            testItemId: resolvedTestItemId,
             accessPolicyId: auditPolicyId,
             status,
             durationMs: durationMs ?? null
           }
         ]
       });
-      return okJson({ recorded: true, projectId, suiteName, testName, status });
+      return okJson({ recorded: true, projectId, testItemId: resolvedTestItemId, commitSha: resolvedSha, suiteName, testName, status });
     }
   );
 
