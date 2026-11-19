@@ -188,12 +188,13 @@ function drawScene() {
   const ctx = canvas.getContext('2d')
   if (!ctx) return
 
-  const width = canvas.width
-  const height = canvas.height
+  const dpr = window.devicePixelRatio || 1
+  const width = canvas.width / dpr
+  const height = canvas.height / dpr
   ctx.clearRect(0, 0, width, height)
 
   const cx = width / 2
-  const cy = height / 2 + 15
+  const cy = height / 2
 
   // 1. Draw 3D Layer Floors (Stacked Isometric Planes)
   const planeWidth = 260
@@ -368,10 +369,12 @@ function resizeCanvas() {
   if (!canvas || !container) return
   const dpr = window.devicePixelRatio || 1
   const rect = container.getBoundingClientRect()
-  canvas.width = rect.width * dpr
-  canvas.height = (rect.height || 480) * dpr
+  const w = Math.max(300, rect.width)
+  const h = Math.max(480, rect.height || 480)
+  canvas.width = w * dpr
+  canvas.height = h * dpr
   const ctx = canvas.getContext('2d')
-  if (ctx) ctx.scale(dpr, dpr)
+  if (ctx) ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
 }
 
 onMounted(() => {
