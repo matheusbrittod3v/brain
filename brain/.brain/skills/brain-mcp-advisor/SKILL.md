@@ -13,7 +13,12 @@ Sempre que o MCP ou plugin do **Brain** estiver disponível no projeto, siga est
 3. **Configurações Dinâmicas**: chame `brain_system_settings_get` para inspecionar parâmetros persistidos no PostgreSQL (`embeddings`, `runner`, `github`, `smtp`, `policies`) em vez de acoplar novas variáveis ao `.env`.
 4. **Análise de Impacto**: antes de alterar schemas, rotas ou contratos, execute `brain_analyze_change_impact` e `brain_validate_cross_service_change`.
 
-## 2. Durante e Após a Implementação (Retroalimentação)
+## 2. Centralização Obrigatória em `.brain/` (Sem pasta `docs/` e nada fora do projeto)
+- **NUNCA crie ou use pasta `docs/`** (nem `doc/`, nem documentação, planos ou skills fora do projeto ou soltos na raiz).
+- Tudo que seria colocado em `docs/` ou fora do projeto deve ser centralizado **exclusivamente dentro de `.brain/`** na raiz do projeto (`knowledgeRoot: ".brain/"`).
+- **Ao iniciar um projeto novo**: se `.project-brain.json` e `.brain/` ainda não existirem na pasta do projeto, crie-os imediatamente antes de começar a codar e indexe via `brain_ingest_git_repo`.
+
+## 3. Durante e Após a Implementação (Retroalimentação)
 1. **Propor e Sincronizar Conhecimento**: documente novas decisões, regras, fluxos e contratos com `brain_propose_knowledge` e sincronize a pasta `.brain/` com `brain_sync_brain_folder`.
 2. **Conectar o Grafo Semântico**: crie arestas rastreáveis (`implements`, `depends_on`, `governs`, `verifies`) usando `brain_link_knowledge`.
 3. **Registrar Testes de Regras de Negócio**: sempre que criar ou executar testes que validam uma `BR-*`, registre a execução com `brain_record_test_result` para manter a cobertura QA em 100%.

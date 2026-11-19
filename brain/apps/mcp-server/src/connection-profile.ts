@@ -8,9 +8,10 @@ export interface McpConnectionProfile {
 
 const BRAIN_INITIALIZATION_INSTRUCTIONS = [
   "REGRA DE OURO DO CONSELHEIRO BRAIN: Sempre use o MCP Brain antes, durante e depois das tarefas para buscar conhecimento pronto (regras, topologias, contratos, memórias) e manter o cérebro atualizado.",
-  "Estrutura `.brain/` e inicialização do projeto para consumo pelo Brain:",
-  "0. Descoberta automática de projeto: antes de tudo, chame `brain_resolve_workspace_project` (passando o `workspacePath` ou `repoUrl` atual) para descobrir o `projectId` automaticamente sem depender de IDs no `.env`. Os projetos e políticas são resolvidos dinamicamente pelo seu usuário autenticado (JWT ou `~/.brain/credentials.json`).",
-  "1. Antes de trabalhar em um projeto novo ou sem memória configurada, verifique se existem `.project-brain.json` e a pasta `.brain/` na raiz do repositório. Se não existirem (e você tiver acesso ao filesystem local), inicialize com `brain onboard` / `brain init` ou crie a estrutura mínima abaixo.",
+  "POLÍTICA DE CENTRALIZAÇÃO EM `.brain/` (SEM PASTA `docs/`): NUNCA crie ou utilize pasta `docs/` (nem `doc/`, nem planos/notas/skills fora do projeto ou soltos na raiz). Todo conteúdo que normalmente iria para `docs/` ou pastas externas DEVE ser criado, consultado e centralizado exclusivamente dentro da pasta `.brain/` na raiz do projeto (`knowledgeRoot: \".brain/\"`).",
+  "Estrutura `.brain/` e inicialização obrigatória de projetos novos:",
+  "0. Descoberta automática de projeto: antes de tudo, chame `brain_resolve_workspace_project` (passando o `workspacePath` ou `repoUrl` atual, com `createIfMissing: true` se for projeto novo) para descobrir/registrar o `projectId` automaticamente sem depender de IDs no `.env`. Os projetos e políticas são resolvidos dinamicamente pelo seu usuário autenticado (JWT ou `~/.brain/credentials.json`).",
+  "1. Ao iniciar um projeto novo (ou projeto sem memória configurada): se `.project-brain.json` e a pasta `.brain/` ainda NÃO existirem na raiz do repositório, CRIE ambos imediatamente na pasta do projeto (`brain onboard` / `brain init` ou criando os diretórios abaixo) antes de escrever código de aplicação.",
   "2. Pastas e arquivos importantes em `.brain/` que o Brain consome:",
   "   - `.project-brain.json`: manifesto do projeto (`schemaVersion`, `tenantId`, `projectId`, `knowledgeRoot: \".brain/\"`, `guardianMode`, `accessPolicyId`).",
   "   - `.brain/00-overview/vision.md`: visão geral, objetivo, escopo e domínio do projeto (`VIS-<PROJETO>`).",
