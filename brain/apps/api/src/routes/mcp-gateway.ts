@@ -90,8 +90,7 @@ export function registerMcpGatewayRoutes(app: FastifyInstance, deps: McpGatewayD
     return {
       resource: `${apiOrigin}/mcp`,
       authorization_servers: [apiOrigin],
-      bearer_methods_supported: ["header"],
-      scopes_supported: ["brain"]
+      bearer_methods_supported: ["header"]
     };
   };
 
