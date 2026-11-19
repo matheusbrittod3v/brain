@@ -302,6 +302,74 @@ function extractJavaSymbols(posixPath: string, lines: string[]): CodeSymbol[] {
   return symbols;
 }
 
+function extractPhpSymbols(posixPath: string, lines: string[]): CodeSymbol[] {
+  const symbols: CodeSymbol[] = [];
+  let braceDepth = 0;
+  let classEndDepth: number | null = null;
+
+  for (let idx = 0; idx < lines.length; idx++) {
+    const lineText = lines[idx]!;
+    const trimmed = lineText.trim();
+    if (!trimmed || trimmed.startsWith("//") || trimmed.startsWith("#") && !trimmed.startsWith("#[") || trimmed.startsWith("/*") || trimmed.startsWith("*")) {
+      continue;
+    }
+
+    const routeAttrMatch = /^\s*#\[Route\(\s*['"]([^'"]+)['"]/.exec(lineText);
+    const laravelRouteMatch = /Route::(?:get|post|put|patch|delete|any|match)\(\s*['"]([^'"]+)['"]/.exec(lineText);
+    const routePath = routeAttrMatch?.[1] ?? laravelRouteMatch?.[1];
+    if (routePath) {
+      symbols.push({ name: routePath, kind: "route", filePath: posixPath, line: idx + 1, endLine: idx + 1 });
+    }
+
+    const ifaceMatch = /^\s*interface\s+([A-Za-z_][A-Za-z0-9_]*)/.exec(lineText);
+    if (ifaceMatch?.[1]) {
+      symbols.push({
+        name: ifaceMatch[1],
+        kind: "interface",
+        filePath: posixPath,
+        line: idx + 1,
+        endLine: computeBraceBlockEndLine(lines, idx)
+      });
+      if (classEndDepth === null) classEndDepth = braceDepth;
+    } else {
+      const classMatch = /^\s*(?:abstract\s+|final\s+|readonly\s+)*(?:class|trait|enum)\s+([A-Za-z_][A-Za-z0-9_]*)/.exec(lineText);
+      if (classMatch?.[1]) {
+        symbols.push({
+          name: classMatch[1],
+          kind: "class",
+          filePath: posixPath,
+          line: idx + 1,
+          endLine: computeBraceBlockEndLine(lines, idx)
+        });
+        if (classEndDepth === null) classEndDepth = braceDepth;
+      } else {
+        const fnMatch =
+          /^\s*(?:(?:public|protected|private|static|final|abstract)\s+)*function\s+&?([A-Za-z_][A-Za-z0-9_]*)\s*\(/.exec(
+            lineText
+          );
+        if (fnMatch?.[1]) {
+          symbols.push({
+            name: fnMatch[1],
+            kind: classEndDepth !== null ? "method" : "function",
+            filePath: posixPath,
+            line: idx + 1,
+            endLine: computeBraceBlockEndLine(lines, idx)
+          });
+        }
+      }
+    }
+
+    for (const ch of lineText) {
+      if (ch === "{") braceDepth += 1;
+      else if (ch === "}") braceDepth = Math.max(0, braceDepth - 1);
+    }
+    if (classEndDepth !== null && braceDepth <= classEndDepth) {
+      classEndDepth = null;
+    }
+  }
+  return symbols;
+}
+
 function extractRustSymbols(posixPath: string, lines: string[]): CodeSymbol[] {
   const symbols: CodeSymbol[] = [];
   let implDepth = 0;
@@ -394,6 +462,9 @@ export function extractCodeSymbols(
   }
   if (/\.rs$/.test(posixPath)) {
     return extractRustSymbols(posixPath, lines);
+  }
+  if (/\.php$/i.test(posixPath)) {
+    return extractPhpSymbols(posixPath, lines);
   }
 
   const symbols: CodeSymbol[] = [];
