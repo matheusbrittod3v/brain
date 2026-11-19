@@ -39,9 +39,3 @@ Mapeamento de serviços essenciais, criticidade, proprietários técnicos e estr
 - **Porta**: 11434
 - **Criticidade**: Média (P3).
 - **Plano de Contingência**: Transição automática para OpenAI API ou Google Gemini API caso o contêiner local esteja sobrecarregado ou pausado.
-
-## 5. Open Policy Agent (`docker-opa-1`)
-- **Finalidade**: Avaliação externa de políticas de autorização corporativa Rego.
-- **Porta**: 8181
-- **Criticidade**: Baixa (P4).
-- **Plano de Contingência**: O Brain executa avaliação interna nativa via `@brain/auth` com CASL Abilities sem bloqueio.

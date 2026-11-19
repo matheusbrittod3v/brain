@@ -41,10 +41,6 @@ postgres:
   port: 5432
   database: brain
 
-opa:
-  enabled: true
-  image: openpolicyagent/opa:1.1.0
-
 networkPolicy:
   enabled: true
   ingressNamespace: ingress-nginx

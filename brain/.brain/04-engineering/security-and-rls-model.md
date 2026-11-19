@@ -15,9 +15,8 @@ knowledgeLayer: engineering
 flowchart TD
   REQ["Requisição HTTP / Chamada MCP"] --> AUTH["1. Autenticação (JWT Usuário / OAuth 2.1 PKCE / Token MCP / API Key)"]
   AUTH --> SCOPE["2. Resolução de Escopo (auth_users + project_access_members + temporary_access_grants)"]
-  SCOPE --> CASL["3. Guarda RBAC & CASL (requiredPermissionForRoute + buildAbilityForContext)"]
-  CASL --> OPA["4. Avaliação OPA / Políticas (public-org, internal-project, confidential-business, restricted-security)"]
-  OPA --> RLS["5. Transação PostgreSQL com RLS (app.tenant_id, app.allowed_projects, app.allowed_policies)"]
+  SCOPE --> CASL["3. Guarda RBAC & CASL (requiredPermissionForRoute + buildAbilityForContext + enforceCaslPolicy)"]
+  CASL --> RLS["4. Transação PostgreSQL com RLS (app.tenant_id, app.allowed_projects, app.allowed_policies)"]
 ```
 
 ## 2. Isolamento de Usuários Sem Projeto (`BR-BRAIN-006`)

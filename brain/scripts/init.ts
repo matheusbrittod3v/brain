@@ -192,7 +192,7 @@ function getDockerComposeCommand(): { cmd: string; argsPrefix: string[] } {
 
 // 4. Subida da Infraestrutura Docker
 function startDockerInfrastructure() {
-  log.step(4, 7, "Subindo infraestrutura Docker (Postgres, Valkey, MinIO, Ollama, OPA, ParadeDB)...");
+  log.step(4, 7, "Subindo infraestrutura Docker (Postgres, Valkey, MinIO, Ollama, ParadeDB)...");
 
   const compose = getDockerComposeCommand();
   log.info(`Executando ${compose.cmd} com: ${DOCKER_COMPOSE_FILE}`);

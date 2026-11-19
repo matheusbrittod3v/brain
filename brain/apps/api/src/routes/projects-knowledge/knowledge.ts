@@ -10,7 +10,7 @@ import type { ProjectsKnowledgeDeps } from "./types.js";
 export function registerKnowledgeItemRoutes(app: FastifyInstance, deps: ProjectsKnowledgeDeps) {
   const {
     authenticateProjectRequest,
-    enforceOpa,
+    enforcePolicy,
     recordAudit,
     upsertKnowledgeItem,
     opRepo,
@@ -70,7 +70,7 @@ export function registerKnowledgeItemRoutes(app: FastifyInstance, deps: Projects
           : ctx;
       const accessPolicyId = req.body.accessPolicyId?.trim() || "internal-project";
       const domainId = req.body.domainId ?? 2;
-      await enforceOpa(effectiveCtx, { projectId: targetProjectId, accessPolicyId, action: "write", domainId });
+      await enforcePolicy(effectiveCtx, { projectId: targetProjectId, accessPolicyId, action: "write", domainId });
 
       const cleanContent = await redactPiiWithAiWorker(req.body.content);
       assertSecretScanClean(scanForSecrets(cleanContent), req.body.id || req.body.title);
@@ -92,7 +92,7 @@ export function registerKnowledgeItemRoutes(app: FastifyInstance, deps: Projects
 
       const requestedStatus = req.body.status ?? existing?.status ?? "draft";
       if (requestedStatus === "approved") {
-        await enforceOpa(effectiveCtx, { projectId: targetProjectId, accessPolicyId, action: "approve", domainId });
+        await enforcePolicy(effectiveCtx, { projectId: targetProjectId, accessPolicyId, action: "approve", domainId });
       }
 
       const item: KnowledgeItem = {
@@ -178,9 +178,9 @@ export function registerKnowledgeItemRoutes(app: FastifyInstance, deps: Projects
       if (!existing) throw new BrainError("BRAIN_ERR_NOT_FOUND", `Item '${req.params.itemId}' não encontrado.`, 404);
 
       const accessPolicyId = req.body.accessPolicyId?.trim() || existing.accessPolicyId;
-      await enforceOpa(ctx, { projectId: req.params.projectId, accessPolicyId, action: "update", domainId: existing.domainId });
+      await enforcePolicy(ctx, { projectId: req.params.projectId, accessPolicyId, action: "update", domainId: existing.domainId });
       if (req.body.status === "approved" && existing.status !== "approved") {
-        await enforceOpa(ctx, { projectId: req.params.projectId, accessPolicyId, action: "approve", domainId: existing.domainId });
+        await enforcePolicy(ctx, { projectId: req.params.projectId, accessPolicyId, action: "approve", domainId: existing.domainId });
       }
 
       const nextContent = req.body.content !== undefined ? await redactPiiWithAiWorker(req.body.content) : existing.content;
@@ -236,7 +236,7 @@ export function registerKnowledgeItemRoutes(app: FastifyInstance, deps: Projects
     const queuedTasks: Array<{ taskId: string; title: string; priority: string }> = [];
 
     if (req.body?.enqueueToRunner) {
-      await enforceOpa(ctx, { projectId: req.params.projectId, accessPolicyId: item.accessPolicyId, action: "write", domainId: item.domainId });
+      await enforcePolicy(ctx, { projectId: req.params.projectId, accessPolicyId: item.accessPolicyId, action: "write", domainId: item.domainId });
       for (const t of pendingTasks.slice(0, 10)) {
         const priority = t.priority === "critical" || t.priority === "high" ? "high" : t.priority === "low" ? "low" : "normal";
         const runnerTask = runner.enqueue(ctx, {
@@ -277,7 +277,7 @@ export function registerKnowledgeItemRoutes(app: FastifyInstance, deps: Projects
     async (req) => {
       const ctx = await authenticateProjectRequest(req.headers.authorization, req.params.projectId);
       const accessPolicyId = req.body.accessPolicyId?.trim() || "internal-project";
-      await enforceOpa(ctx, { projectId: req.params.projectId, accessPolicyId, action: "write", domainId: 2 });
+      await enforcePolicy(ctx, { projectId: req.params.projectId, accessPolicyId, action: "write", domainId: 2 });
 
       const extracted = await extractMarkdownFromUrl(req.body.url);
       const cleanContent = await redactPiiWithAiWorker(extracted.markdown);
@@ -367,7 +367,7 @@ export function registerKnowledgeItemRoutes(app: FastifyInstance, deps: Projects
       if (req.body.status === "approved" && ctx.actorType === "agent" && !ctx.inheritUserPermissions && !ctx.allowedActions?.includes("approve")) {
         throw new BrainError("BRAIN_ERR_POLICY_DENIED", "Agentes não podem aprovar conhecimento oficial sem vínculo/delegação de usuário.", 403);
       }
-      await enforceOpa(ctx, {
+      await enforcePolicy(ctx, {
         projectId: req.params.projectId,
         accessPolicyId: item.accessPolicyId,
         action: req.body.status === "approved" ? "approve" : "update",

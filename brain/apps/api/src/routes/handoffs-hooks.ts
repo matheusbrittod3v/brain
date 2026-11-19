@@ -10,7 +10,7 @@ export function registerHandoffsHooksRoutes(
   app: FastifyInstance,
   deps: {
     authenticateProjectRequest: (headerValue: string | undefined, projectId: string) => Promise<AuthContext>;
-    enforceOpa: (
+    enforcePolicy: (
       ctx: AuthContext,
       resource: { projectId: string; accessPolicyId: string; action: "read" | "write" | "create" | "update" | "approve"; domainId?: number }
     ) => Promise<void>;
@@ -20,7 +20,7 @@ export function registerHandoffsHooksRoutes(
     opRepo?: PgOperationalRepository;
   }
 ) {
-  const { authenticateProjectRequest, enforceOpa, recordAudit, getDeveloperProfile, handoffs, opRepo } = deps;
+  const { authenticateProjectRequest, enforcePolicy, recordAudit, getDeveloperProfile, handoffs, opRepo } = deps;
 
   app.post<{
     Params: { projectId: string };
@@ -85,7 +85,7 @@ export function registerHandoffsHooksRoutes(
     };
   }>("/v1/projects/:projectId/hooks/lifecycle", async (req) => {
     const ctx = await authenticateProjectRequest(req.headers.authorization, req.params.projectId);
-    await enforceOpa(ctx, { projectId: req.params.projectId, accessPolicyId: "internal-project", action: "write" });
+    await enforcePolicy(ctx, { projectId: req.params.projectId, accessPolicyId: "internal-project", action: "write" });
     const harness = req.body.harness?.trim() || "unknown";
     const summary = req.body.summary?.trim() ?? "";
     if (summary) {

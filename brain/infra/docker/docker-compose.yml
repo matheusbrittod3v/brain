@@ -40,14 +40,6 @@ services:
     volumes:
       - miniodata:/data
 
-  opa:
-    image: openpolicyagent/opa:1.1.0
-    command: ["run", "--server", "--addr", ":8181", "--watch", "/policies/brain.rego"]
-    ports:
-      - "8181:8181"
-    volumes:
-      - ../opa:/policies:ro
-
   ollama:
     image: ollama/ollama:0.5.7
     ports:

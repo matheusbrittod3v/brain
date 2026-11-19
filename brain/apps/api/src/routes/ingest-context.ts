@@ -21,7 +21,7 @@ export function registerIngestContextRoutes(
   app: FastifyInstance,
   deps: {
     authenticateProjectRequest: (headerValue: string | undefined, projectId: string) => Promise<AuthContext>;
-    enforceOpa: (
+    enforcePolicy: (
       ctx: AuthContext,
       resource: { projectId: string; accessPolicyId: string; action: "read" | "write" | "create" | "update" | "approve"; domainId?: number }
     ) => Promise<void>;
@@ -38,7 +38,7 @@ export function registerIngestContextRoutes(
 ) {
   const {
     authenticateProjectRequest,
-    enforceOpa,
+    enforcePolicy,
     recordAudit,
     upsertKnowledgeItem,
     probeEmbeddingProvider,
@@ -86,7 +86,7 @@ export function registerIngestContextRoutes(
         commitSha: req.body.commitSha
       });
       assertPolicyAccess(ctx, item.accessPolicyId);
-      await enforceOpa(ctx, {
+      await enforcePolicy(ctx, {
         projectId: req.params.projectId,
         accessPolicyId: item.accessPolicyId,
         action: "write",

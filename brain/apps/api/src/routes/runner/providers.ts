@@ -64,14 +64,14 @@ export function registerRunnerProviderRoutes(
   deps: RunnerRouteDeps,
   state: RunnerSharedState
 ) {
-  const { authenticateProjectRequest, enforceOpa, opRepo, projectModelUsage } = deps;
+  const { authenticateProjectRequest, enforcePolicy, opRepo, projectModelUsage } = deps;
   const { runtimeApiKeys, liveModelsCache } = state;
 
   app.get<{ Params: { projectId: string }; Querystring: { probe?: string } }>(
     "/v1/projects/:projectId/runner/providers",
     async (req) => {
       const ctx = await authenticateProjectRequest(req.headers.authorization, req.params.projectId);
-      await enforceOpa(ctx, { projectId: req.params.projectId, accessPolicyId: "internal-project", action: "read" });
+      await enforcePolicy(ctx, { projectId: req.params.projectId, accessPolicyId: "internal-project", action: "read" });
       const shouldProbe = req.query.probe !== "false";
       const specs = Object.values(PROVIDER_REGISTRY);
       const providers = await Promise.all(
@@ -129,7 +129,7 @@ export function registerRunnerProviderRoutes(
     "/v1/projects/:projectId/runner/providers/:providerId/models",
     async (req) => {
       const ctx = await authenticateProjectRequest(req.headers.authorization, req.params.projectId);
-      await enforceOpa(ctx, { projectId: req.params.projectId, accessPolicyId: "internal-project", action: "read" });
+      await enforcePolicy(ctx, { projectId: req.params.projectId, accessPolicyId: "internal-project", action: "read" });
       const fetched = await fetchProviderLiveModels(req.params.providerId, {
         apiKey: runtimeApiKeys.get(req.params.providerId),
         timeoutMs: 4000
@@ -149,7 +149,7 @@ export function registerRunnerProviderRoutes(
     "/v1/projects/:projectId/runner/routing",
     async (req) => {
       const ctx = await authenticateProjectRequest(req.headers.authorization, req.params.projectId);
-      await enforceOpa(ctx, { projectId: req.params.projectId, accessPolicyId: "internal-project", action: "read" });
+      await enforcePolicy(ctx, { projectId: req.params.projectId, accessPolicyId: "internal-project", action: "read" });
       return getProjectRouting(ctx.tenantId, req.params.projectId);
     }
   );
@@ -208,7 +208,7 @@ export function registerRunnerProviderRoutes(
     },
     async (req) => {
       const ctx = await authenticateProjectRequest(req.headers.authorization, req.params.projectId);
-      await enforceOpa(ctx, { projectId: req.params.projectId, accessPolicyId: "internal-project", action: "write" });
+      await enforcePolicy(ctx, { projectId: req.params.projectId, accessPolicyId: "internal-project", action: "write" });
 
       if (req.body.providerConfig) {
         const cfg = req.body.providerConfig;
@@ -259,7 +259,7 @@ export function registerRunnerProviderRoutes(
     },
     async (req) => {
       const ctx = await authenticateProjectRequest(req.headers.authorization, req.params.projectId);
-      await enforceOpa(ctx, { projectId: req.params.projectId, accessPolicyId: "internal-project", action: "write" });
+      await enforcePolicy(ctx, { projectId: req.params.projectId, accessPolicyId: "internal-project", action: "write" });
       const started = Date.now();
       try {
         const res = await generateWithVercelAiSdk({
@@ -302,7 +302,7 @@ export function registerRunnerProviderRoutes(
     },
     async (req) => {
       const ctx = await authenticateProjectRequest(req.headers.authorization, req.params.projectId);
-      await enforceOpa(ctx, { projectId: req.params.projectId, accessPolicyId: "internal-project", action: "write" });
+      await enforcePolicy(ctx, { projectId: req.params.projectId, accessPolicyId: "internal-project", action: "write" });
       const created = registerCustomModel(req.body.provider, {
         id: req.body.modelId.trim(),
         name: req.body.name?.trim() || undefined,
@@ -324,7 +324,7 @@ export function registerRunnerProviderRoutes(
     },
     async (req) => {
       const ctx = await authenticateProjectRequest(req.headers.authorization, req.params.projectId);
-      await enforceOpa(ctx, { projectId: req.params.projectId, accessPolicyId: "internal-project", action: "write" });
+      await enforcePolicy(ctx, { projectId: req.params.projectId, accessPolicyId: "internal-project", action: "write" });
       const removed = removeCustomModel(req.body.provider, req.body.modelId);
       return { removed };
     }
@@ -343,7 +343,7 @@ export function registerRunnerProviderRoutes(
     },
     async (req) => {
       const ctx = await authenticateProjectRequest(req.headers.authorization, req.params.projectId);
-      await enforceOpa(ctx, { projectId: req.params.projectId, accessPolicyId: "internal-project", action: "write" });
+      await enforcePolicy(ctx, { projectId: req.params.projectId, accessPolicyId: "internal-project", action: "write" });
       const model = setModelDisabled(req.body.provider, req.body.modelId, req.body.disabled);
       return { model };
     }
@@ -353,7 +353,7 @@ export function registerRunnerProviderRoutes(
     "/v1/projects/:projectId/runner/connections/import-local",
     async (req) => {
       const ctx = await authenticateProjectRequest(req.headers.authorization, req.params.projectId);
-      await enforceOpa(ctx, { projectId: req.params.projectId, accessPolicyId: "internal-project", action: "write" });
+      await enforcePolicy(ctx, { projectId: req.params.projectId, accessPolicyId: "internal-project", action: "write" });
       const imported = importLocalProviderAuth(req.body?.providerId);
       for (const item of imported) {
         liveModelsCache.delete(item.provider);
@@ -373,7 +373,7 @@ export function registerRunnerProviderRoutes(
     "/v1/projects/:projectId/runner/connections/:providerId/oauth/start",
     async (req) => {
       const ctx = await authenticateProjectRequest(req.headers.authorization, req.params.projectId);
-      await enforceOpa(ctx, { projectId: req.params.projectId, accessPolicyId: "internal-project", action: "write" });
+      await enforcePolicy(ctx, { projectId: req.params.projectId, accessPolicyId: "internal-project", action: "write" });
       return startProviderOAuth(req.params.providerId, req.body?.redirectUri);
     }
   );
@@ -382,7 +382,7 @@ export function registerRunnerProviderRoutes(
     "/v1/projects/:projectId/runner/connections/:providerId/oauth/status",
     async (req) => {
       const ctx = await authenticateProjectRequest(req.headers.authorization, req.params.projectId);
-      await enforceOpa(ctx, { projectId: req.params.projectId, accessPolicyId: "internal-project", action: "read" });
+      await enforcePolicy(ctx, { projectId: req.params.projectId, accessPolicyId: "internal-project", action: "read" });
       const status = req.query.state ? getOAuthStateStatus(req.query.state) : { completed: false };
       if (status.completed && status.ok) {
         liveModelsCache.delete(req.params.providerId);
@@ -409,7 +409,7 @@ export function registerRunnerProviderRoutes(
     "/v1/projects/:projectId/runner/connections/:providerId/oauth/complete",
     async (req) => {
       const ctx = await authenticateProjectRequest(req.headers.authorization, req.params.projectId);
-      await enforceOpa(ctx, { projectId: req.params.projectId, accessPolicyId: "internal-project", action: "write" });
+      await enforcePolicy(ctx, { projectId: req.params.projectId, accessPolicyId: "internal-project", action: "write" });
       const result = await completeProviderOAuth(
         req.params.providerId,
         req.body?.codeOrUrl || "",
@@ -437,7 +437,7 @@ export function registerRunnerProviderRoutes(
     "/v1/projects/:projectId/runner/connections/:providerId",
     async (req) => {
       const ctx = await authenticateProjectRequest(req.headers.authorization, req.params.projectId);
-      await enforceOpa(ctx, { projectId: req.params.projectId, accessPolicyId: "internal-project", action: "write" });
+      await enforcePolicy(ctx, { projectId: req.params.projectId, accessPolicyId: "internal-project", action: "write" });
       const removed = disconnectProviderConnection(req.params.providerId);
       runtimeApiKeys.delete(req.params.providerId);
       liveModelsCache.delete(req.params.providerId);
@@ -475,7 +475,7 @@ export function registerRunnerProviderRoutes(
     },
     async (req) => {
       const ctx = await authenticateProjectRequest(req.headers.authorization, req.params.projectId);
-      await enforceOpa(ctx, { projectId: req.params.projectId, accessPolicyId: "internal-project", action: "read" });
+      await enforcePolicy(ctx, { projectId: req.params.projectId, accessPolicyId: "internal-project", action: "read" });
 
       const routing = getProjectRouting(ctx.tenantId, req.params.projectId);
       const finopsDowngrade = await resolveActiveFinopsDowngrade({

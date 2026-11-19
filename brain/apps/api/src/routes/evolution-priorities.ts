@@ -276,12 +276,10 @@ export function registerEvolutionPrioritiesRoutes(
 
     const requiredEmbeddingModel = (process.env.EMBEDDING_MODEL ?? "bge-m3").trim();
     const valkeyUrl = process.env.VALKEY_URL ?? process.env.REDIS_URL ?? "redis://localhost:6379";
-    const opaBaseUrl = (process.env.OPA_URL ?? "http://localhost:8181").replace(/\/+$/, "");
     const ollamaBaseUrl = (process.env.OLLAMA_BASE_URL ?? "http://localhost:11434").replace(/\/+$/, "");
-    const [ollamaProbe, minioProbe, opaProbe, valkeyProbe, pgProbe, hits, quotas, tasks] = await Promise.all([
+    const [ollamaProbe, minioProbe, valkeyProbe, pgProbe, hits, quotas, tasks] = await Promise.all([
       probeOllama(ollamaBaseUrl, requiredEmbeddingModel),
       probeHttp("http://localhost:9000/minio/health/live"),
-      probeHttp(`${opaBaseUrl}/health`),
       probeValkey(valkeyUrl),
       probePostgresHealth({ appPostgresClient, opRepo, ctx: searchCtx, projectId: req.params.projectId }),
       queryAwareRetrieval.search(searchCtx, { projectId: req.params.projectId, query: "", limit: 200 }).catch(() => []),
@@ -320,9 +318,6 @@ export function registerEvolutionPrioritiesRoutes(
     if (!minioProbe.online) {
       alerts.push({ severity: "warning", title: "MinIO S3 Offline (:9000)", detail: "Upload de binários e artefatos degradado." });
     }
-    if (!opaProbe.online) {
-      alerts.push({ severity: "warning", title: "OPA Offline (:8181)", detail: "Open Policy Agent inacessível para avaliação Policy-as-Code." });
-    }
     if (failedTasks > 0) {
       alerts.push({ severity: "warning", title: `${failedTasks} tarefa(s) com falha no Runner`, detail: "Use a opção Retomar Tarefa na guia Agentes & Runner." });
     }
@@ -348,8 +343,7 @@ export function registerEvolutionPrioritiesRoutes(
             : ollamaProbe.serverUp
               ? `${requiredEmbeddingModel} (ausente no Ollama)`
               : `${requiredEmbeddingModel} (servidor offline)`
-        },
-        opa: { online: opaProbe.online, latencyMs: opaProbe.latencyMs, detail: `Open Policy Agent (${opaBaseUrl})` }
+        }
       },
       ingestionPipeline: {
         totalItems,

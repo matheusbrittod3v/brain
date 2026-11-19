@@ -20,7 +20,7 @@ export function registerIngestDocumentRoutes(
   app: FastifyInstance,
   deps: {
     authenticateProjectRequest: (headerValue: string | undefined, projectId: string) => Promise<AuthContext>;
-    enforceOpa: (
+    enforcePolicy: (
       ctx: AuthContext,
       resource: { projectId: string; accessPolicyId: string; action: "read" | "write" | "create" | "update" | "approve"; domainId?: number }
     ) => Promise<void>;
@@ -29,7 +29,7 @@ export function registerIngestDocumentRoutes(
     probeEmbeddingProvider: () => Promise<OllamaEmbeddingProviderStatus>;
   }
 ) {
-  const { authenticateProjectRequest, enforceOpa, recordAudit, upsertKnowledgeItem, probeEmbeddingProvider } = deps;
+  const { authenticateProjectRequest, enforcePolicy, recordAudit, upsertKnowledgeItem, probeEmbeddingProvider } = deps;
 
   app.post<{
     Params: { projectId: string };
@@ -114,7 +114,7 @@ export function registerIngestDocumentRoutes(
           : {})
       };
       assertPolicyAccess(ctx, item.accessPolicyId);
-      await enforceOpa(ctx, { projectId: req.params.projectId, accessPolicyId: item.accessPolicyId, action: "write", domainId: item.domainId });
+      await enforcePolicy(ctx, { projectId: req.params.projectId, accessPolicyId: item.accessPolicyId, action: "write", domainId: item.domainId });
       await upsertKnowledgeItem(ctx, item);
       if (scan.ignoredFindings.length > 0) {
         await recordAudit(ctx, {

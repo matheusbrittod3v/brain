@@ -275,7 +275,7 @@ export function buildApp(
     githubMainHeadMemory,
     accessMemberKey,
     customPolicyKey,
-    enforceOpa,
+    enforcePolicy,
     recordAudit,
     authenticateProjectRequest,
     close: closeStores
@@ -408,7 +408,7 @@ export function buildApp(
 
   registerIngestContextRoutes(app, {
     authenticateProjectRequest,
-    enforceOpa,
+    enforcePolicy,
     recordAudit,
     upsertKnowledgeItem,
     probeEmbeddingProvider,
@@ -421,7 +421,7 @@ export function buildApp(
   });
   registerRunnerRoutes(app, {
     authenticateProjectRequest,
-    enforceOpa,
+    enforcePolicy,
     recordAudit,
     runner,
     opRepo,
@@ -430,7 +430,7 @@ export function buildApp(
 
   registerHandoffsHooksRoutes(app, {
     authenticateProjectRequest,
-    enforceOpa,
+    enforcePolicy,
     recordAudit,
     getDeveloperProfile,
     handoffs,
@@ -438,7 +438,7 @@ export function buildApp(
   });
   registerIngestDocumentRoutes(app, {
     authenticateProjectRequest,
-    enforceOpa,
+    enforcePolicy,
     recordAudit,
     upsertKnowledgeItem,
     probeEmbeddingProvider
@@ -460,7 +460,7 @@ export function buildApp(
 
   registerProposalsRoutes(app, {
     authenticateProjectRequest,
-    enforceOpa,
+    enforcePolicy,
     recordAudit,
     upsertKnowledgeItem,
     integrationEventMemory,
@@ -497,7 +497,7 @@ export function buildApp(
 
   registerProjectsKnowledgeRoutes(app, {
     authenticateProjectRequest,
-    enforceOpa,
+    enforcePolicy,
     recordAudit,
     upsertKnowledgeItem,
     queryAwareRetrieval,
@@ -524,7 +524,7 @@ export function buildApp(
 
   registerIntegrationsRoutes(app, {
     authenticateProjectRequest,
-    enforceOpa,
+    enforcePolicy,
     recordAudit,
     configuredApiKey,
     allowedProjects,
@@ -537,7 +537,7 @@ export function buildApp(
   });
 
   registerWebhookRoutes(app, {
-    enforceOpa,
+    enforcePolicy,
     recordAudit,
     upsertKnowledgeItem,
     configuredApiKey,
@@ -558,7 +558,7 @@ export function buildApp(
 
   registerAccessProfileRoutes(app, {
     authenticateProjectRequest,
-    enforceOpa,
+    enforcePolicy,
     recordAudit,
     queryAwareRetrieval,
     opRepo,
@@ -576,7 +576,7 @@ export function buildApp(
   });
   registerFinopsAuditRoutes(app, {
     authenticateProjectRequest,
-    enforceOpa,
+    enforcePolicy,
     recordAudit,
     queryAwareRetrieval,
     projectModelUsage,
@@ -592,7 +592,7 @@ export function buildApp(
 
   registerOperationsRoutes(app, {
     authenticateProjectRequest,
-    enforceOpa,
+    enforcePolicy,
     recordAudit,
     queryAwareRetrieval,
     upsertKnowledgeItem,

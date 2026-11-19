@@ -29,7 +29,7 @@ function verifyHmacSha256Signature(rawBody: string, signatureHeader: string | un
 export function registerWebhookRoutes(
   app: FastifyInstance,
   deps: {
-    enforceOpa: (
+    enforcePolicy: (
       ctx: AuthContext,
       resource: { projectId: string; accessPolicyId: string; action: "read" | "write" | "create" | "update" | "approve"; domainId?: number }
     ) => Promise<void>;
@@ -52,7 +52,7 @@ export function registerWebhookRoutes(
   }
 ) {
   const {
-    enforceOpa,
+    enforcePolicy,
     recordAudit,
     upsertKnowledgeItem,
     configuredApiKey,
@@ -218,7 +218,7 @@ export function registerWebhookRoutes(
       assertProjectAccess(ctx, body.projectId);
       const serviceActor = mapExternalHumanActor(ctx, provider, body.externalUserId, body.projectId, "internal-project", "system");
       if (!serviceActor.roles.includes("ci-bot")) throw new BrainError("BRAIN_ERR_POLICY_DENIED", "Identidade externa precisa do papel ci-bot.", 403);
-      await enforceOpa(serviceActor, { projectId: body.projectId, accessPolicyId: "internal-project", action: "write" });
+      await enforcePolicy(serviceActor, { projectId: body.projectId, accessPolicyId: "internal-project", action: "write" });
       const configuredRepositories = configuredGitHubRepositories(serviceActor.tenantId, body.projectId);
       let repository = typeof body.repository === "string" ? body.repository.trim().toLowerCase() : undefined;
       if (repository) {
@@ -247,7 +247,7 @@ export function registerWebhookRoutes(
         if (!item || (item.type !== "test" && !/\.(?:spec|test)\.[cm]?[jt]sx?$|_test\.py$/i.test(item.sourceUri))) {
           throw new BrainError("BRAIN_ERR_NOT_FOUND", `Arquivo de teste '${result.testItemId}' não encontrado.`, 404);
         }
-        await enforceOpa(serviceActor, { projectId: body.projectId, accessPolicyId: item.accessPolicyId, action: "write", domainId: item.domainId });
+        await enforcePolicy(serviceActor, { projectId: body.projectId, accessPolicyId: item.accessPolicyId, action: "write", domainId: item.domainId });
         normalized.push({ testItemId: item.id, accessPolicyId: item.accessPolicyId, status: result.status as "passed" | "failed" | "skipped", durationMs: result.durationMs === undefined ? null : Number(result.durationMs) });
       }
       const executedAt = typeof body.executedAt === "string" && Number.isFinite(Date.parse(body.executedAt)) ? new Date(body.executedAt) : new Date();
@@ -286,7 +286,7 @@ export function registerWebhookRoutes(
       if (!question) throw new BrainError("BRAIN_ERR_NOT_FOUND", `Pergunta '${body.questionId}' não encontrada para a tarefa.`, 404);
       const responsePolicyId = "accessPolicyId" in question ? question.accessPolicyId : "internal-project";
       const responseCtx = mapExternalHumanActor(ctx, provider, body.externalUserId, body.projectId, responsePolicyId);
-      await enforceOpa(responseCtx, { projectId: body.projectId, accessPolicyId: responsePolicyId, action: "write" });
+      await enforcePolicy(responseCtx, { projectId: body.projectId, accessPolicyId: responsePolicyId, action: "write" });
       const responseResult = opRepo
         ? await opRepo.answerRunnerQuestion(responseCtx, { projectId: body.projectId, taskId: body.taskId, questionId: body.questionId, response: body.response, idempotencyKey: `${provider}:${body.idempotencyKey}` })
         : runner.answerQuestion(responseCtx, body.taskId, { questionId: body.questionId, response: body.response, idempotencyKey: `${provider}:${body.idempotencyKey}` });
@@ -307,7 +307,7 @@ export function registerWebhookRoutes(
       if (!externalUserId) throw new BrainError("BRAIN_ERR_UNAUTHORIZED", "Callback de aprovação requer externalUserId assinado pelo provedor.", 401);
       const decisionCtx = mapExternalHumanActor(ctx, provider, externalUserId, body.projectId, item.accessPolicyId);
       if (!Number.isInteger(body.proposalVersion) || body.proposalVersion! < 1) throw new BrainError("BRAIN_ERR_CONFLICT", "Evento de aprovação requer proposalVersion inteiro e positivo.", 400);
-      await enforceOpa(decisionCtx, { projectId: body.projectId, accessPolicyId: item.accessPolicyId, action: "approve", domainId: item.domainId });
+      await enforcePolicy(decisionCtx, { projectId: body.projectId, accessPolicyId: item.accessPolicyId, action: "approve", domainId: item.domainId });
       const externalEventId = body.externalEventId?.trim();
       if (!externalEventId) throw new BrainError("BRAIN_ERR_CONFLICT", "Evento de aprovação requer externalEventId para deduplicação.", 400);
       const eventHash = createHash("sha256").update(JSON.stringify({ projectId: body.projectId, proposalId: body.proposalId, proposalVersion: body.proposalVersion, decision, comment: body.comment ?? "", actorId: decisionCtx.actorId })).digest("hex");

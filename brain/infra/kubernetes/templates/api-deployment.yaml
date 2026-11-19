@@ -37,12 +37,6 @@ spec:
               value: "{{ .Values.postgres.port }}"
             - name: POSTGRES_DB
               value: "{{ .Values.postgres.database }}"
-            - name: OPA_ENABLED
-              value: "{{ .Values.opa.enabled }}"
-            {{- if .Values.opa.enabled }}
-            - name: OPA_URL
-              value: "http://{{ .Release.Name }}-opa:8181"
-            {{- end }}
           livenessProbe:
             httpGet:
               path: /v1/health

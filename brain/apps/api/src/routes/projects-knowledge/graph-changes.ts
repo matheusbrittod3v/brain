@@ -27,7 +27,7 @@ const relationTypeSchema = Type.Union([
 export function registerGraphAndChangeRoutes(app: FastifyInstance, deps: ProjectsKnowledgeDeps) {
   const {
     authenticateProjectRequest,
-    enforceOpa,
+    enforcePolicy,
     recordAudit,
     upsertKnowledgeItem,
     queryAwareRetrieval,
@@ -179,7 +179,7 @@ export function registerGraphAndChangeRoutes(app: FastifyInstance, deps: Project
     },
     async (req) => {
       const ctx = await authenticateProjectRequest(req.headers.authorization, req.params.projectId);
-      await enforceOpa(ctx, { projectId: req.params.projectId, accessPolicyId: "internal-project", action: "write" });
+      await enforcePolicy(ctx, { projectId: req.params.projectId, accessPolicyId: "internal-project", action: "write" });
       const id = `PROP-${randomUUID()}`;
       const item = parseKnowledgeFile({
         tenantId: ctx.tenantId,
@@ -194,7 +194,7 @@ export function registerGraphAndChangeRoutes(app: FastifyInstance, deps: Project
         const target = pgKnowledge ? await pgKnowledge.getItem(ctx, req.params.projectId, targetId) : retrieval.getItem(ctx, req.params.projectId, targetId);
         if (!target) throw new BrainError("BRAIN_ERR_NOT_FOUND", `Alvo de impacto '${targetId}' não encontrado.`, 404);
         assertPolicyAccess(ctx, target.accessPolicyId);
-        await enforceOpa(ctx, { projectId: req.params.projectId, accessPolicyId: target.accessPolicyId, action: "read", domainId: target.domainId });
+        await enforcePolicy(ctx, { projectId: req.params.projectId, accessPolicyId: target.accessPolicyId, action: "read", domainId: target.domainId });
         relatedTargets.push(target);
       }
       await upsertKnowledgeItem(ctx, item);
@@ -267,7 +267,7 @@ export function registerGraphAndChangeRoutes(app: FastifyInstance, deps: Project
     }
   }, async (req) => {
     const ctx = await authenticateProjectRequest(req.headers.authorization, req.params.projectId);
-    await enforceOpa(ctx, { projectId: req.params.projectId, accessPolicyId: "internal-project", action: "write" });
+    await enforcePolicy(ctx, { projectId: req.params.projectId, accessPolicyId: "internal-project", action: "write" });
     const inputs = req.body.relations && req.body.relations.length > 0
       ? req.body.relations
       : req.body.fromItemId && req.body.toItemId && req.body.relationType

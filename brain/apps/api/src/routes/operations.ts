@@ -17,7 +17,7 @@ export function registerOperationsRoutes(
   app: FastifyInstance,
   deps: {
     authenticateProjectRequest: (headerValue: string | undefined, projectId: string) => Promise<AuthContext>;
-    enforceOpa: (
+    enforcePolicy: (
       ctx: AuthContext,
       resource: { projectId: string; accessPolicyId: string; action: "read" | "write" | "create" | "update" | "approve"; domainId?: number }
     ) => Promise<void>;
@@ -37,7 +37,7 @@ export function registerOperationsRoutes(
 ) {
   const {
     authenticateProjectRequest,
-    enforceOpa,
+    enforcePolicy,
     recordAudit,
     queryAwareRetrieval,
     upsertKnowledgeItem,
@@ -56,7 +56,7 @@ export function registerOperationsRoutes(
     "/v1/projects/:projectId/scaffold/recommendations",
     async (req) => {
       const ctx = await authenticateProjectRequest(req.headers.authorization, req.params.projectId);
-      await enforceOpa(ctx, { projectId: req.params.projectId, accessPolicyId: "internal-project", action: "read" });
+      await enforcePolicy(ctx, { projectId: req.params.projectId, accessPolicyId: "internal-project", action: "read" });
       const domain = req.query.domain?.trim().toLowerCase() ?? "";
       const stack = req.query.stack?.trim().toLowerCase() ?? "";
       const includeCrossProject = req.query.crossProject === "true" || req.query.crossProject === "1";
@@ -151,7 +151,7 @@ export function registerOperationsRoutes(
     const criticality = req.body.criticality ?? "medium";
     const accessPolicyId = handlesPii || handlesPayments || criticality === "critical" ? "restricted-security" : "internal-project";
     assertPolicyAccess(ctx, accessPolicyId);
-    await enforceOpa(ctx, { projectId: req.params.projectId, accessPolicyId, action: "write" });
+    await enforcePolicy(ctx, { projectId: req.params.projectId, accessPolicyId, action: "write" });
     const domain = req.body.domain?.trim() || "general";
     const objective = req.body.objective?.trim() || `Serviço ${serviceSlug}`;
     const stack = req.body.stack ?? "node-ts";
@@ -219,7 +219,7 @@ export function registerOperationsRoutes(
 
   app.get<{ Params: { projectId: string } }>("/v1/projects/:projectId/operations/overview", async (req) => {
     const ctx = await authenticateProjectRequest(req.headers.authorization, req.params.projectId);
-    await enforceOpa(ctx, { projectId: req.params.projectId, accessPolicyId: "internal-project", action: "read" });
+    await enforcePolicy(ctx, { projectId: req.params.projectId, accessPolicyId: "internal-project", action: "read" });
     const hits = await queryAwareRetrieval.search(ctx, { projectId: req.params.projectId, query: "", limit: 200 });
     const items = hits.map((hit) => hit.item);
     const evidence = await projectVerifiedTests(ctx, req.params.projectId, items);
@@ -311,7 +311,7 @@ export function registerOperationsRoutes(
     "/v1/projects/:projectId/operations/jobs/:jobId/retry",
     async (req) => {
       const ctx = await authenticateProjectRequest(req.headers.authorization, req.params.projectId);
-      await enforceOpa(ctx, { projectId: req.params.projectId, accessPolicyId: "internal-project", action: "write" });
+      await enforcePolicy(ctx, { projectId: req.params.projectId, accessPolicyId: "internal-project", action: "write" });
       if (!ownedSystemSqlClient || process.env.BRAIN_PG_BOSS !== "1") {
         throw new BrainError("BRAIN_ERR_STORAGE_UNAVAILABLE", "pg-boss não está configurado neste ambiente.", 503);
       }
@@ -359,7 +359,7 @@ export function registerOperationsRoutes(
     Body: { epicDescription: string; targetFiles?: string[]; impactedRuleIds?: string[] };
   }>("/v1/projects/:projectId/tasks/plan", async (req) => {
     const ctx = await authenticateProjectRequest(req.headers.authorization, req.params.projectId);
-    await enforceOpa(ctx, { projectId: req.params.projectId, accessPolicyId: "internal-project", action: "read" });
+    await enforcePolicy(ctx, { projectId: req.params.projectId, accessPolicyId: "internal-project", action: "read" });
     if (!req.body.epicDescription?.trim()) {
       throw new BrainError("BRAIN_ERR_CONFLICT", "Descrição do épico é obrigatória para planejar tarefas.", 400);
     }
@@ -393,7 +393,7 @@ export function registerOperationsRoutes(
     if (changedFiles.length === 0) {
       throw new BrainError("BRAIN_ERR_CONFLICT", "Informe ao menos um caminho de arquivo alterado.", 400);
     }
-    await enforceOpa(ctx, {
+    await enforcePolicy(ctx, {
       projectId: req.params.projectId,
       accessPolicyId: "internal-project",
       action: req.body.submitDrafts ? "write" : "read"

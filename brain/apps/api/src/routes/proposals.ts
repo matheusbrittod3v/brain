@@ -17,7 +17,7 @@ export function registerProposalsRoutes(
   app: FastifyInstance,
   deps: {
     authenticateProjectRequest: (headerValue: string | undefined, projectId: string) => Promise<AuthContext>;
-    enforceOpa: (
+    enforcePolicy: (
       ctx: AuthContext,
       resource: { projectId: string; accessPolicyId: string; action: "read" | "write" | "create" | "update" | "approve"; domainId?: number }
     ) => Promise<void>;
@@ -38,7 +38,7 @@ export function registerProposalsRoutes(
 ) {
   const {
     authenticateProjectRequest,
-    enforceOpa,
+    enforcePolicy,
     recordAudit,
     upsertKnowledgeItem,
     integrationEventMemory,
@@ -75,7 +75,7 @@ export function registerProposalsRoutes(
     const ctx = await authenticateProjectRequest(req.headers.authorization, req.params.projectId);
     const item = pgKnowledge ? await pgKnowledge.getItem(ctx, req.params.projectId, req.params.proposalId) : retrieval.getItem(ctx, req.params.projectId, req.params.proposalId);
     if (!item) throw new BrainError("BRAIN_ERR_NOT_FOUND", `Proposta '${req.params.proposalId}' não encontrada.`, 404);
-    await enforceOpa(ctx, { projectId: req.params.projectId, accessPolicyId: item.accessPolicyId, action: "read", domainId: item.domainId });
+    await enforcePolicy(ctx, { projectId: req.params.projectId, accessPolicyId: item.accessPolicyId, action: "read", domainId: item.domainId });
     const memoryEvents = (auditLogger as (AuditLogger & { events?: Array<Record<string, unknown>> }) | undefined)?.events;
     const events = opRepo
       ? await opRepo.listProposalAuditHistory(ctx, req.params.projectId, req.params.proposalId)
@@ -100,7 +100,7 @@ export function registerProposalsRoutes(
       const ctx = await authenticateProjectRequest(req.headers.authorization, req.params.projectId);
       const item = pgKnowledge ? await pgKnowledge.getItem(ctx, req.params.projectId, req.params.proposalId) : retrieval.getItem(ctx, req.params.projectId, req.params.proposalId);
       if (!item) throw new BrainError("BRAIN_ERR_NOT_FOUND", `Proposta '${req.params.proposalId}' não encontrada.`, 404);
-      await enforceOpa(ctx, { projectId: req.params.projectId, accessPolicyId: item.accessPolicyId, action: "approve", domainId: item.domainId });
+      await enforcePolicy(ctx, { projectId: req.params.projectId, accessPolicyId: item.accessPolicyId, action: "approve", domainId: item.domainId });
       const provider = req.body.provider.toLowerCase();
       const reviewer = mapExternalHumanActor(ctx, provider, req.body.externalUserId, req.params.projectId, item.accessPolicyId);
       if (!canApproveDomain(reviewer, item.domainId)) throw new BrainError("BRAIN_ERR_POLICY_DENIED", "O revisor mapeado não pode aprovar este domínio.", 403);
@@ -226,7 +226,7 @@ export function registerProposalsRoutes(
       }
       const item = pgKnowledge ? await pgKnowledge.getItem(ctx, req.params.projectId, req.params.proposalId) : retrieval.getItem(ctx, req.params.projectId, req.params.proposalId);
       if (!item) throw new BrainError("BRAIN_ERR_NOT_FOUND", `Proposta '${req.params.proposalId}' não encontrada.`, 404);
-      await enforceOpa(ctx, { projectId: req.params.projectId, accessPolicyId: item.accessPolicyId, action: "approve", domainId: item.domainId });
+      await enforcePolicy(ctx, { projectId: req.params.projectId, accessPolicyId: item.accessPolicyId, action: "approve", domainId: item.domainId });
       const channel = req.body.channel?.trim() || "api";
       const externalEventId = req.body.externalEventId?.trim();
       const eventProvider = `direct:${channel.toLowerCase()}`;
@@ -328,7 +328,7 @@ export function registerProposalsRoutes(
       const item = pgKnowledge ? await pgKnowledge.getItem(ctx, req.params.projectId, req.params.proposalId) : retrieval.getItem(ctx, req.params.projectId, req.params.proposalId);
       if (!item) throw new BrainError("BRAIN_ERR_NOT_FOUND", `Proposta '${req.params.proposalId}' não encontrada.`, 404);
       if (item.version !== req.body.baseVersion) throw new BrainError("BRAIN_ERR_CONFLICT", `A proposta mudou (versão atual: ${item.version}); atualize antes de revisar.`, 409);
-      await enforceOpa(ctx, { projectId: req.params.projectId, accessPolicyId: item.accessPolicyId, action: "write", domainId: item.domainId });
+      await enforcePolicy(ctx, { projectId: req.params.projectId, accessPolicyId: item.accessPolicyId, action: "write", domainId: item.domainId });
       const content = req.body.content.trim();
       if (!content) throw new BrainError("BRAIN_ERR_CONFLICT", "O conteúdo revisado não pode estar vazio.", 400);
       const revisedItem: KnowledgeItem = { ...item, content, status: "draft", version: item.version + 1, contentHash: createHash("sha256").update(content).digest("hex"), updatedAt: new Date().toISOString() };
@@ -361,7 +361,7 @@ export function registerProposalsRoutes(
     async (req) => {
       const ctx = await authenticateProjectRequest(req.headers.authorization, req.params.projectId);
       if (ctx.actorType !== "human") throw new BrainError("BRAIN_ERR_POLICY_DENIED", "Somente uma pessoa autenticada pode responder perguntas do Runner.", 403);
-      await enforceOpa(ctx, { projectId: req.params.projectId, accessPolicyId: "internal-project", action: "write" });
+      await enforcePolicy(ctx, { projectId: req.params.projectId, accessPolicyId: "internal-project", action: "write" });
       const result = opRepo
         ? await opRepo.answerRunnerQuestion(ctx, { projectId: req.params.projectId, taskId: req.params.taskId, questionId: req.body.questionId, response: req.body.response, idempotencyKey: req.body.idempotencyKey })
         : (() => {

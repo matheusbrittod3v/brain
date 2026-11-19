@@ -85,7 +85,7 @@ export const PLUGIN_CATALOG_PRESETS: RunnerPluginPreset[] = [
     id: "security-scanner",
     name: "Security & Secrets Scanner",
     version: "1.1.0",
-    description: "Inspeciona credenciais expostas, padrões inseguros (OWASP) e permissões OPA.",
+    description: "Inspeciona credenciais expostas, padrões inseguros (OWASP) e permissões CASL.",
     category: "security",
     skills: ["secret-scan", "owasp-audit"],
     tools: ["scan_secrets", "audit_policies"],

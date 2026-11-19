@@ -79,7 +79,6 @@ flowchart TB
     Valkey[("Valkey 7.2\nCache Distribuído de Retrieval")]
     MinIO[("MinIO S3\nSnapshots & Brainpacks")]
     Ollama["Ollama Local (:11434)\nbge-m3 / nomic-embed-text"]
-    OPA["Open Policy Agent (:8181)\nPolicy-as-Code"]
   end
 
   WebUI --> API
@@ -98,7 +97,6 @@ flowchart TB
   Retrieval --> Ollama
   Health --> PG
   API --> MinIO
-  API --> OPA
 ```
 
 ---
@@ -127,7 +125,7 @@ bun run init:start
 | Comando | Descrição |
 | :--- | :--- |
 | `bun run init:doctor` | Executa o **Brain Doctor** (verifica Bun, Turbo, Docker, portas e conectividade PostgreSQL/Valkey) |
-| `bun run init:infra` | Sobe apenas a infraestrutura Docker (PostgreSQL 16, Valkey, MinIO, Ollama, OPA) e aplica migrações |
+| `bun run init:infra` | Sobe apenas a infraestrutura Docker (PostgreSQL 16, Valkey, MinIO, Ollama) e aplica migrações |
 | `bun run build` | Compila todos os 29 pacotes e aplicações do monorepo via **Turborepo** (`turbo run build`) |
 | `bun run test` | Executa a suíte de testes automatizados em todo o monorepo (`turbo run test`) |
 | `bun test tests/business-rules.test.ts` | Executa a verificação direta das 9 Regras de Negócio (`TEST-BR-BRAIN-001` a `009`) |

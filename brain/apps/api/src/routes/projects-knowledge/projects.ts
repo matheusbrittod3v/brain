@@ -15,7 +15,7 @@ import type { ProjectsKnowledgeDeps } from "./types.js";
 export function registerProjectCoreRoutes(app: FastifyInstance, deps: ProjectsKnowledgeDeps) {
   const {
     authenticateProjectRequest,
-    enforceOpa,
+    enforcePolicy,
     recordAudit,
     upsertKnowledgeItem,
     queryAwareRetrieval,
@@ -154,7 +154,7 @@ export function registerProjectCoreRoutes(app: FastifyInstance, deps: ProjectsKn
       if (req.body.isShared) {
         assertPermission(ctx, "projects:share");
       }
-      await enforceOpa(ctx, { projectId, accessPolicyId: "internal-project", action: "write" });
+      await enforcePolicy(ctx, { projectId, accessPolicyId: "internal-project", action: "write" });
       const name = req.body.name?.trim() || projectId;
       const description = req.body.description?.trim() || undefined;
       const knowledgeRoot = req.body.knowledgeRoot?.trim() || ".brain/";
@@ -333,7 +333,7 @@ export function registerProjectCoreRoutes(app: FastifyInstance, deps: ProjectsKn
     "/v1/projects/:projectId/brain/sync",
     async (req) => {
       const ctx = await authenticateProjectRequest(req.headers.authorization, req.params.projectId);
-      await enforceOpa(ctx, { projectId: req.params.projectId, accessPolicyId: "internal-project", action: "write", domainId: 2 });
+      await enforcePolicy(ctx, { projectId: req.params.projectId, accessPolicyId: "internal-project", action: "write", domainId: 2 });
 
       const projectMeta = registeredProjects.get(`${ctx.tenantId}:${req.params.projectId}`);
       let rootDir = req.body?.workspacePath?.trim() || configuredWorkspaceRoot(projectMeta?.knowledgeRoot || process.cwd());

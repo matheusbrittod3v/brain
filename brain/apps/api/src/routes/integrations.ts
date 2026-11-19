@@ -11,7 +11,7 @@ export function registerIntegrationsRoutes(
   app: FastifyInstance,
   deps: {
     authenticateProjectRequest: (headerValue: string | undefined, projectId: string) => Promise<AuthContext>;
-    enforceOpa: (
+    enforcePolicy: (
       ctx: AuthContext,
       resource: { projectId: string; accessPolicyId: string; action: "read" | "write" | "create" | "update" | "approve"; domainId?: number }
     ) => Promise<void>;
@@ -28,7 +28,7 @@ export function registerIntegrationsRoutes(
 ) {
   const {
     authenticateProjectRequest,
-    enforceOpa,
+    enforcePolicy,
     recordAudit,
     configuredApiKey,
     allowedProjects,
@@ -54,7 +54,7 @@ export function registerIntegrationsRoutes(
     },
     async (req) => {
       const ctx = await authenticateProjectRequest(req.headers.authorization, req.params.projectId);
-      await enforceOpa(ctx, { projectId: req.params.projectId, accessPolicyId: "internal-project", action: "write" });
+      await enforcePolicy(ctx, { projectId: req.params.projectId, accessPolicyId: "internal-project", action: "write" });
       if (process.env.BRAIN_PG_BOSS !== "1") {
         throw new BrainError("BRAIN_ERR_STORAGE_UNAVAILABLE", "Ingestão GitHub remota exige o worker pg-boss ativo.", 503);
       }
@@ -92,7 +92,7 @@ export function registerIntegrationsRoutes(
     },
     async (req) => {
       const ctx = await authenticateProjectRequest(req.headers.authorization, req.params.projectId);
-      await enforceOpa(ctx, { projectId: req.params.projectId, accessPolicyId: "internal-project", action: "read" });
+      await enforcePolicy(ctx, { projectId: req.params.projectId, accessPolicyId: "internal-project", action: "read" });
       if (!ownedSystemSqlClient || process.env.BRAIN_PG_BOSS !== "1") {
         throw new BrainError("BRAIN_ERR_STORAGE_UNAVAILABLE", "Histórico de ingestão requer PostgreSQL e pg-boss ativos.", 503);
       }
@@ -126,7 +126,7 @@ export function registerIntegrationsRoutes(
 
   app.get<{ Params: { projectId: string } }>("/v1/projects/:projectId/integrations/status", async (req) => {
     const ctx = await authenticateProjectRequest(req.headers.authorization, req.params.projectId);
-    await enforceOpa(ctx, { projectId: req.params.projectId, accessPolicyId: "internal-project", action: "read" });
+    await enforcePolicy(ctx, { projectId: req.params.projectId, accessPolicyId: "internal-project", action: "read" });
     const systemSql = ownedSystemSqlClient;
     let githubJobs: Array<Record<string, unknown>> = [];
     if (systemSql && process.env.BRAIN_PG_BOSS === "1") {

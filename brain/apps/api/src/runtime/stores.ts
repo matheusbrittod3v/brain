@@ -7,7 +7,7 @@ import {
   type AuditLogger,
   type RlsSessionContext
 } from "@brain/audit-engine";
-import { assertProjectAccess, authenticateRequest, enforceOpaPolicy, resolveDefaultPermissionsForRoles, usersStore, type AuthContext } from "@brain/auth";
+import { assertProjectAccess, authenticateRequest, enforceCaslPolicy, resolveDefaultPermissionsForRoles, usersStore, type AuthContext } from "@brain/auth";
 import { ContextEngine } from "@brain/context-engine";
 import { BrainError, type KnowledgeItem } from "@brain/core";
 import { CrossServiceContractRegistry, PostgresCrossServiceRegistry } from "@brain/cross-service";
@@ -154,11 +154,11 @@ export function createApiRuntimeStores(deps: {
   const accessMemberKey = (ctx: AuthContext, projectId: string, actorId: string) => `${ctx.tenantId}:${projectId}:${actorId}`;
   const customPolicyKey = (ctx: AuthContext, projectId: string, policyId: string) => `${ctx.tenantId}:${projectId}:${policyId}`;
 
-  async function enforceOpa(
+  async function enforcePolicy(
     ctx: AuthContext,
     resource: { projectId: string; accessPolicyId: string; action: "read" | "write" | "create" | "update" | "approve"; domainId?: number }
   ) {
-    await enforceOpaPolicy(ctx, resource);
+    enforceCaslPolicy(ctx, resource);
   }
 
   function recordAudit(ctx: AuthContext, event: Parameters<AuditLogger["record"]>[0]) {
@@ -253,7 +253,7 @@ export function createApiRuntimeStores(deps: {
     githubMainHeadMemory,
     accessMemberKey,
     customPolicyKey,
-    enforceOpa,
+    enforcePolicy,
     recordAudit,
     authenticateProjectRequest,
     close

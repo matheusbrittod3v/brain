@@ -8,7 +8,7 @@ import type { ModelUsageSnapshot } from "../../services/finops-quota.js";
 
 export interface RunnerRouteDeps {
   authenticateProjectRequest: (headerValue: string | undefined, projectId: string) => Promise<AuthContext>;
-  enforceOpa: (
+  enforcePolicy: (
     ctx: AuthContext,
     resource: { projectId: string; accessPolicyId: string; action: "read" | "write" | "create" | "update" | "approve"; domainId?: number }
   ) => Promise<void>;

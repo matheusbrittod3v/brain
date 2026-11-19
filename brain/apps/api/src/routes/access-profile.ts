@@ -9,7 +9,7 @@ export function registerAccessProfileRoutes(
   app: FastifyInstance,
   deps: {
     authenticateProjectRequest: (headerValue: string | undefined, projectId: string) => Promise<AuthContext>;
-    enforceOpa: (
+    enforcePolicy: (
       ctx: AuthContext,
       resource: { projectId: string; accessPolicyId: string; action: "read" | "write" | "create" | "update" | "approve"; domainId?: number }
     ) => Promise<void>;
@@ -35,7 +35,7 @@ export function registerAccessProfileRoutes(
 ) {
   const {
     authenticateProjectRequest,
-    enforceOpa,
+    enforcePolicy,
     recordAudit,
     queryAwareRetrieval,
     opRepo,
@@ -123,7 +123,7 @@ export function registerAccessProfileRoutes(
     async (req) => {
       const ctx = await authenticateProjectRequest(req.headers.authorization, req.params.projectId);
       requireAccessAdmin(ctx);
-      await enforceOpa(ctx, { projectId: req.params.projectId, accessPolicyId: "internal-project", action: "write" });
+      await enforcePolicy(ctx, { projectId: req.params.projectId, accessPolicyId: "internal-project", action: "write" });
       if (!Array.isArray(req.body.roles) || req.body.roles.length === 0) {
         throw new BrainError("BRAIN_ERR_CONFLICT", "roles deve ser uma lista não vazia.", 400);
       }
@@ -166,7 +166,7 @@ export function registerAccessProfileRoutes(
     async (req) => {
       const ctx = await authenticateProjectRequest(req.headers.authorization, req.params.projectId);
       requireAccessAdmin(ctx);
-      await enforceOpa(ctx, { projectId: req.params.projectId, accessPolicyId: "internal-project", action: "write" });
+      await enforcePolicy(ctx, { projectId: req.params.projectId, accessPolicyId: "internal-project", action: "write" });
       const ttlMinutes = Math.min(10080, Math.max(5, Number(req.body.ttlMinutes ?? 60)));
       const grantId = `GRANT-${randomUUID().slice(0, 8)}`;
       const now = new Date();
@@ -228,7 +228,7 @@ export function registerAccessProfileRoutes(
     async (req) => {
       const ctx = await authenticateProjectRequest(req.headers.authorization, req.params.projectId);
       requireAccessAdmin(ctx);
-      await enforceOpa(ctx, { projectId: req.params.projectId, accessPolicyId: "internal-project", action: "write" });
+      await enforcePolicy(ctx, { projectId: req.params.projectId, accessPolicyId: "internal-project", action: "write" });
       const entry = {
         policyId: req.params.policyId,
         label: req.body.label?.trim() || req.params.policyId,

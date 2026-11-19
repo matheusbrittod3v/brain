@@ -11,7 +11,7 @@ export function registerFinopsAuditRoutes(
   app: FastifyInstance,
   deps: {
     authenticateProjectRequest: (headerValue: string | undefined, projectId: string) => Promise<AuthContext>;
-    enforceOpa: (
+    enforcePolicy: (
       ctx: AuthContext,
       resource: { projectId: string; accessPolicyId: string; action: "read" | "write" | "create" | "update" | "approve"; domainId?: number }
     ) => Promise<void>;
@@ -37,7 +37,7 @@ export function registerFinopsAuditRoutes(
 ) {
   const {
     authenticateProjectRequest,
-    enforceOpa,
+    enforcePolicy,
     recordAudit,
     queryAwareRetrieval,
     projectModelUsage,
@@ -59,7 +59,7 @@ export function registerFinopsAuditRoutes(
     const projectId = req.query.projectId;
     if (projectId) {
       assertProjectAccess(ctx, projectId);
-      await enforceOpa(ctx, { projectId, accessPolicyId: "internal-project", action: "read" });
+      await enforcePolicy(ctx, { projectId, accessPolicyId: "internal-project", action: "read" });
     }
     const limit = Math.min(100, Math.max(1, Number.parseInt(req.query.limit ?? "100", 10) || 100));
     if (appPostgresClient && process.env.DATABASE_URL) {
@@ -148,7 +148,7 @@ export function registerFinopsAuditRoutes(
     Body: { department: string; monthlyTokenLimit: number; monthlyUsdLimit: number; downgradeModel?: string };
   }>("/v1/projects/:projectId/finops/quotas", async (req) => {
     const ctx = await authenticateProjectRequest(req.headers.authorization, req.params.projectId);
-    await enforceOpa(ctx, { projectId: req.params.projectId, accessPolicyId: "internal-project", action: "write" });
+    await enforcePolicy(ctx, { projectId: req.params.projectId, accessPolicyId: "internal-project", action: "write" });
     const department = req.body.department?.trim();
     if (!department || !Number.isFinite(req.body.monthlyTokenLimit) || !Number.isFinite(req.body.monthlyUsdLimit)) {
       throw new BrainError("BRAIN_ERR_CONFLICT", "Departamento e limites de cota inválidos.", 400);
@@ -186,7 +186,7 @@ export function registerFinopsAuditRoutes(
     "/v1/projects/:projectId/finops/usage-stats",
     async (req) => {
       const ctx = await authenticateProjectRequest(req.headers.authorization, req.params.projectId);
-      await enforceOpa(ctx, { projectId: req.params.projectId, accessPolicyId: "internal-project", action: "read" });
+      await enforcePolicy(ctx, { projectId: req.params.projectId, accessPolicyId: "internal-project", action: "read" });
       const limit = Math.min(200, Math.max(1, Number.parseInt(req.query.limit ?? "50", 10) || 50));
       return {
         summary: getUsageSummary(),

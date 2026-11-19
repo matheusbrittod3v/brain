@@ -12,7 +12,7 @@ export function registerRunnerTaskRoutes(
   deps: RunnerRouteDeps,
   state: RunnerSharedState
 ) {
-  const { authenticateProjectRequest, enforceOpa, recordAudit, runner, opRepo, projectModelUsage } = deps;
+  const { authenticateProjectRequest, enforcePolicy, recordAudit, runner, opRepo, projectModelUsage } = deps;
 
   app.post<{ Params: { projectId: string }; Body: { instruction: string; priority?: "low" | "normal" | "high" } }>(
     "/v1/projects/:projectId/runner/tasks",
@@ -109,7 +109,7 @@ export function registerRunnerTaskRoutes(
     "/v1/projects/:projectId/runner/tasks/:taskId/cancel",
     async (req) => {
       const ctx = await authenticateProjectRequest(req.headers.authorization, req.params.projectId);
-      await enforceOpa(ctx, { projectId: req.params.projectId, accessPolicyId: "internal-project", action: "write" });
+      await enforcePolicy(ctx, { projectId: req.params.projectId, accessPolicyId: "internal-project", action: "write" });
       if (opRepo) {
         const cancelled = await opRepo.cancelRunnerTask(ctx, req.params.projectId, req.params.taskId);
         if (!cancelled) {
@@ -148,7 +148,7 @@ export function registerRunnerTaskRoutes(
     },
     async (req) => {
       const ctx = await authenticateProjectRequest(req.headers.authorization, req.params.projectId);
-      await enforceOpa(ctx, { projectId: req.params.projectId, accessPolicyId: "internal-project", action: "write" });
+      await enforcePolicy(ctx, { projectId: req.params.projectId, accessPolicyId: "internal-project", action: "write" });
       const questionText = req.body.question.trim();
       if (!questionText) throw new BrainError("BRAIN_ERR_CONFLICT", "A pergunta não pode estar vazia.", 400);
       const question = opRepo
@@ -179,7 +179,7 @@ export function registerRunnerTaskRoutes(
     "/v1/projects/:projectId/runner/tasks/:taskId/questions",
     async (req) => {
       const ctx = await authenticateProjectRequest(req.headers.authorization, req.params.projectId);
-      await enforceOpa(ctx, { projectId: req.params.projectId, accessPolicyId: "internal-project", action: "read" });
+      await enforcePolicy(ctx, { projectId: req.params.projectId, accessPolicyId: "internal-project", action: "read" });
       const questions = opRepo
         ? await opRepo.listRunnerTaskQuestions(ctx, req.params.projectId, req.params.taskId)
         : runner.listQuestions(ctx, req.params.taskId);
@@ -206,7 +206,7 @@ export function registerRunnerTaskRoutes(
     },
     async (req) => {
       const ctx = await authenticateProjectRequest(req.headers.authorization, req.params.projectId);
-      await enforceOpa(ctx, { projectId: req.params.projectId, accessPolicyId: "internal-project", action: "write" });
+      await enforcePolicy(ctx, { projectId: req.params.projectId, accessPolicyId: "internal-project", action: "write" });
       if (!/^[A-Za-z0-9_-]{3,80}$/.test(req.params.taskId)) {
         throw new BrainError("BRAIN_ERR_INVALID_INPUT", "taskId inválido.", 422);
       }
@@ -256,7 +256,7 @@ export function registerRunnerTaskRoutes(
     "/v1/projects/:projectId/runner/tasks/:taskId/retry",
     async (req) => {
       const ctx = await authenticateProjectRequest(req.headers.authorization, req.params.projectId);
-      await enforceOpa(ctx, { projectId: req.params.projectId, accessPolicyId: "internal-project", action: "write" });
+      await enforcePolicy(ctx, { projectId: req.params.projectId, accessPolicyId: "internal-project", action: "write" });
       const projectTasks = opRepo
         ? await opRepo.listRunnerTasks(ctx, req.params.projectId)
         : runner.listTasks(ctx, req.params.projectId);

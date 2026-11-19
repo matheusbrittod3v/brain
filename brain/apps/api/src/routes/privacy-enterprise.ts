@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import type { FastifyInstance } from "fastify";
 import type { AuditLogger } from "@brain/audit-engine";
-import { assertPolicyAccess, assertProjectAccess, authenticateRequest, enforceOpaPolicy, type AuthContext } from "@brain/auth";
+import { assertPolicyAccess, assertProjectAccess, authenticateRequest, enforceCaslPolicy, type AuthContext } from "@brain/auth";
 import { BrainError, type KnowledgeItem } from "@brain/core";
 import type { CrossServiceContractRegistry, PostgresCrossServiceRegistry } from "@brain/cross-service";
 import type { PgOperationalRepository } from "@brain/database";
@@ -53,7 +53,7 @@ export function registerPrivacyEnterpriseRoutes(
 
   app.post<{ Body: { subjectId: string; projectId: string } }>("/v1/privacy/erase", async (req) => {
     const ctx = await authenticateProjectRequest(req.headers.authorization, req.body.projectId);
-    await enforceOpaPolicy(ctx, { projectId: req.body.projectId, accessPolicyId: "internal-project", action: "write" });
+    enforceCaslPolicy(ctx, { projectId: req.body.projectId, accessPolicyId: "internal-project", action: "write" });
     if (!systemKnowledgeClient || process.env.BRAIN_PG_STORES !== "1") {
       throw new BrainError(
         "BRAIN_ERR_STORAGE_UNAVAILABLE",

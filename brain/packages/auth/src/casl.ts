@@ -1,4 +1,5 @@
 import { AbilityBuilder, createMongoAbility, subject, type MongoAbility, type MongoQuery } from "@casl/ability";
+import { BrainError } from "@brain/core";
 import type { AuthContext } from "./index.js";
 
 export { subject };
@@ -90,4 +91,15 @@ export function buildAbilityForContext(ctx: AuthContext): AppAbility {
 
 export function exportAbilityRules(ctx: AuthContext) {
   return buildAbilityForContext(ctx).rules;
+}
+
+export function enforceCaslPolicy(
+  ctx: AuthContext,
+  resource: { projectId: string; accessPolicyId: string; action: "read" | "write" | "create" | "update" | "approve"; domainId?: number }
+): void {
+  const ability = buildAbilityForContext(ctx);
+  const allowed = ability.can(resource.action, subject("Knowledge", resource));
+  if (!allowed) {
+    throw new BrainError("BRAIN_ERR_POLICY_DENIED", `CASL negou ação '${resource.action}' em '${resource.projectId}'.`, 403);
+  }
 }
