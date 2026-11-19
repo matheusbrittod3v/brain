@@ -138,15 +138,6 @@ export function registerMcpGatewayRoutes(app: FastifyInstance, deps: McpGatewayD
       return;
     }
 
-    const baseCtx = await authenticateRequest(
-      rawAuth,
-      deps.configuredApiKey,
-      "default-org",
-      deps.allowedProjects,
-      undefined,
-      deps.allowedPolicies
-    );
-
     const rawBearer = rawAuth.replace(/^Bearer\s+/i, "").trim();
     const tokenRecord = deps.mcpAuthRepo && rawBearer
       ? await deps.mcpAuthRepo.findActiveTokenByHash(sha256Hex(rawBearer)).catch(() => null)
@@ -154,6 +145,31 @@ export function registerMcpGatewayRoutes(app: FastifyInstance, deps: McpGatewayD
     if (tokenRecord) {
       deps.mcpAuthRepo?.touchLastUsed(tokenRecord.id).catch(() => {});
     }
+
+    const baseCtx: AuthContext = tokenRecord
+      ? await authenticateRequest(
+          rawAuth,
+          deps.configuredApiKey,
+          tokenRecord.tenantId || "default-org",
+          tokenRecord.allowedProjects.length > 0 ? tokenRecord.allowedProjects : deps.allowedProjects,
+          undefined,
+          deps.allowedPolicies
+        ).catch(() => ({
+          tenantId: tokenRecord.tenantId || "default-org",
+          actorId: tokenRecord.userId,
+          actorType: "agent" as const,
+          roles: ["admin", "developer", "tech-lead"],
+          allowedProjects: tokenRecord.allowedProjects.length > 0 ? [...tokenRecord.allowedProjects] : [...deps.allowedProjects],
+          allowedPolicies: [...deps.allowedPolicies, "public-org", "internal-project"]
+        }))
+      : await authenticateRequest(
+          rawAuth,
+          deps.configuredApiKey,
+          "default-org",
+          deps.allowedProjects,
+          undefined,
+          deps.allowedPolicies
+        );
 
     let ctx = deps.opRepo
       ? await deps.opRepo.resolveDynamicMcpScope(baseCtx, deps.allowedProjects, deps.allowedPolicies, systemDb)
@@ -167,6 +183,11 @@ export function registerMcpGatewayRoutes(app: FastifyInstance, deps: McpGatewayD
     if (!deps.opRepo && ctx.roles.some((r) => ["admin", "owner"].includes(r.toLowerCase()))) {
       const mergedProjects = new Set([...ctx.allowedProjects, ...deps.registeredProjects.keys()]);
       ctx = { ...ctx, allowedProjects: Array.from(mergedProjects) };
+    }
+
+    const rawAccept = String(req.raw.headers["accept"] || "");
+    if (!rawAccept.includes("application/json") || !rawAccept.includes("text/event-stream")) {
+      req.raw.headers["accept"] = "application/json, text/event-stream";
     }
 
     const sessionId = typeof req.headers["mcp-session-id"] === "string" ? req.headers["mcp-session-id"] : undefined;
@@ -189,8 +210,17 @@ export function registerMcpGatewayRoutes(app: FastifyInstance, deps: McpGatewayD
       (typeof req.headers["x-brain-client"] === "string" ? req.headers["x-brain-client"] : "mcp-http-client");
     const clientId = tokenRecord?.clientId || clientName;
 
+    const isInitRequest =
+      req.method === "POST" &&
+      req.body !== null &&
+      typeof req.body === "object" &&
+      (Array.isArray(req.body)
+        ? req.body.some((m) => (m as { method?: string })?.method === "initialize")
+        : (req.body as { method?: string }).method === "initialize");
+
     const transport = new StreamableHTTPServerTransport({
-      sessionIdGenerator: () => randomUUID(),
+      sessionIdGenerator: isInitRequest || req.method === "GET" ? () => randomUUID() : undefined,
+      enableJsonResponse: true,
       onsessioninitialized: (sid) => {
         activeSessions.set(sid, transport);
       }
