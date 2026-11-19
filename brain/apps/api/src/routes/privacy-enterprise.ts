@@ -8,6 +8,7 @@ import type { PgOperationalRepository } from "@brain/database";
 import { buildBusinessRuleTestCoverageMatrix, buildTechRadar } from "@brain/enterprise-views";
 import { privacyEraseSubject, type SystemKnowledgeSqlClient } from "@brain/knowledge";
 import type { PostgresRetrievalEngine } from "@brain/retrieval";
+import { eraseMinioObjectsForSubject } from "../services/minio-storage.js";
 import type { PgTemporalKnowledgeRepository, TemporalKnowledgeEngine } from "@brain/temporal-knowledge";
 
 export function registerPrivacyEnterpriseRoutes(
@@ -91,30 +92,29 @@ export function registerPrivacyEnterpriseRoutes(
       auditLogsAnonymized = 0;
     }
 
-    const objectStorageUrl = process.env.BRAIN_OBJECT_STORAGE_URL ?? process.env.MINIO_ENDPOINT;
-    let objectStorageDeleted = false;
-    let objectStorageStatus: "deleted" | "not_configured" | "failed" = "not_configured";
-    if (objectStorageUrl) {
-      try {
-        const res = await fetch(`${objectStorageUrl.replace(/\/$/, "")}/privacy/erase`, {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({ tenantId: ctx.tenantId, projectId: req.body.projectId, subjectId: req.body.subjectId })
-        });
-        objectStorageDeleted = res.ok;
-        objectStorageStatus = res.ok ? "deleted" : "failed";
-      } catch {
-        objectStorageDeleted = false;
-        objectStorageStatus = "failed";
-      }
-    }
+    const minioConfigured = Boolean(process.env.MINIO_ENDPOINT || process.env.BRAIN_OBJECT_STORAGE_URL);
+    const minioResult = await eraseMinioObjectsForSubject({
+      tenantId: ctx.tenantId,
+      projectId: req.body.projectId,
+      subjectId: req.body.subjectId,
+      endpoint: process.env.BRAIN_OBJECT_STORAGE_URL ?? process.env.MINIO_ENDPOINT
+    });
 
-    const complete = cryptoShredded && objectStorageStatus !== "failed";
+    const objectStorageDeleted = minioResult.reachable && minioResult.ok;
+    const objectStorageStatus: "deleted" | "not_configured" | "failed" = minioResult.reachable
+      ? minioResult.ok
+        ? "deleted"
+        : "failed"
+      : minioConfigured
+        ? "failed"
+        : "not_configured";
+
+    const complete = cryptoShredded && objectStorageStatus === "deleted";
     const limitations: string[] = [];
     if (objectStorageStatus === "not_configured") {
-      limitations.push("MinIO/Object Storage não configurado neste ambiente (nenhum bucket externo ativo)");
+      limitations.push("MinIO/Object Storage inacessível ou não configurado neste ambiente; exclusão de objetos binários não confirmada.");
     } else if (objectStorageStatus === "failed") {
-      limitations.push("Falha ao remover objetos do MinIO/Object Storage");
+      limitations.push(`Falha ao remover objetos do MinIO/Object Storage (${minioResult.failedCount} falha(s)).`);
     }
     if (erased.createdSyncTombstones > 0) {
       limitations.push("Cópias Edge serão removidas após sincronização do tombstone");

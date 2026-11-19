@@ -5,6 +5,7 @@ import { assertProjectAccess, authenticateRequest, type AuthContext } from "@bra
 import { BrainError } from "@brain/core";
 import type { PgOperationalRepository } from "@brain/database";
 import { normalizeAuditLogRow } from "../services/jobs.js";
+import { estimateInfraAndEnergyUsd, evaluateFinopsQuotas } from "../services/finops-quota.js";
 
 export function registerFinopsAuditRoutes(
   app: FastifyInstance,
@@ -100,27 +101,13 @@ export function registerFinopsAuditRoutes(
 
     const measuredTokens = modelUsage.byModel.reduce((acc, m) => acc + (m.totalTokens ?? 0), 0);
     const totalTokens = measuredTokens > 0 ? measuredTokens : estimatedLocalTokens;
-    const durationHours = (modelUsage.calls * 2) / 3600;
-    const infraHourlyUsd = Number(process.env.BRAIN_INFRA_HOURLY_USD ?? "0.12");
-    const kwhPerMillionTokens = Number(process.env.BRAIN_ENERGY_KWH_PER_MILLION_TOKENS ?? "0.45");
-    const energyUsdPerKwh = Number(process.env.BRAIN_ENERGY_USD_PER_KWH ?? "0.15");
-    const estimatedInfraUsd = Number((durationHours * infraHourlyUsd).toFixed(6));
-    const estimatedEnergyKwh = Number(((totalTokens / 1_000_000) * kwhPerMillionTokens).toFixed(6));
-    const estimatedEnergyUsd = Number((estimatedEnergyKwh * energyUsdPerKwh).toFixed(6));
+    const { estimatedInfraUsd, estimatedEnergyKwh, estimatedEnergyUsd } = estimateInfraAndEnergyUsd(totalTokens, modelUsage.calls);
 
     const quotaPrefix = `${ctx.tenantId}:${req.params.projectId}:`;
     const rawQuotas = opRepo
       ? await opRepo.listDepartmentFinopsQuotas(ctx, req.params.projectId)
       : [...departmentQuotas.entries()].filter(([key]) => key.startsWith(quotaPrefix)).map(([, q]) => q);
-    const quotas = rawQuotas.map((q) => {
-      const usedTokens = measuredTokens;
-      const usedUsd = Number(((modelUsage.providerCostUsd ?? 0) + estimatedInfraUsd + estimatedEnergyUsd).toFixed(6));
-      const withinQuota = usedTokens <= q.monthlyTokenLimit && usedUsd <= q.monthlyUsdLimit;
-      const downgradeModel = !withinQuota
-        ? (("downgradeModel" in q ? q.downgradeModel : undefined) ?? process.env.BRAIN_FINOPS_DOWNGRADE_MODEL ?? "ollama:qwen2.5-coder:7b")
-        : undefined;
-      return { ...q, usedTokens, usedUsd, withinQuota, ...(downgradeModel ? { recommendedDowngradeModel: downgradeModel } : {}) };
-    });
+    const quotas = evaluateFinopsQuotas(rawQuotas, modelUsage, estimatedLocalTokens);
 
     return {
       projectId: req.params.projectId,

@@ -4,6 +4,7 @@ import type { AuthContext } from "@brain/auth";
 import { BrainError } from "@brain/core";
 import type { PgOperationalRepository } from "@brain/database";
 import type { BrainRunnerQueue } from "@brain/agent-runner";
+import type { ModelUsageSnapshot } from "../../services/finops-quota.js";
 
 export interface RunnerRouteDeps {
   authenticateProjectRequest: (headerValue: string | undefined, projectId: string) => Promise<AuthContext>;
@@ -14,6 +15,7 @@ export interface RunnerRouteDeps {
   recordAudit: (ctx: AuthContext, event: Parameters<AuditLogger["record"]>[0]) => Promise<unknown>;
   runner: BrainRunnerQueue;
   opRepo?: PgOperationalRepository;
+  projectModelUsage?: (ctx: AuthContext, projectId: string) => Promise<ModelUsageSnapshot>;
 }
 
 export interface RunnerSharedState {

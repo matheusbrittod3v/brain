@@ -54,8 +54,30 @@ const KNOWLEDGE_TYPES = [
   "integration",
   "risk",
   "memory",
-  "document"
-] as const;
+  "document",
+  "skill",
+  "spec",
+  "glossary_term",
+  "product_capability",
+  "data_model",
+  "use_case",
+  "journey",
+  "risk_control",
+  "slo_target",
+  "runbook",
+  "incident_postmortem",
+  "pending_decision",
+  "implementation_pattern",
+  "limit_constraint",
+  "role_responsibility",
+  "compatibility_matrix",
+  "code_vocabulary",
+  "experiment_record",
+  "known_exception",
+  "mock_data_sample",
+  "external_dependency",
+  "acceptance_criteria"
+] as const satisfies readonly KnowledgeType[];
 
 const KNOWLEDGE_STATUSES = ["draft", "approved", "deprecated", "superseded"] as const;
 

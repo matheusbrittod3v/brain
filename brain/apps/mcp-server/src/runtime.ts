@@ -22,6 +22,7 @@ import { KnowledgeGraphStore, PostgresGraphStore, type GraphStoreContract } from
 import type { AnalyzeDistributedImpactOptions } from "@brain/impact-analysis";
 import { PostgresKnowledgeRepository, type KnowledgeRepository } from "@brain/knowledge";
 import { PostgresMemoryManager } from "@brain/memory";
+import { PgTemporalKnowledgeRepository } from "@brain/temporal-knowledge";
 import {
   HybridRetrievalEngine,
   PostgresRetrievalEngine,
@@ -74,6 +75,7 @@ export interface BrainRuntime {
   knowledge?: Pick<KnowledgeRepository, "listVersions" | "upsertItem"> & {
     incrementHitCounts?: (ctx: AuthContext, projectId: string, itemIds: readonly string[]) => Promise<Array<{ itemId: string; hitCount: number }>>;
   };
+  temporal?: Pick<PgTemporalKnowledgeRepository, "queryVersionsAt">;
   workspaceRoot?: string;
   workspaceRoots?: Readonly<Record<string, string>>;
   registeredProjects?: Map<string, { projectId: string; tenantId: string; name: string; description?: string; knowledgeRoot: string; createdAt: string }>;
@@ -140,6 +142,7 @@ export function createSqlBrainRuntime(
   const approvals = new PostgresApprovalQueue(targetClient);
   const crossServiceRegistry = new PostgresCrossServiceRegistry(targetClient, rlsContext);
   const knowledge = new PostgresKnowledgeRepository(targetClient);
+  const temporal = new PgTemporalKnowledgeRepository(targetClient);
   const memory = new PostgresMemoryManager(targetClient);
   const dbUrl = options?.databaseUrl ?? process.env.DATABASE_URL;
   const opRepo = options?.opRepo ?? (dbUrl ? new PgOperationalRepository(createDatabaseClient(dbUrl).db) : undefined);
@@ -152,6 +155,7 @@ export function createSqlBrainRuntime(
   return {
     graph, retrieval, contextEngine, handoffs, runner, audit: resolvedAudit, approvals, crossServiceRegistry, opRepo, memory,
     knowledge,
+    temporal,
     workspaceRoot: options?.workspaceRoot ?? process.env.BRAIN_WORKSPACE_ROOT ?? process.cwd(),
     workspaceRoots: options?.workspaceRoots ?? configuredProjectWorkspaceRoots(),
     scheduleRunnerTask

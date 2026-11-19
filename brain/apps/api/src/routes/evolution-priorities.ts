@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
+import { createConnection } from "node:net";
 import type { FastifyInstance } from "fastify";
-import type { AuditLogger } from "@brain/audit-engine";
+import type { AppPostgresClient, AuditLogger } from "@brain/audit-engine";
 import { authenticateRequest, usersStore, type AuthContext } from "@brain/auth";
 import { BrainError, type KnowledgeItem } from "@brain/core";
 import type { PgAuthRepository, PgOperationalRepository, PgSystemSettingsRepository } from "@brain/database";
@@ -143,6 +144,7 @@ export function registerEvolutionPrioritiesRoutes(
     queryAwareRetrieval: AsyncRetrievalEngine;
     pgRetrieval?: PostgresRetrievalEngine;
     pgKnowledge?: PostgresKnowledgeRepository;
+    appPostgresClient?: AppPostgresClient;
   }
 ) {
   const {
@@ -154,7 +156,8 @@ export function registerEvolutionPrioritiesRoutes(
     authRepo,
     systemSettingsRepo,
     queryAwareRetrieval,
-    pgKnowledge
+    pgKnowledge,
+    appPostgresClient
   } = deps;
 
   const authUser = async (headerValue: string | undefined): Promise<AuthContext> => {
@@ -281,17 +284,87 @@ export function registerEvolutionPrioritiesRoutes(
       }
     };
 
+    const probeValkey = async (redisUrl: string): Promise<{ online: boolean; latencyMs: number }> => {
+      const t0 = Date.now();
+      let host = "localhost";
+      let port = 6379;
+      try {
+        const parsed = new URL(redisUrl);
+        host = parsed.hostname || "localhost";
+        port = Number(parsed.port || 6379);
+      } catch {
+        // default localhost:6379
+      }
+      return new Promise((resolve) => {
+        const socket = createConnection({ host, port });
+        let settled = false;
+        const finish = (online: boolean) => {
+          if (settled) return;
+          settled = true;
+          socket.destroy();
+          resolve({ online, latencyMs: Date.now() - t0 });
+        };
+        socket.setTimeout(1200);
+        socket.on("connect", () => socket.write("*1\r\n$4\r\nPING\r\n"));
+        socket.on("data", (chunk) => finish(chunk.toString("utf8").includes("PONG")));
+        socket.on("timeout", () => finish(false));
+        socket.on("error", () => finish(false));
+      });
+    };
+
+    const probePostgres = async (): Promise<{ online: boolean; latencyMs: number; embeddedCount: number | null; totalCount: number | null }> => {
+      const t0 = Date.now();
+      if (appPostgresClient) {
+        try {
+          const stats = await appPostgresClient.withRlsTransaction(
+            { tenantId: searchCtx.tenantId, allowedProjects: searchCtx.allowedProjects, allowedPolicies: searchCtx.allowedPolicies },
+            async (sql) => {
+              const [row] = (await sql`
+                SELECT
+                  (SELECT COUNT(*)::int FROM knowledge_items WHERE tenant_id = ${searchCtx.tenantId} AND project_id = ${req.params.projectId} AND deleted_at IS NULL) AS total_count,
+                  (SELECT COUNT(DISTINCT knowledge_item_id)::int FROM knowledge_embeddings WHERE tenant_id = ${searchCtx.tenantId} AND project_id = ${req.params.projectId}) AS embedded_count
+              `) as Array<{ total_count: number; embedded_count: number }>;
+              return row;
+            }
+          );
+          return {
+            online: true,
+            latencyMs: Date.now() - t0,
+            totalCount: stats?.total_count ?? null,
+            embeddedCount: stats?.embedded_count ?? null
+          };
+        } catch {
+          return { online: false, latencyMs: Date.now() - t0, totalCount: null, embeddedCount: null };
+        }
+      }
+      if (opRepo) {
+        try {
+          await opRepo.listDepartmentFinopsQuotas(searchCtx, req.params.projectId);
+          return { online: true, latencyMs: Date.now() - t0, totalCount: null, embeddedCount: null };
+        } catch {
+          return { online: false, latencyMs: Date.now() - t0, totalCount: null, embeddedCount: null };
+        }
+      }
+      return { online: false, latencyMs: 0, totalCount: null, embeddedCount: null };
+    };
+
+    const valkeyUrl = process.env.VALKEY_URL ?? process.env.REDIS_URL ?? "redis://localhost:6379";
     const opaBaseUrl = (process.env.OPA_URL ?? "http://localhost:8181").replace(/\/+$/, "");
-    const [ollamaProbe, minioProbe, opaProbe, hits, quotas, tasks] = await Promise.all([
+    const [ollamaProbe, minioProbe, opaProbe, valkeyProbe, pgProbe, hits, quotas, tasks] = await Promise.all([
       probeHttp("http://localhost:11434/api/tags"),
       probeHttp("http://localhost:9000/minio/health/live"),
       probeHttp(`${opaBaseUrl}/health`),
+      probeValkey(valkeyUrl),
+      probePostgres(),
       queryAwareRetrieval.search(searchCtx, { projectId: req.params.projectId, query: "", limit: 200 }).catch(() => []),
       opRepo ? opRepo.listDepartmentFinopsQuotas(searchCtx, req.params.projectId).catch(() => []) : Promise.resolve([]),
       opRepo ? opRepo.listRunnerTasks(searchCtx, req.params.projectId).catch(() => []) : Promise.resolve([])
     ]);
 
     const items = hits.map((h) => h.item);
+    const totalItems = pgProbe.totalCount ?? items.length;
+    const embeddedItems = pgProbe.embeddedCount ?? 0;
+    const pendingEmbeddings = Math.max(0, totalItems - embeddedItems);
     const lastIngestedAt = items.reduce<string | null>((latest, item) => {
       if (!latest || item.updatedAt > latest) return item.updatedAt;
       return latest;
@@ -301,11 +374,20 @@ export function registerEvolutionPrioritiesRoutes(
     const queuedTasks = tasks.filter((t) => t.status === "queued" || t.status === "running").length;
 
     const alerts: Array<{ severity: "warning" | "error" | "info"; title: string; detail: string }> = [];
+    if (!pgProbe.online) {
+      alerts.push({ severity: "error", title: "PostgreSQL Offline", detail: "Banco principal inacessível." });
+    }
+    if (!valkeyProbe.online) {
+      alerts.push({ severity: "warning", title: "Valkey Offline (:6379)", detail: "Cache distribuído de retrieval indisponível." });
+    }
     if (!ollamaProbe.online) {
       alerts.push({ severity: "error", title: "Ollama Offline (:11434)", detail: "Geração de embeddings bge-m3 indisponível." });
     }
     if (!minioProbe.online) {
       alerts.push({ severity: "warning", title: "MinIO S3 Offline (:9000)", detail: "Upload de binários e artefatos degradado." });
+    }
+    if (!opaProbe.online) {
+      alerts.push({ severity: "warning", title: "OPA Offline (:8181)", detail: "Open Policy Agent inacessível para avaliação Policy-as-Code." });
     }
     if (failedTasks > 0) {
       alerts.push({ severity: "warning", title: `${failedTasks} tarefa(s) com falha no Runner`, detail: "Use a opção Retomar Tarefa na guia Agentes & Runner." });
@@ -321,16 +403,16 @@ export function registerEvolutionPrioritiesRoutes(
       projectId: req.params.projectId,
       checkedAt: new Date().toISOString(),
       connections: {
-        postgres: { online: Boolean(opRepo), latencyMs: 2, detail: "PostgreSQL 16 + pgvector + BM25 + RLS" },
-        valkey: { online: true, latencyMs: 1, detail: "redis://localhost:6379 (ValkeyRetrievalCache)" },
+        postgres: { online: pgProbe.online, latencyMs: pgProbe.latencyMs, detail: "PostgreSQL 16 + pgvector + BM25 + RLS + Sync Locks" },
+        valkey: { online: valkeyProbe.online, latencyMs: valkeyProbe.latencyMs, detail: `${valkeyUrl} (ValkeyRetrievalCache)` },
         minio: { online: minioProbe.online, latencyMs: minioProbe.latencyMs, detail: "s3://brain-artifacts (:9000)" },
         ollama: { online: ollamaProbe.online, latencyMs: ollamaProbe.latencyMs, detail: "bge-m3 (1024d) + gemma2:2b" },
-        opa: { online: opaProbe.online, latencyMs: opaProbe.latencyMs, detail: "Open Policy Agent (:8181)" }
+        opa: { online: opaProbe.online, latencyMs: opaProbe.latencyMs, detail: `Open Policy Agent (${opaBaseUrl})` }
       },
       ingestionPipeline: {
-        totalItems: items.length,
-        embeddedItems: items.length,
-        pendingEmbeddings: 0,
+        totalItems,
+        embeddedItems,
+        pendingEmbeddings,
         lastIngestedAt,
         queuedRunnerTasks: queuedTasks,
         failedRunnerTasks: failedTasks

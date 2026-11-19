@@ -301,3 +301,142 @@ export async function uploadObjectToMinio(opts: MinioUploadOptions): Promise<Min
     };
   }
 }
+
+export async function listMinioObjects(
+  prefix: string,
+  options: {
+    endpoint?: string;
+    bucket?: string;
+    accessKey?: string;
+    secretKey?: string;
+    region?: string;
+  } = {}
+): Promise<string[]> {
+  const endpoint = (options.endpoint ?? process.env.MINIO_ENDPOINT ?? "http://localhost:9000").replace(/\/+$/, "");
+  const bucket = options.bucket ?? process.env.MINIO_BUCKET ?? "brain-artifacts";
+  const accessKey = options.accessKey ?? process.env.MINIO_ROOT_USER ?? "brain_minio";
+  const secretKey = options.secretKey ?? process.env.MINIO_ROOT_PASSWORD ?? "brain_minio_password";
+  const region = options.region ?? "us-east-1";
+
+  const url = new URL(`${endpoint}/${bucket}`);
+  url.searchParams.set("list-type", "2");
+  if (prefix) url.searchParams.set("prefix", prefix);
+
+  const emptyBuf = Buffer.alloc(0);
+  const headers = signS3Request({
+    method: "GET",
+    url,
+    payload: emptyBuf,
+    accessKey,
+    secretKey,
+    region
+  });
+  const res = await fetch(url, {
+    method: "GET",
+    headers,
+    signal: AbortSignal.timeout(3000)
+  });
+  if (res.status === 404) return [];
+  if (!res.ok) {
+    throw new Error(`MinIO listObjects retornou HTTP ${res.status}`);
+  }
+  const xml = await res.text();
+  const keys: string[] = [];
+  const keyRegex = /<Key>([^<]+)<\/Key>/g;
+  let match: RegExpExecArray | null;
+  while ((match = keyRegex.exec(xml)) !== null) {
+    if (match[1]) keys.push(match[1]);
+  }
+  return keys;
+}
+
+export async function deleteMinioObject(
+  key: string,
+  options: {
+    endpoint?: string;
+    bucket?: string;
+    accessKey?: string;
+    secretKey?: string;
+    region?: string;
+  } = {}
+): Promise<boolean> {
+  const endpoint = (options.endpoint ?? process.env.MINIO_ENDPOINT ?? "http://localhost:9000").replace(/\/+$/, "");
+  const bucket = options.bucket ?? process.env.MINIO_BUCKET ?? "brain-artifacts";
+  const accessKey = options.accessKey ?? process.env.MINIO_ROOT_USER ?? "brain_minio";
+  const secretKey = options.secretKey ?? process.env.MINIO_ROOT_PASSWORD ?? "brain_minio_password";
+  const region = options.region ?? "us-east-1";
+  const cleanKey = key.replace(/^\/+/, "");
+
+  const url = new URL(`${endpoint}/${bucket}/${cleanKey}`);
+  const emptyBuf = Buffer.alloc(0);
+  const headers = signS3Request({
+    method: "DELETE",
+    url,
+    payload: emptyBuf,
+    accessKey,
+    secretKey,
+    region
+  });
+  const res = await fetch(url, {
+    method: "DELETE",
+    headers,
+    signal: AbortSignal.timeout(3000)
+  });
+  return res.ok || res.status === 204 || res.status === 404;
+}
+
+export async function eraseMinioObjectsForSubject(input: {
+  tenantId: string;
+  projectId: string;
+  subjectId: string;
+  endpoint?: string;
+  bucket?: string;
+  accessKey?: string;
+  secretKey?: string;
+}): Promise<{ ok: boolean; reachable: boolean; deletedCount: number; failedCount: number }> {
+  const endpoint = (input.endpoint ?? process.env.MINIO_ENDPOINT ?? "http://localhost:9000").replace(/\/+$/, "");
+  try {
+    const health = await fetch(`${endpoint}/minio/health/live`, { signal: AbortSignal.timeout(1500) });
+    if (!health.ok) {
+      return { ok: false, reachable: false, deletedCount: 0, failedCount: 0 };
+    }
+  } catch {
+    return { ok: false, reachable: false, deletedCount: 0, failedCount: 0 };
+  }
+
+  try {
+    const prefixes = [
+      `${input.tenantId}/${input.projectId}/`,
+      `documents/${input.projectId}/`,
+      `${input.projectId}/`
+    ];
+    const allKeys = new Set<string>();
+    for (const prefix of prefixes) {
+      const found = await listMinioObjects(prefix, {
+        endpoint,
+        bucket: input.bucket,
+        accessKey: input.accessKey,
+        secretKey: input.secretKey
+      });
+      for (const k of found) allKeys.add(k);
+    }
+
+    const needle = input.subjectId.toLowerCase();
+    const matchingKeys = [...allKeys].filter((k) => k.toLowerCase().includes(needle));
+    let deletedCount = 0;
+    let failedCount = 0;
+    for (const key of matchingKeys) {
+      const deleted = await deleteMinioObject(key, {
+        endpoint,
+        bucket: input.bucket,
+        accessKey: input.accessKey,
+        secretKey: input.secretKey
+      });
+      if (deleted) deletedCount += 1;
+      else failedCount += 1;
+    }
+    return { ok: failedCount === 0, reachable: true, deletedCount, failedCount };
+  } catch {
+    return { ok: false, reachable: true, deletedCount: 0, failedCount: 1 };
+  }
+}

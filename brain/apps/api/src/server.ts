@@ -402,7 +402,8 @@ export function buildApp(
     crossService,
     pgApprovals,
     approvals,
-    registeredProjects
+    registeredProjects,
+    appPostgresClient
   });
 
   registerIngestContextRoutes(app, {
@@ -423,7 +424,8 @@ export function buildApp(
     enforceOpa,
     recordAudit,
     runner,
-    opRepo
+    opRepo,
+    projectModelUsage
   });
 
   registerHandoffsHooksRoutes(app, {

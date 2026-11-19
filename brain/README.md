@@ -75,8 +75,8 @@ flowchart TB
   end
 
   subgraph Infra["Infraestrutura & Persistência"]
-    PG[("PostgreSQL 16 + pgvector\nRow-Level Security (RLS) Forçado")]
-    Valkey[("Valkey 7.2\nCache Distribuído & Locks")]
+    PG[("PostgreSQL 16 + pgvector\nRow-Level Security (RLS) & Sync Locks")]
+    Valkey[("Valkey 7.2\nCache Distribuído de Retrieval")]
     MinIO[("MinIO S3\nSnapshots & Brainpacks")]
     Ollama["Ollama Local (:11434)\nbge-m3 / nomic-embed-text"]
     OPA["Open Policy Agent (:8181)\nPolicy-as-Code"]

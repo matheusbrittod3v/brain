@@ -1,5 +1,6 @@
 import { Type } from "@sinclair/typebox";
 import type { FastifyInstance } from "fastify";
+import { resolveActiveFinopsDowngrade } from "../../services/finops-quota.js";
 import {
   PROVIDER_REGISTRY,
   completeProviderOAuth,
@@ -63,7 +64,7 @@ export function registerRunnerProviderRoutes(
   deps: RunnerRouteDeps,
   state: RunnerSharedState
 ) {
-  const { authenticateProjectRequest, enforceOpa } = deps;
+  const { authenticateProjectRequest, enforceOpa, opRepo, projectModelUsage } = deps;
   const { runtimeApiKeys, liveModelsCache } = state;
 
   app.get<{ Params: { projectId: string }; Querystring: { probe?: string } }>(
@@ -477,6 +478,12 @@ export function registerRunnerProviderRoutes(
       await enforceOpa(ctx, { projectId: req.params.projectId, accessPolicyId: "internal-project", action: "read" });
 
       const routing = getProjectRouting(ctx.tenantId, req.params.projectId);
+      const finopsDowngrade = await resolveActiveFinopsDowngrade({
+        ctx,
+        projectId: req.params.projectId,
+        opRepo,
+        projectModelUsage
+      });
       const role = req.body.role || "primary";
       const historyText = req.body.messages
         .slice(-16)
@@ -485,10 +492,12 @@ export function registerRunnerProviderRoutes(
 
       const started = Date.now();
       if (role === "collaborate") {
+        const primaryProvider = finopsDowngrade.downgraded && finopsDowngrade.provider ? finopsDowngrade.provider : routing.primary.provider;
+        const primaryModel = finopsDowngrade.downgraded && finopsDowngrade.model ? finopsDowngrade.model : routing.primary.model;
         const primaryDraft = await generateWithVercelAiSdk({
-          provider: routing.primary.provider,
-          model: routing.primary.model,
-          apiKey: runtimeApiKeys.get(routing.primary.provider) || getStoredToken(routing.primary.provider),
+          provider: primaryProvider,
+          model: primaryModel,
+          apiKey: runtimeApiKeys.get(primaryProvider) || getStoredToken(primaryProvider),
           system: `Você é o Agente Principal (projeto '${req.params.projectId}'). Elabore uma análise inicial clara e objetiva para ser revisada pelo Submodelo.`,
           prompt: historyText,
           fallbacks: routing.fallbacks,
@@ -503,9 +512,9 @@ export function registerRunnerProviderRoutes(
           timeoutMs: 60_000
         });
         const consolidated = await generateWithVercelAiSdk({
-          provider: routing.primary.provider,
-          model: routing.primary.model,
-          apiKey: runtimeApiKeys.get(routing.primary.provider) || getStoredToken(routing.primary.provider),
+          provider: primaryProvider,
+          model: primaryModel,
+          apiKey: runtimeApiKeys.get(primaryProvider) || getStoredToken(primaryProvider),
           system: `Você é o Agente Principal (projeto '${req.params.projectId}'). Consolide a resposta final incorporando os pontos válidos do Submodelo.`,
           prompt: `Pergunta:\n${historyText}\n\nSua análise inicial:\n${primaryDraft.text}\n\nRevisão do Submodelo (${secondaryReview.provider}/${secondaryReview.model}):\n${secondaryReview.text}`,
           fallbacks: routing.fallbacks,
@@ -516,8 +525,10 @@ export function registerRunnerProviderRoutes(
           secondaryReply: secondaryReview.text,
           secondaryProvider: secondaryReview.provider || routing.secondary.provider,
           secondaryModel: secondaryReview.model || routing.secondary.model,
-          provider: consolidated.provider || routing.primary.provider,
-          model: consolidated.model || routing.primary.model,
+          provider: consolidated.provider || primaryProvider,
+          model: consolidated.model || primaryModel,
+          finopsDowngraded: finopsDowngrade.downgraded,
+          ...(finopsDowngrade.reason ? { downgradeReason: finopsDowngrade.reason } : {}),
           attempts: consolidated.attempts ?? 1,
           usage: {
             inputTokens: primaryDraft.usage.inputTokens + secondaryReview.usage.inputTokens + consolidated.usage.inputTokens,
@@ -529,8 +540,12 @@ export function registerRunnerProviderRoutes(
       }
 
       const selected = role === "secondary" ? routing.secondary : routing.primary;
-      const targetProvider = req.body.provider?.trim() || selected.provider;
-      const targetModel = req.body.model?.trim() || selected.model;
+      const targetProvider = finopsDowngrade.downgraded && finopsDowngrade.provider
+        ? finopsDowngrade.provider
+        : req.body.provider?.trim() || selected.provider;
+      const targetModel = finopsDowngrade.downgraded && finopsDowngrade.model
+        ? finopsDowngrade.model
+        : req.body.model?.trim() || selected.model;
 
       const res = await generateWithVercelAiSdk({
         provider: targetProvider,
@@ -540,7 +555,7 @@ export function registerRunnerProviderRoutes(
           req.body.system?.trim() ||
           `Você é o Brain Chat (${role === "secondary" ? "Submodelo" : "Modelo Principal"} · projeto '${req.params.projectId}'). Responda de forma clara, prática e direta em Markdown.`,
         prompt: historyText,
-        fallbacks: req.body.provider ? undefined : routing.fallbacks,
+        fallbacks: req.body.provider || finopsDowngrade.downgraded ? undefined : routing.fallbacks,
         timeoutMs: 90_000
       });
 
@@ -548,6 +563,8 @@ export function registerRunnerProviderRoutes(
         reply: res.text,
         provider: res.provider || targetProvider,
         model: res.model || targetModel,
+        finopsDowngraded: finopsDowngrade.downgraded,
+        ...(finopsDowngrade.reason ? { downgradeReason: finopsDowngrade.reason } : {}),
         attempts: res.attempts ?? 1,
         usage: res.usage,
         latencyMs: Date.now() - started

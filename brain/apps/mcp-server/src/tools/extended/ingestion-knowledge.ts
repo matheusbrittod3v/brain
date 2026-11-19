@@ -234,18 +234,50 @@ export function registerExtendedIngestionTools(
     },
     async ({ projectId, atDate, query, limit }) => {
       assertProjectAccess(ctx, projectId);
+      const maxItems = limit ?? 25;
+      const needle = query?.trim().toLowerCase() ?? "";
+
+      if (runtime.temporal) {
+        const persisted = await runtime.temporal.queryVersionsAt(ctx, { projectId, atTimestamp: atDate });
+        const filtered = needle
+          ? persisted.filter(
+              (item) =>
+                item.title.toLowerCase().includes(needle) ||
+                item.content.toLowerCase().includes(needle) ||
+                item.itemId.toLowerCase().includes(needle)
+            )
+          : persisted;
+        const items = filtered.slice(0, maxItems).map((item) => ({
+          id: item.itemId,
+          title: item.title,
+          status: item.status,
+          version: item.version,
+          sourceVersion: item.sourceVersion,
+          content: item.content
+        }));
+        return okJson({
+          projectId,
+          atDate,
+          source: "postgres_temporal",
+          count: items.length,
+          items
+        });
+      }
+
       const hits = await runtime.retrieval.search(ctx, {
         projectId,
         query: query ?? "",
         atDate,
-        limit: limit ?? 25
+        limit: maxItems
       });
       const temporal = new TemporalKnowledgeEngine();
       for (const hit of hits) temporal.recordVersion(hit.item);
       const snapshot = temporal.queryAt(ctx, { projectId, atTimestamp: atDate });
+
       return okJson({
         projectId,
         atDate,
+        source: "in_memory_retrieval",
         count: snapshot.length,
         items: snapshot.map((item) => ({
           id: item.id,

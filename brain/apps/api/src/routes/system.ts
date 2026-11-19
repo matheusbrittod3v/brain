@@ -2,7 +2,7 @@ import type { FastifyInstance } from "fastify";
 import type { HandoffStore } from "@brain/agent-handoff";
 import type { BrainRunnerQueue } from "@brain/agent-runner";
 import type { ApprovalQueue, PostgresApprovalQueue } from "@brain/approval-engine";
-import type { AuditLogger } from "@brain/audit-engine";
+import type { AppPostgresClient, AuditLogger } from "@brain/audit-engine";
 import {
   authenticateRequest,
   exportAbilityRules,
@@ -63,6 +63,7 @@ export function registerSystemRoutes(
     pgApprovals?: PostgresApprovalQueue;
     approvals?: ApprovalQueue;
     registeredProjects: Map<string, unknown>;
+    appPostgresClient?: AppPostgresClient;
   }
 ) {
   const {
