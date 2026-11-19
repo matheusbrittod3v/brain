@@ -11,9 +11,9 @@
   },
   "dependencies": {
     "@brain/auth": "*",
+    "@brain/context-optimizer": "*",
     "@brain/core": "*",
-    "@brain/retrieval": "*",
-    "js-tiktoken": "^1.0.21"
+    "@brain/retrieval": "*"
   },
   "devDependencies": {
     "@types/node": "^22.10.0",

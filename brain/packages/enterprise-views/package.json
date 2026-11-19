@@ -10,6 +10,7 @@
     "test": "node --test dist/test/*.test.js"
   },
   "dependencies": {
+    "@brain/business-traceability": "*",
     "@brain/core": "*",
     "@brain/graph": "*"
   },

@@ -332,145 +332,7 @@ export function registerKnowledgeDailyRoutes(
     return { saved: true, memory: memoryItem };
   });
 
-  // 5. Prévia do Impacto de uma Decisão (Decision Preview)
-  app.post<{
-    Params: { projectId: string };
-    Body: {
-      optionA: { title: string; description: string };
-      optionB: { title: string; description: string };
-    };
-  }>("/v1/projects/:projectId/daily/decision-preview", async (req) => {
-    const ctx = await authUser(req.headers.authorization);
-    const { optionA, optionB } = req.body ?? {};
-    if (!optionA?.title || !optionB?.title) {
-      throw new BrainError("BRAIN_ERR_INVALID_INPUT", "Duas opções (optionA e optionB) são obrigatórias.", 400);
-    }
-
-    const items = await getProjectKnowledge(ctx, req.params.projectId, 250);
-    const evaluateOption = (opt: { title: string; description: string }) => {
-      const text = `${opt.title} ${opt.description}`.toLowerCase();
-      const affectedRules = items.filter((i) => i.type === "business_rule" && text.includes(i.title.toLowerCase().slice(0, 10)));
-      const affectedServices = items.filter((i) => i.type === "service" || i.type === "api_contract");
-      const riskScore = affectedRules.length > 2 ? "high" : affectedRules.length > 0 ? "medium" : "low";
-
-      return {
-        title: opt.title,
-        riskScore,
-        affectedRulesCount: affectedRules.length,
-        affectedRules: affectedRules.map((r) => r.title),
-        impactedServicesCount: Math.min(affectedServices.length, 3),
-        pros: ["Alinhamento modular", "Preservação de contratos existentes"],
-        cons: riskScore === "high" ? ["Requer refatoração de regras ativas"] : ["Esforço de teste moderado"]
-      };
-    };
-
-    const evalA = evaluateOption(optionA);
-    const evalB = evaluateOption(optionB);
-
-    return {
-      projectId: req.params.projectId,
-      comparison: { optionA: evalA, optionB: evalB },
-      recommendation: evalA.affectedRulesCount <= evalB.affectedRulesCount ? optionA.title : optionB.title,
-      rationale: "Opção com menor atrito arquitetural e menor taxa de refatoração de regras de negócio existentes."
-    };
-  });
-
-  // 6. Acompanhamento de Tarefas Técnicas (Task Knowledge Tracker)
-  app.get<{
-    Params: { projectId: string };
-  }>("/v1/projects/:projectId/daily/task-tracker", async (req) => {
-    const ctx = await authUser(req.headers.authorization);
-    const items = await getProjectKnowledge(ctx, req.params.projectId, 250);
-    const tasks = items.filter((i) => i.type === "task");
-
-    const mappedTasks = tasks.map((t) => {
-      const related = items.filter((i) => t.relatedIds?.includes(i.id));
-      const hasTests = related.some((r) => r.type === "test");
-      return {
-        id: t.id,
-        title: t.title,
-        status: t.status,
-        progressPercent: hasTests ? 100 : related.length > 0 ? 60 : 25,
-        linkedRulesCount: related.filter((r) => r.type === "business_rule").length,
-        linkedDocsCount: related.filter((r) => r.type === "document").length,
-        tags: t.tags
-      };
-    });
-
-    return {
-      projectId: req.params.projectId,
-      totalTrackedTasks: mappedTasks.length,
-      tasks: mappedTasks
-    };
-  });
-
-  // 7. Explicação de Permissões em Linguagem Simples (Explain Permissions)
-  app.post<{
-    Params: { projectId: string };
-    Body: { knowledgeItemId?: string; targetAction?: string; userId?: string };
-  }>("/v1/projects/:projectId/daily/explain-permissions", async (req) => {
-    const ctx = await authUser(req.headers.authorization);
-    const { knowledgeItemId, targetAction = "write", userId } = req.body ?? {};
-
-    const items = await getProjectKnowledge(ctx, req.params.projectId, 100);
-    const targetItem = knowledgeItemId ? items.find((i) => i.id === knowledgeItemId) : null;
-    const policy = targetItem?.accessPolicyId || "internal-project";
-
-    const explanation = {
-      targetItem: targetItem ? `${targetItem.id} (${targetItem.title})` : "Recurso Geral do Projeto",
-      action: targetAction,
-      policyApplied: policy,
-      allowedRoles: ["admin", "developer", "tech-lead"],
-      whoCanPerform: "Usuários com perfil 'developer' ou 'admin' atribuídos a este projeto.",
-      plainLanguageExplanation: `A ação '${targetAction}' neste item é governada pela política CASL '${policy}'. O isolamento multi-tenant restringe a alteração estritamente a membros com escopo ativo no projeto '${req.params.projectId}'.`,
-      canCurrentUserPerform: ctx.roles.includes("admin") || ctx.roles.includes("developer")
-    };
-
-    return explanation;
-  });
-
-  // 8. Importação de Conhecimento por Conversa (Discussion Extractor)
-  app.post<{
-    Params: { projectId: string };
-    Body: { conversationText: string; title?: string };
-  }>("/v1/projects/:projectId/daily/import-from-discussion", async (req) => {
-    const ctx = await authUser(req.headers.authorization);
-    const { conversationText = "", title = "Discussão Técnica" } = req.body ?? {};
-    if (!conversationText.trim()) {
-      throw new BrainError("BRAIN_ERR_INVALID_INPUT", "Texto da conversa obrigatório.", 400);
-    }
-
-    const lines = conversationText.split("\n").filter((l) => l.trim().length > 0);
-    const adrCandidates = lines
-      .filter((l) => /decid|adot|escolh|arquitetura/i.test(l))
-      .map((l, idx) => ({
-        suggestedId: `ADR-SUGG-${idx + 1}`,
-        type: "architecture_decision" as const,
-        title: l.slice(0, 60).replace(/^[-\d.*#\s]+/, ""),
-        context: l,
-        decision: `Adotar conforme deliberado: "${l}"`
-      }));
-
-    const ruleCandidates = lines
-      .filter((l) => /sempre|nunca|deve|obrigat|regra|proib/i.test(l))
-      .map((l, idx) => ({
-        suggestedId: `RULE-SUGG-${idx + 1}`,
-        type: "business_rule" as const,
-        title: l.slice(0, 60).replace(/^[-\d.*#\s]+/, ""),
-        ruleContent: l
-      }));
-
-    return {
-      projectId: req.params.projectId,
-      sourceTitle: title,
-      summary: `Extração concluída: ${adrCandidates.length} decisão(ões) de arquitetura e ${ruleCandidates.length} regra(s) identificadas.`,
-      adrCandidates,
-      ruleCandidates,
-      nextStep: "Submeter candidatos para aprovação na Caixa de Entrada (Inbox de Propostas)."
-    };
-  });
-
-  // 9. Modo de Exploração para Projetos Desconhecidos (Interactive Tour)
+  // 5. Modo de Exploração para Projetos Desconhecidos (Interactive Tour)
   app.get<{
     Params: { projectId: string };
     Querystring: { step?: string };
@@ -517,7 +379,7 @@ export function registerKnowledgeDailyRoutes(
     };
   });
 
-  // 10. Busca de Exemplos Internos (Internal Examples Search)
+  // 6. Busca de Exemplos Internos (Internal Examples Search)
   app.post<{
     Params: { projectId: string };
     Body: { problemOrPattern: string; limit?: number };

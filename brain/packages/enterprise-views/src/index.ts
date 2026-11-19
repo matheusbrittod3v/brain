@@ -1,3 +1,4 @@
+import { buildBusinessTraceabilityMatrix } from "@brain/business-traceability";
 import type { KnowledgeItem } from "@brain/core";
 import type { GraphEdge } from "@brain/graph";
 
@@ -169,11 +170,12 @@ export function buildBusinessRuleTestCoverageMatrix(
   for (const result of evidence?.testResults ?? []) {
     if (!latestResults.has(result.testItemId)) latestResults.set(result.testItemId, result);
   }
+  const traceability = buildBusinessTraceabilityMatrix(items, edges);
+  const traceabilityByRule = new Map(traceability.map((link) => [link.ruleId, link]));
   const rules = items.filter((i) => i.type === "business_rule" && i.status !== "deprecated");
   const rows: QaCoverageRow[] = rules.map((rule) => {
-    const linkedTests = [...(evidence?.linkedTestsByRule?.get(rule.id) ?? edges
-      .filter((e) => e.relationType === "VERIFIED_BY" && (e.toItemId === rule.id || e.fromItemId === rule.id))
-      .map((e) => (e.toItemId === rule.id ? e.fromItemId : e.toItemId)))];
+    const deepLinked = traceabilityByRule.get(rule.id)?.tests ?? [];
+    const linkedTests = [...new Set([...(evidence?.linkedTestsByRule?.get(rule.id) ?? []), ...deepLinked])];
     const tests = evidence
       ? [...new Set(linkedTests)].filter((testId) => {
           const test = evidence.testItemsById?.get(testId) ?? itemById.get(testId);

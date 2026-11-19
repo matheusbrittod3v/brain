@@ -306,11 +306,123 @@ export function computeRetryDelayMs(policy: RetryPolicy, attempt: number): numbe
   return Math.min(policy.maximumIntervalMs, Math.round(raw));
 }
 
+export interface DurableWorkflowStore {
+  save(state: DurableWorkflowState): Promise<void>;
+  get(workflowId: string): Promise<DurableWorkflowState | undefined>;
+  listByProject(tenantId: string, projectId: string): Promise<DurableWorkflowState[]>;
+}
+
+export type DurableSqlRunner = {
+  (strings: TemplateStringsArray, ...values: Array<string | number | boolean | null>): PromiseLike<unknown>;
+};
+
+/**
+ * Persistência durável de workflows em PostgreSQL para sobreviver a reinícios.
+ */
+export class PostgresDurableWorkflowStore implements DurableWorkflowStore {
+  private initialized = false;
+
+  constructor(private readonly sql: DurableSqlRunner) {}
+
+  private async ensureTable(): Promise<void> {
+    if (this.initialized) return;
+    const existsRows = (await this.sql`SELECT to_regclass('public.durable_workflows') IS NOT NULL AS exists`) as Array<{ exists?: boolean }>;
+    if (existsRows[0]?.exists) {
+      this.initialized = true;
+      return;
+    }
+    await this.sql`
+      CREATE TABLE IF NOT EXISTS durable_workflows (
+        workflow_id text PRIMARY KEY,
+        tenant_id text NOT NULL,
+        project_id text NOT NULL,
+        kind text NOT NULL,
+        step integer NOT NULL,
+        status text NOT NULL,
+        checkpoint jsonb NOT NULL DEFAULT '{}'::jsonb,
+        expires_at_ms bigint NOT NULL,
+        updated_at timestamptz NOT NULL DEFAULT now()
+      )
+    `;
+    this.initialized = true;
+  }
+
+  async save(state: DurableWorkflowState): Promise<void> {
+    await this.ensureTable();
+    await this.sql`
+      INSERT INTO durable_workflows (workflow_id, tenant_id, project_id, kind, step, status, checkpoint, expires_at_ms, updated_at)
+      VALUES (
+        ${state.workflowId},
+        ${state.tenantId},
+        ${state.projectId},
+        ${state.kind},
+        ${state.step},
+        ${state.status},
+        ${JSON.stringify(state.checkpoint)},
+        ${state.expiresAtMs},
+        now()
+      )
+      ON CONFLICT (workflow_id)
+      DO UPDATE SET
+        step = EXCLUDED.step,
+        status = EXCLUDED.status,
+        checkpoint = EXCLUDED.checkpoint,
+        expires_at_ms = EXCLUDED.expires_at_ms,
+        updated_at = now()
+    `;
+  }
+
+  async get(workflowId: string): Promise<DurableWorkflowState | undefined> {
+    await this.ensureTable();
+    const rows = (await this.sql`
+      SELECT workflow_id, tenant_id, project_id, kind, step, status, checkpoint, expires_at_ms
+      FROM durable_workflows
+      WHERE workflow_id = ${workflowId}
+      LIMIT 1
+    `) as Array<Record<string, unknown>>;
+    const row = rows[0];
+    if (!row) return undefined;
+    return {
+      workflowId: String(row.workflow_id),
+      tenantId: String(row.tenant_id),
+      projectId: String(row.project_id),
+      kind: row.kind as DurableWorkflowState["kind"],
+      step: Number(row.step),
+      status: row.status as WorkflowStatus,
+      checkpoint: (typeof row.checkpoint === "object" && row.checkpoint !== null ? row.checkpoint : {}) as Record<string, unknown>,
+      expiresAtMs: Number(row.expires_at_ms)
+    };
+  }
+
+  async listByProject(tenantId: string, projectId: string): Promise<DurableWorkflowState[]> {
+    await this.ensureTable();
+    const rows = (await this.sql`
+      SELECT workflow_id, tenant_id, project_id, kind, step, status, checkpoint, expires_at_ms
+      FROM durable_workflows
+      WHERE tenant_id = ${tenantId} AND project_id = ${projectId}
+      ORDER BY updated_at DESC
+      LIMIT 50
+    `) as Array<Record<string, unknown>>;
+    return rows.map((row) => ({
+      workflowId: String(row.workflow_id),
+      tenantId: String(row.tenant_id),
+      projectId: String(row.project_id),
+      kind: row.kind as DurableWorkflowState["kind"],
+      step: Number(row.step),
+      status: row.status as WorkflowStatus,
+      checkpoint: (typeof row.checkpoint === "object" && row.checkpoint !== null ? row.checkpoint : {}) as Record<string, unknown>,
+      expiresAtMs: Number(row.expires_at_ms)
+    }));
+  }
+}
+
 /**
  * Orquestração durável multi-etapas com retomada, timers e aprovação humana (Fase 5 / Temporal).
  */
 export class DurableWorkflowEngine {
   private readonly workflows = new Map<string, DurableWorkflowState>();
+
+  constructor(private readonly store?: DurableWorkflowStore) {}
 
   start(input: {
     tenantId: string;
@@ -330,7 +442,37 @@ export class DurableWorkflowEngine {
       expiresAtMs: Date.now() + (input.timeoutMs ?? 24 * 60 * 60_000)
     };
     this.workflows.set(state.workflowId, state);
+    if (this.store) void this.store.save(state).catch(() => undefined);
     return state;
+  }
+
+  async startDurable(input: {
+    tenantId: string;
+    projectId: string;
+    kind: DurableWorkflowState["kind"];
+    timeoutMs?: number;
+    checkpoint?: Record<string, unknown>;
+  }): Promise<DurableWorkflowState> {
+    const state = this.start(input);
+    if (this.store) await this.store.save(state);
+    return state;
+  }
+
+  async advanceDurable(
+    workflowId: string,
+    patch: { status?: WorkflowStatus; checkpoint?: Record<string, unknown> }
+  ): Promise<DurableWorkflowState> {
+    const existing = (await this.getDurable(workflowId)) ?? this.workflows.get(workflowId);
+    if (!existing) throw new Error(`Workflow '${workflowId}' não encontrado.`);
+    const updated: DurableWorkflowState = {
+      ...existing,
+      step: existing.step + 1,
+      status: patch.status ?? existing.status,
+      checkpoint: patch.checkpoint ? { ...existing.checkpoint, ...patch.checkpoint } : existing.checkpoint
+    };
+    this.workflows.set(workflowId, updated);
+    if (this.store) await this.store.save(updated);
+    return updated;
   }
 
   signalApproval(workflowId: string, approved: boolean, nowMs = Date.now()): DurableWorkflowState {
@@ -338,15 +480,26 @@ export class DurableWorkflowEngine {
     if (!wf) throw new Error(`Workflow '${workflowId}' não encontrado.`);
     if (nowMs > wf.expiresAtMs) {
       wf.status = "timed_out";
+      if (this.store) void this.store.save(wf).catch(() => undefined);
       return wf;
     }
     wf.step += 1;
     wf.status = approved ? "completed" : "rejected";
+    if (this.store) void this.store.save(wf).catch(() => undefined);
     return wf;
   }
 
   get(workflowId: string): DurableWorkflowState | undefined {
     return this.workflows.get(workflowId);
+  }
+
+  async getDurable(workflowId: string): Promise<DurableWorkflowState | undefined> {
+    const cached = this.workflows.get(workflowId);
+    if (cached) return cached;
+    if (!this.store) return undefined;
+    const loaded = await this.store.get(workflowId);
+    if (loaded) this.workflows.set(workflowId, loaded);
+    return loaded;
   }
 }
 

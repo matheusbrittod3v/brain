@@ -9,7 +9,6 @@ import { asc, eq } from "drizzle-orm";
 import { scanForSecrets } from "@brain/ingestion";
 import { assertSecretScanClean, redactPiiWithAiWorker, rerankWithAiWorker } from "../../services/ai-worker.js";
 import { configuredWorkspaceRoot } from "../../services/jobs.js";
-import { recordZeroHitQuery } from "../evolution-priorities.js";
 import type { ProjectsKnowledgeDeps } from "./types.js";
 
 export function registerProjectCoreRoutes(app: FastifyInstance, deps: ProjectsKnowledgeDeps) {
@@ -287,10 +286,6 @@ export function registerProjectCoreRoutes(app: FastifyInstance, deps: ProjectsKn
             }
           }
         }
-      }
-
-      if (mapped.length === 0 && query.trim().length > 0) {
-        recordZeroHitQuery(req.params.projectId, query, ctx.actorId);
       }
 
       const reranked = await rerankWithAiWorker(query, mapped);

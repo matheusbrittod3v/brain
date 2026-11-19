@@ -5,47 +5,14 @@ import type { AppPostgresClient, AuditLogger } from "@brain/audit-engine";
 import { authenticateRequest, usersStore, type AuthContext } from "@brain/auth";
 import { BrainError, type KnowledgeItem } from "@brain/core";
 import type { PgAuthRepository, PgOperationalRepository, PgSystemSettingsRepository } from "@brain/database";
+import { evaluateSearchBenchmark } from "@brain/evaluation";
 import { scanForSecrets } from "@brain/ingestion";
 import type { PostgresKnowledgeRepository } from "@brain/knowledge";
 import type { AsyncRetrievalEngine, PostgresRetrievalEngine } from "@brain/retrieval";
 import { enqueueEmbedJob } from "@brain/worker";
 import { redactPiiWithAiWorker } from "../services/ai-worker.js";
+import { executeIncrementalConnectorSync } from "../services/connector-sync.js";
 import { ensureMinioBucket, uploadObjectToMinio } from "../services/minio-storage.js";
-
-export interface ZeroHitEntry {
-  query: string;
-  projectId: string;
-  actorId: string;
-  count: number;
-  lastSeenAt: string;
-}
-
-const zeroHitQueriesByProject = new Map<string, Map<string, ZeroHitEntry>>();
-
-export function recordZeroHitQuery(projectId: string, query: string, actorId: string): void {
-  const normalized = query.trim();
-  if (!normalized) return;
-  let projMap = zeroHitQueriesByProject.get(projectId);
-  if (!projMap) {
-    projMap = new Map();
-    zeroHitQueriesByProject.set(projectId, projMap);
-  }
-  const key = normalized.toLowerCase();
-  const existing = projMap.get(key);
-  projMap.set(key, {
-    query: normalized,
-    projectId,
-    actorId,
-    count: (existing?.count ?? 0) + 1,
-    lastSeenAt: new Date().toISOString()
-  });
-}
-
-export function listZeroHitQueries(projectId: string): ZeroHitEntry[] {
-  const projMap = zeroHitQueriesByProject.get(projectId);
-  if (!projMap) return [];
-  return [...projMap.values()].sort((a, b) => b.count - a.count || b.lastSeenAt.localeCompare(a.lastSeenAt));
-}
 
 export interface BenchmarkQuestion {
   id: string;
@@ -193,7 +160,6 @@ export function registerEvolutionPrioritiesRoutes(
     return {
       projectId: req.params.projectId,
       questions: REFERENCE_BENCHMARK_QUESTIONS,
-      zeroHitQueries: listZeroHitQueries(req.params.projectId),
       staleItems,
       untestedRules
     };
@@ -206,63 +172,59 @@ export function registerEvolutionPrioritiesRoutes(
       allowedProjects: [...new Set([...ctx.allowedProjects, req.params.projectId])]
     };
 
-    const cases = await Promise.all(
-      REFERENCE_BENCHMARK_QUESTIONS.map(async (q) => {
+    const report = await evaluateSearchBenchmark(
+      REFERENCE_BENCHMARK_QUESTIONS.map((q) => ({
+        id: q.id,
+        query: q.question,
+        expectedIds: q.expectedIds,
+        meta: { category: q.category }
+      })),
+      async (q) => {
         const started = Date.now();
         const hits = await queryAwareRetrieval.search(searchCtx, {
           projectId: req.params.projectId,
-          query: q.question,
+          query: q.query,
           limit: 5,
           explain: true
         });
         const latencyMs = Date.now() - started;
-        const returnedIds = hits.map((h) => h.item.id);
-        const firstMatchRank = returnedIds.findIndex((id) => q.expectedIds.includes(id)) + 1;
-        const hitAt1 = firstMatchRank === 1;
-        const recallAt5 =
-          q.expectedIds.filter((eid) => returnedIds.includes(eid)).length / Math.max(1, q.expectedIds.length);
-        const reciprocalRank = firstMatchRank > 0 ? 1 / firstMatchRank : 0;
         const topHit = hits[0];
         const exp = (topHit as { explain?: { lexicalScore?: number; vectorScore?: number; graphProximity?: number } } | undefined)?.explain;
-
         return {
-          id: q.id,
-          question: q.question,
-          category: q.category,
-          expectedIds: q.expectedIds,
-          returnedIds,
-          hitAt1,
-          recallAt5: Number(recallAt5.toFixed(3)),
-          reciprocalRank: Number(reciprocalRank.toFixed(3)),
+          returnedIds: hits.map((h) => h.item.id),
           latencyMs,
-          topExplain: exp
-            ? {
-                lexicalScore: Number((exp.lexicalScore ?? 0).toFixed(3)),
-                vectorScore: Number((exp.vectorScore ?? 0).toFixed(3)),
-                graphProximity: Number((exp.graphProximity ?? 0).toFixed(3))
-              }
-            : null
+          detail: {
+            question: q.query,
+            category: q.meta?.category,
+            expectedIds: q.expectedIds,
+            topExplain: exp
+              ? {
+                  lexicalScore: Number((exp.lexicalScore ?? 0).toFixed(3)),
+                  vectorScore: Number((exp.vectorScore ?? 0).toFixed(3)),
+                  graphProximity: Number((exp.graphProximity ?? 0).toFixed(3))
+                }
+              : null
+          }
         };
-      })
+      }
     );
-
-    const total = Math.max(1, cases.length);
-    const hitRateAt1 = Number((cases.filter((c) => c.hitAt1).length / total).toFixed(3));
-    const meanRecallAt5 = Number((cases.reduce((acc, c) => acc + c.recallAt5, 0) / total).toFixed(3));
-    const mrr = Number((cases.reduce((acc, c) => acc + c.reciprocalRank, 0) / total).toFixed(3));
-    const avgLatencyMs = Math.round(cases.reduce((acc, c) => acc + c.latencyMs, 0) / total);
 
     return {
       projectId: req.params.projectId,
       evaluatedAt: new Date().toISOString(),
-      summary: {
-        totalQuestions: cases.length,
-        hitRateAt1,
-        meanRecallAt5,
-        mrr,
-        avgLatencyMs
-      },
-      cases
+      summary: report.summary,
+      cases: report.cases.map((c) => ({
+        id: c.id,
+        question: c.detail?.question,
+        category: c.detail?.category,
+        expectedIds: c.detail?.expectedIds,
+        returnedIds: c.returnedIds,
+        hitAt1: c.hitAt1,
+        recallAt5: c.recallAt5,
+        reciprocalRank: c.reciprocalRank,
+        latencyMs: c.latencyMs,
+        topExplain: c.detail?.topExplain ?? null
+      }))
     };
   });
 
@@ -407,17 +369,16 @@ export function registerEvolutionPrioritiesRoutes(
     if (!current) {
       throw new BrainError("BRAIN_ERR_INVALID_INPUT", `Conector '${provider}' inválido.`, 422);
     }
-    const now = new Date().toISOString();
-    const nextCursor = `${provider}-sync-${createHash("sha256").update(`${now}:${req.body?.targetRef ?? ""}`).digest("hex").slice(0, 10)}`;
-    current.incrementalCursor = nextCursor;
-    current.lastSyncedAt = now;
-    current.status = "synced";
-    current.syncedItemsCount = Math.max(current.syncedItemsCount, 1);
 
-    await uploadObjectToMinio({
-      key: `${ctx.tenantId}/${req.params.projectId}/connectors/${provider}/${nextCursor}.json`,
-      body: JSON.stringify({ provider, projectId: req.params.projectId, cursor: nextCursor, syncedAt: now, actorId: ctx.actorId }),
-      contentType: "application/json"
+    const { now, completedWf, wfState, deduplicatedItems, relations, conflicts } = await executeIncrementalConnectorSync({
+      ctx,
+      searchCtx,
+      projectId: req.params.projectId,
+      provider,
+      current,
+      targetRef: req.body?.targetRef,
+      appPostgresClient,
+      queryAwareRetrieval
     });
 
     await recordAudit(searchCtx, {
@@ -428,11 +389,25 @@ export function registerEvolutionPrioritiesRoutes(
       actorType: ctx.actorType,
       action: "update",
       targetType: "connector_incremental_sync",
-      targetId: `${provider}:${nextCursor}`,
-      metadata: { provider, cursor: nextCursor, syncedAt: now }
+      targetId: `${provider}:${current.incrementalCursor}`,
+      metadata: {
+        provider,
+        cursor: current.incrementalCursor,
+        syncedAt: now,
+        workflowId: completedWf.workflowId,
+        deduplicatedCount: deduplicatedItems.length,
+        conflictsCount: conflicts.length
+      }
     }).catch(() => undefined);
 
-    return { projectId: req.params.projectId, connector: current };
+    return {
+      projectId: req.params.projectId,
+      connector: current,
+      workflow: { workflowId: completedWf.workflowId, state: wfState, status: completedWf.status },
+      deduplicatedCount: deduplicatedItems.length,
+      relations,
+      conflicts
+    };
   });
 
   app.post<{
