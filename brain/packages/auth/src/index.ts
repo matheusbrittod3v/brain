@@ -8,6 +8,7 @@ export * from "./jwt.js";
 export * from "./oauth2.js";
 export * from "./users-store.js";
 export * from "./casl.js";
+export * from "./opa.js";
 export * from "./better-auth.js";
 
 export type ActorType = "human" | "agent" | "system";

@@ -281,10 +281,11 @@ export function registerEvolutionPrioritiesRoutes(
       }
     };
 
+    const opaBaseUrl = (process.env.OPA_URL ?? "http://localhost:8181").replace(/\/+$/, "");
     const [ollamaProbe, minioProbe, opaProbe, hits, quotas, tasks] = await Promise.all([
       probeHttp("http://localhost:11434/api/tags"),
       probeHttp("http://localhost:9000/minio/health/live"),
-      probeHttp("http://localhost:8181/health"),
+      probeHttp(`${opaBaseUrl}/health`),
       queryAwareRetrieval.search(searchCtx, { projectId: req.params.projectId, query: "", limit: 200 }).catch(() => []),
       opRepo ? opRepo.listDepartmentFinopsQuotas(searchCtx, req.params.projectId).catch(() => []) : Promise.resolve([]),
       opRepo ? opRepo.listRunnerTasks(searchCtx, req.params.projectId).catch(() => []) : Promise.resolve([])

@@ -7,7 +7,7 @@ import {
   type AuditLogger,
   type RlsSessionContext
 } from "@brain/audit-engine";
-import { assertProjectAccess, authenticateRequest, buildAbilityForContext, resolveDefaultPermissionsForRoles, subject, usersStore, type AuthContext } from "@brain/auth";
+import { assertProjectAccess, authenticateRequest, enforceOpaPolicy, resolveDefaultPermissionsForRoles, usersStore, type AuthContext } from "@brain/auth";
 import { ContextEngine } from "@brain/context-engine";
 import { BrainError, type KnowledgeItem } from "@brain/core";
 import { CrossServiceContractRegistry, PostgresCrossServiceRegistry } from "@brain/cross-service";
@@ -158,11 +158,7 @@ export function createApiRuntimeStores(deps: {
     ctx: AuthContext,
     resource: { projectId: string; accessPolicyId: string; action: "read" | "write" | "create" | "update" | "approve"; domainId?: number }
   ) {
-    const ability = buildAbilityForContext(ctx);
-    const allowed = ability.can(resource.action, subject("Knowledge", resource));
-    if (!allowed) {
-      throw new BrainError("BRAIN_ERR_POLICY_DENIED", `CASL negou ação '${resource.action}' em '${resource.projectId}'.`, 403);
-    }
+    await enforceOpaPolicy(ctx, resource);
   }
 
   function recordAudit(ctx: AuthContext, event: Parameters<AuditLogger["record"]>[0]) {
