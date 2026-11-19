@@ -1,25 +1,46 @@
 # Brain — Project Brain OS 2.0
 
-**Cérebro corporativo universal para engenharia de software, regras de negócio, arquitetura viva, topologia multicamada 2D/3D e agentes autônomos de IA.**
+**Cérebro corporativo universal para engenharia de software, regras de negócio, arquitetura viva, topologia multicamada 2D/3D, fluxogramas Mermaid e agentes autônomos de IA.**
 
-O **Project Brain OS 2.0** unifica conhecimento estruturado em **`.brain/`** (versionado junto ao código no Git) com indexação híbrida de alta performance no **PostgreSQL 16 (`pgvector` + BM25 + Grafo Relacional + Row-Level Security)**, cache distribuído em **Valkey**, armazenamento de artefatos em **MinIO S3** e exposição nativa via **Web UI (Nuxt 3)**, **API REST (Fastify)** e **Model Context Protocol (MCP — Streamable HTTP & `stdio`)**.
+[![Documentação Viva](https://img.shields.io/badge/.brain-Documenta%C3%A7%C3%A3o%20Viva-6366f1)](.brain)
+[![Regras de Negócio](https://img.shields.io/badge/Regras%20BR-100%25%20Cobertas-10b981)](.brain/01-business/business-rules)
+[![Fluxos Mermaid](https://img.shields.io/badge/Fluxos%20Mermaid-12%20Ciclos-0ea5e9)](.brain/05-flows)
+[![MCP Tools](https://img.shields.io/badge/MCP-108%2B%20Ferramentas-f59e0b)](.brain/06-operations/mcp-tools-catalog.md)
+[![Skills](https://img.shields.io/badge/Skills-8%20Oficiais-8b5cf6)](.brain/skills)
+
+O **Project Brain OS 2.0** unifica conhecimento estruturado em **[`.brain/`](.brain)** (versionado junto ao código no Git) com indexação híbrida de alta performance no **PostgreSQL 16 (`pgvector` + BM25 + Grafo Relacional + Row-Level Security)**, cache distribuído em **Valkey**, armazenamento de artefatos em **MinIO S3** e exposição nativa via **Web UI (Nuxt 3 com tema Claro/Escuro, Live Sync e renderização Mermaid)**, **API REST (Fastify)** e **Model Context Protocol (MCP — Streamable HTTP & `stdio` com OAuth 2.1 PKCE)**.
+
+> **Mapa Rápido da Base `.brain/`:** [Visão](.brain/00-overview/vision.md) · [Regras (BR-001..009)](.brain/01-business/business-rules) · [Onboarding](.brain/02-onboarding/guide.md) · [Arquitetura & ADRs](.brain/03-architecture/system-topology.md) · [Engenharia & RLS](.brain/04-engineering/security-and-rls-model.md) · [Fluxos Mermaid (12)](.brain/05-flows) · [Operações & MCP](.brain/06-operations/mcp-tools-catalog.md) · [Skills](.brain/skills)
+
+## Conheça a interface
+
+A interface reúne projetos, conhecimento, busca, grafos, execução de agentes e áreas de governança. As capturas abaixo mostram a topologia do conhecimento e a visualização dos fluxos de busca e do ciclo de vida do sistema.
+
+![Interface do Brain na área Busca & Grafo, com topologia interativa do conhecimento](assets/readme/knowledge-graph.png)
+
+*Visão de Busca & Grafo do Brain: explore conexões do conhecimento em layouts 2D e 3D, filtre relações e consulte resultados da busca híbrida.*
+
+![Busca híbrida e visualização dos fluxos do sistema no Brain](assets/readme/knowledge-flows.png)
+
+*Busca híbrida com explicabilidade dos resultados e painel de fluxos com diagramas Mermaid.*
 
 ---
 
 ## Sumário
 
-1. [Principais Capacidades](#-principais-capacidades)
-2. [Arquitetura e Topologia do Sistema](#-arquitetura-e-topologia-do-sistema)
-3. [Inicialização Rápida (Bun + Turborepo)](#-inicialização-rápida-bun--turborepo)
-4. [Estrutura do Monorepo](#-estrutura-do-monorepo)
-5. [Documentação Viva (`.brain/`)](#-documentação-viva-brain)
-6. [Regras de Negócio & Cobertura de Testes (100%)](#-regras-de-negócio--cobertura-de-testes-100)
-7. [Skills Oficiais de Engenharia (`.brain/skills/`)](#-skills-oficiais-de-engenharia-brainskills)
-8. [Conectar Agentes via MCP (108+ Ferramentas)](#-conectar-agentes-via-mcp-108-ferramentas)
-9. [Segurança, Multi-Tenancy (RLS + CASL) e Governança](#-segurança-multi-tenancy-rls--casl-e-governança)
+1. [Principais Capacidades](#principais-capacidades)
+2. [Arquitetura e Topologia do Sistema](#arquitetura-e-topologia-do-sistema)
+3. [Inicialização Rápida (Bun + Turborepo)](#inicializacao-rapida-bun-turborepo)
+4. [Estrutura do Monorepo](#estrutura-do-monorepo)
+5. [Documentação Viva (`.brain/`)](#documentacao-viva-brain)
+6. [Regras de Negócio & Cobertura de Testes (100%)](#regras-de-negocio-cobertura-de-testes)
+7. [Skills Oficiais de Engenharia (`.brain/skills/`)](#skills-oficiais-de-engenharia)
+8. [Conectar Agentes via MCP (108+ Ferramentas)](#conectar-agentes-via-mcp)
+9. [Segurança, Multi-Tenancy (RLS + CASL) e Governança](#seguranca-multi-tenancy-rls-casl-e-governanca)
 
 ---
 
+<a id="principais-capacidades"></a>
 ## Principais Capacidades
 
 ### 1. Topologia Multicamada e Visualização de Grafos 2D / 2.5D / 3D
@@ -27,11 +48,11 @@ O **Project Brain OS 2.0** unifica conhecimento estruturado em **`.brain/`** (ve
   - Conecta visualmente **Arquitetura**, **Negócio**, **Código**, **Produto & Dados** e **Operação**.
   - **7 Modos de Layout**: *Força Direcionada*, *Anéis Concêntricos*, *Radial Central*, *Matriz em Camadas*, *Fluxo Sankey*, *3D Orbital (WebGL)* e *3D Camadas Empilhadas (WebGL)*.
   - **Projeções & Dimensões**: Alternância instantânea entre planos `2D`, `2.5D Isométrico` e `3D Perspectiva`, com dimensionamento proporcional ao grau de conexões, confiança ou uniforme.
-- **Grafo Interativo de Conhecimento (`GraphViewTab`)**:
-  - **Motor Duplo (Cytoscape 2D & Three.js WebGL 3D)**:
-    - **10+ Algoritmos 2D**: `Dagre (Hierárquico)`, `Cola (Física)`, `Radial por Camadas`, `Concêntrico (Grau)`, `Grade Ordenada`, `Árvore (BFS)`, `Circular`, `Orgânico` e `Manual`.
-    - **Paletas Dinâmicas**: Cores por *Camada Semântica*, *Status de Aprovação*, *Grau de Conexão (Hubs)* ou *Heatmap de Confiança*.
-    - **Estilos Visuais**: Formatos de nós customizáveis, curvas de arestas (`Bezier`, `Ortogonal/Taxi`, `Retas`, `Feixe/Haystack`), modo foco em vizinhança (`1-Hop`), minimapa interativo e exportação direta para **PNG**, **JSON** e **Mermaid**.
+- **Grafo Interativo de Conhecimento (`GraphViewTab` & `SearchGraphWorkspace`)**:
+  - **Motor Duplo (ECharts 2D & Canvas/WebGL 3D)**:
+    - **Visualizações**: `3D Órbita`, `2D Força`, `2D Circular`, `DAG Hierárquico`, `Matriz de Acoplamento` e **Diagramas Mermaid renderizados nativamente** com alternância entre tema **Claro** e **Escuro**.
+    - **Sincronização em Tempo Real (`Live Sync`)**: Mutações via UI ou API propagam atualizações instantâneas para todas as guias sem necessidade de `F5`.
+    - **Renderização & Ingestão Mermaid**: Qualquer bloco ` ```mermaid ` ou arquivo `.mmd` em `.brain/05-flows/` é extraído automaticamente durante a ingestão (`extractMermaidCodeFlow`) e renderizado em SVG na guia *Fluxos de Funções & Ciclo de Vida do Sistema*.
 
 ### 2. Inteligência para o Dia a Dia de Engenharia
 - **"O que mudou desde ontem?" (`brain_what_changed`)**: Resumo diário consolidando alterações em código, regras, documentos e decisões.
@@ -50,6 +71,7 @@ Além de Regras de Negócio (`business_rule`), Decisões Arquiteturais (`archite
 
 ---
 
+<a id="arquitetura-e-topologia-do-sistema"></a>
 ## Arquitetura e Topologia do Sistema
 
 ```mermaid
@@ -101,9 +123,10 @@ flowchart TB
 
 ---
 
+<a id="inicializacao-rapida-bun-turborepo"></a>
 ## Inicialização Rápida (Bun + Turborepo)
 
-O projeto possui um **script universal de inicialização em TypeScript** ([`brain/scripts/init.ts`](file:///Users/matheusbrito/tuf/pasta%20sem%20t%C3%ADtulo%204/brain/scripts/init.ts)) que detecta o sistema operacional (macOS Apple Silicon/Intel, Linux, Windows/WSL), valida ou instala **Bun** e **Turborepo**, gera o arquivo `.env` com chaves criptográficas seguras, sobe os contêineres Docker, executa as migrações e bootstrap de roles RLS no PostgreSQL, compila o monorepo via Turborepo e inicia os serviços.
+O projeto possui um **script universal de inicialização em TypeScript** ([`brain/scripts/init.ts`](scripts/init.ts)) que detecta o sistema operacional (macOS Apple Silicon/Intel, Linux, Windows/WSL), valida ou instala **Bun** e **Turborepo**, gera o arquivo `.env` com chaves criptográficas seguras, sobe os contêineres Docker, executa as migrações e bootstrap de roles RLS no PostgreSQL, compila o monorepo via Turborepo e inicia os serviços.
 
 ### 1. Subir o Projeto Completo com Um Comando
 
@@ -140,6 +163,7 @@ bun run init:start
 
 ---
 
+<a id="estrutura-do-monorepo"></a>
 ## Estrutura do Monorepo
 
 ```text
@@ -173,90 +197,103 @@ brain/
 
 ---
 
+<a id="documentacao-viva-brain"></a>
 ## Documentação Viva (`.brain/`)
 
-Toda a documentação arquitetural e operacional reside exclusivamente dentro de [`brain/.brain/`](file:///Users/matheusbrito/tuf/pasta%20sem%20t%C3%ADtulo%204/brain/.brain) e é sincronizada automaticamente com o grafo do Brain:
+Toda a documentação arquitetural e operacional reside exclusivamente dentro de [`brain/.brain/`](.brain) e é sincronizada automaticamente com o grafo do Brain:
 
 - **00 — Visão & Produto**:
-  - [Visão Geral e Proposta de Valor (`vision.md`)](file:///Users/matheusbrito/tuf/pasta%20sem%20t%C3%ADtulo%204/brain/.brain/00-overview/vision.md)
+  - [Visão Geral e Proposta de Valor (`vision.md`)](.brain/00-overview/vision.md)
 - **01 — Negócio & Invariantes**:
-  - [Catálogo de Regras de Negócio (`BR-BRAIN-001` a `BR-BRAIN-009`)](file:///Users/matheusbrito/tuf/pasta%20sem%20t%C3%ADtulo%204/brain/.brain/01-business/business-rules)
+  - [Catálogo de Regras de Negócio (`BR-BRAIN-001` a `BR-BRAIN-009`)](.brain/01-business/business-rules)
 - **02 — Onboarding**:
-  - [Guia de Onboarding de Engenharia (`guide.md`)](file:///Users/matheusbrito/tuf/pasta%20sem%20t%C3%ADtulo%204/brain/.brain/02-onboarding/guide.md)
+  - [Guia de Onboarding de Engenharia (`guide.md`)](.brain/02-onboarding/guide.md)
 - **03 — Arquitetura & ADRs**:
-  - [Topologia do Sistema (`system-topology.md`)](file:///Users/matheusbrito/tuf/pasta%20sem%20t%C3%ADtulo%204/brain/.brain/03-architecture/system-topology.md)
-  - [Modelo de Dados & Persistência (`data-model.md`)](file:///Users/matheusbrito/tuf/pasta%20sem%20t%C3%ADtulo%204/brain/.brain/03-architecture/data-model.md)
-  - [Topologia dos Workspaces Frontend (`frontend-workspaces-topology.md`)](file:///Users/matheusbrito/tuf/pasta%20sem%20t%C3%ADtulo%204/brain/.brain/03-architecture/frontend-workspaces-topology.md)
-  - [Provedores do Agent Runner (`agent-runner-providers.md`)](file:///Users/matheusbrito/tuf/pasta%20sem%20t%C3%ADtulo%204/brain/.brain/03-architecture/agent-runner-providers.md)
-  - [Subagentes e Colaboração (`subagents-and-collaboration.md`)](file:///Users/matheusbrito/tuf/pasta%20sem%20t%C3%ADtulo%204/brain/.brain/03-architecture/subagents-and-collaboration.md)
-  - [ADR-001: Topologia e Autenticação](file:///Users/matheusbrito/tuf/pasta%20sem%20t%C3%ADtulo%204/brain/.brain/03-architecture/ADR-BRAIN-001-topology-and-auth.md)
-  - [ADR-002: Conhecimento em Camadas e MCP](file:///Users/matheusbrito/tuf/pasta%20sem%20t%C3%ADtulo%204/brain/.brain/03-architecture/ADR-BRAIN-002-layered-knowledge-and-mcp.md)
-  - [ADR-003: Configurações Dinâmicas e RBAC Global](file:///Users/matheusbrito/tuf/pasta%20sem%20t%C3%ADtulo%204/brain/.brain/03-architecture/ADR-BRAIN-003-dynamic-settings-and-global-rbac.md)
-  - [ADR-004: Cache Distribuído Valkey e Storage MinIO](file:///Users/matheusbrito/tuf/pasta%20sem%20t%C3%ADtulo%204/brain/.brain/03-architecture/ADR-BRAIN-004-valkey-cache-and-minio-storage.md)
-  - [ADR-005: Streamable HTTP MCP e Inteligência Diária](file:///Users/matheusbrito/tuf/pasta%20sem%20t%C3%ADtulo%204/brain/.brain/03-architecture/ADR-BRAIN-005-streamable-http-mcp-and-daily-intelligence.md)
+  - [Topologia do Sistema (`system-topology.md`)](.brain/03-architecture/system-topology.md)
+  - [Modelo de Dados & Persistência (`data-model.md`)](.brain/03-architecture/data-model.md)
+  - [Topologia dos Workspaces Frontend (`frontend-workspaces-topology.md`)](.brain/03-architecture/frontend-workspaces-topology.md)
+  - [Provedores do Agent Runner (`agent-runner-providers.md`)](.brain/03-architecture/agent-runner-providers.md)
+  - [Subagentes e Colaboração (`subagents-and-collaboration.md`)](.brain/03-architecture/subagents-and-collaboration.md)
+  - [ADR-001: Topologia e Autenticação](.brain/03-architecture/ADR-BRAIN-001-topology-and-auth.md)
+  - [ADR-002: Conhecimento em Camadas e MCP](.brain/03-architecture/ADR-BRAIN-002-layered-knowledge-and-mcp.md)
+  - [ADR-003: Configurações Dinâmicas e RBAC Global](.brain/03-architecture/ADR-BRAIN-003-dynamic-settings-and-global-rbac.md)
+  - [ADR-004: Cache Distribuído Valkey e Storage MinIO](.brain/03-architecture/ADR-BRAIN-004-valkey-cache-and-minio-storage.md)
+  - [ADR-005: Streamable HTTP MCP e Inteligência Diária](.brain/03-architecture/ADR-BRAIN-005-streamable-http-mcp-and-daily-intelligence.md)
 - **04 — Engenharia & Padrões**:
-  - [Padrões de Codificação (`coding-standards.md`)](file:///Users/matheusbrito/tuf/pasta%20sem%20t%C3%ADtulo%204/brain/.brain/04-engineering/coding-standards.md)
-  - [Padrões de Implementação (`implementation-patterns.md`)](file:///Users/matheusbrito/tuf/pasta%20sem%20t%C3%ADtulo%204/brain/.brain/04-engineering/implementation-patterns.md)
-  - [Limites e Restrições (`limits-and-constraints.md`)](file:///Users/matheusbrito/tuf/pasta%20sem%20t%C3%ADtulo%204/brain/.brain/04-engineering/limits-and-constraints.md)
-  - [Matriz de Compatibilidade (`compatibility-matrix.md`)](file:///Users/matheusbrito/tuf/pasta%20sem%20t%C3%ADtulo%204/brain/.brain/04-engineering/compatibility-matrix.md)
-  - [Modelo de Segurança e RLS (`security-and-rls-model.md`)](file:///Users/matheusbrito/tuf/pasta%20sem%20t%C3%ADtulo%204/brain/.brain/04-engineering/security-and-rls-model.md)
-  - [Contratos de API e MCP (`api-and-mcp-contracts.md`)](file:///Users/matheusbrito/tuf/pasta%20sem%20t%C3%ADtulo%204/brain/.brain/04-engineering/api-and-mcp-contracts.md)
-  - [Mapa de Pacotes e Módulos (`packages-and-modules-map.md`)](file:///Users/matheusbrito/tuf/pasta%20sem%20t%C3%ADtulo%204/brain/.brain/04-engineering/packages-and-modules-map.md)
-- **05 — Fluxos Operacionais**:
-  - [Fluxo OAuth 2.1 PKCE no MCP (`mcp-oauth-flow.md`)](file:///Users/matheusbrito/tuf/pasta%20sem%20t%C3%ADtulo%204/brain/.brain/05-flows/mcp-oauth-flow.md)
-  - [Fluxo de Busca Híbrida (`hybrid-retrieval-flow.md`)](file:///Users/matheusbrito/tuf/pasta%20sem%20t%C3%ADtulo%204/brain/.brain/05-flows/hybrid-retrieval-flow.md)
-  - [Ingestão e Aprovação HITL (`knowledge-ingestion-and-approval-flow.md`)](file:///Users/matheusbrito/tuf/pasta%20sem%20t%C3%ADtulo%204/brain/.brain/05-flows/knowledge-ingestion-and-approval-flow.md)
-  - [Impacto e Blast Radius Cross-Service (`impact-and-cross-service-flow.md`)](file:///Users/matheusbrito/tuf/pasta%20sem%20t%C3%ADtulo%204/brain/.brain/05-flows/impact-and-cross-service-flow.md)
-  - [Agent Runner e FinOps (`agent-runner-and-finops-flow.md`)](file:///Users/matheusbrito/tuf/pasta%20sem%20t%C3%ADtulo%204/brain/.brain/05-flows/agent-runner-and-finops-flow.md)
+  - [Padrões de Codificação (`coding-standards.md`)](.brain/04-engineering/coding-standards.md)
+  - [Padrões de Implementação (`implementation-patterns.md`)](.brain/04-engineering/implementation-patterns.md)
+  - [Limites e Restrições (`limits-and-constraints.md`)](.brain/04-engineering/limits-and-constraints.md)
+  - [Matriz de Compatibilidade (`compatibility-matrix.md`)](.brain/04-engineering/compatibility-matrix.md)
+  - [Modelo de Segurança e RLS (`security-and-rls-model.md`)](.brain/04-engineering/security-and-rls-model.md)
+  - [Contratos de API e MCP (`api-and-mcp-contracts.md`)](.brain/04-engineering/api-and-mcp-contracts.md)
+  - [Mapa de Pacotes e Módulos (`packages-and-modules-map.md`)](.brain/04-engineering/packages-and-modules-map.md)
+  - [Referência de Ambiente e Infraestrutura (`env-and-infra-reference.md`)](.brain/04-engineering/env-and-infra-reference.md)
+- **05 — Fluxos Operacionais & Ciclo de Vida (12 Fluxogramas Mermaid)**:
+  - [Fluxo OAuth 2.1 PKCE no MCP (`mcp-oauth-flow.md`)](.brain/05-flows/mcp-oauth-flow.md)
+  - [Gateway MCP Streamable HTTP (`mcp-streamable-gateway-flow.md`)](.brain/05-flows/mcp-streamable-gateway-flow.md)
+  - [Ciclo de Autenticação Web Zero-Flash (`auth-lifecycle-zero-flash-flow.md`)](.brain/05-flows/auth-lifecycle-zero-flash-flow.md)
+  - [Gestão de Projetos, Compartilhamento e Exclusão (`project-crud-and-sharing-flow.md`)](.brain/05-flows/project-crud-and-sharing-flow.md)
+  - [Sincronização Dinâmica Live Sync (`live-sync-realtime-flow.md`)](.brain/05-flows/live-sync-realtime-flow.md)
+  - [Fluxo de Busca Híbrida (`hybrid-retrieval-flow.md`)](.brain/05-flows/hybrid-retrieval-flow.md)
+  - [Ingestão e Aprovação HITL (`knowledge-ingestion-and-approval-flow.md`)](.brain/05-flows/knowledge-ingestion-and-approval-flow.md)
+  - [Extração AST Tree-sitter e Topologia (`code-intelligence-ast-topology-flow.md`)](.brain/05-flows/code-intelligence-ast-topology-flow.md)
+  - [Impacto e Blast Radius Cross-Service (`impact-and-cross-service-flow.md`)](.brain/05-flows/impact-and-cross-service-flow.md)
+  - [Agent Runner e FinOps (`agent-runner-and-finops-flow.md`)](.brain/05-flows/agent-runner-and-finops-flow.md)
+  - [Telemetria FinOps e Downgrade Automático (`finops-telemetry-and-downgrade-flow.md`)](.brain/05-flows/finops-telemetry-and-downgrade-flow.md)
+  - [Configurações Dinâmicas e RBAC Global (`dynamic-settings-and-zero-project-rbac-flow.md`)](.brain/05-flows/dynamic-settings-and-zero-project-rbac-flow.md)
 - **06 — Operações & SRE**:
-  - [Catálogo Completo de Ferramentas MCP (`mcp-tools-catalog.md`)](file:///Users/matheusbrito/tuf/pasta%20sem%20t%C3%ADtulo%204/brain/.brain/06-operations/mcp-tools-catalog.md)
-  - [SLOs e Metas Operacionais (`slo-and-operational-targets.md`)](file:///Users/matheusbrito/tuf/pasta%20sem%20t%C3%ADtulo%204/brain/.brain/06-operations/slo-and-operational-targets.md)
-  - [Dependências Externas e Planos de Contingência (`external-dependencies.md`)](file:///Users/matheusbrito/tuf/pasta%20sem%20t%C3%ADtulo%204/brain/.brain/06-operations/external-dependencies.md)
-  - [Deploy e Comandos (`deployment-and-commands.md`)](file:///Users/matheusbrito/tuf/pasta%20sem%20t%C3%ADtulo%204/brain/.brain/06-operations/deployment-and-commands.md)
-  - [Troubleshooting e Playbooks (`troubleshooting-and-playbooks.md`)](file:///Users/matheusbrito/tuf/pasta%20sem%20t%C3%ADtulo%204/brain/.brain/06-operations/troubleshooting-and-playbooks.md)
+  - [Catálogo Completo de Ferramentas MCP (`mcp-tools-catalog.md`)](.brain/06-operations/mcp-tools-catalog.md)
+  - [SLOs e Metas Operacionais (`slo-and-operational-targets.md`)](.brain/06-operations/slo-and-operational-targets.md)
+  - [Dependências Externas e Planos de Contingência (`external-dependencies.md`)](.brain/06-operations/external-dependencies.md)
+  - [Deploy e Comandos (`deployment-and-commands.md`)](.brain/06-operations/deployment-and-commands.md)
+  - [Troubleshooting e Playbooks (`troubleshooting-and-playbooks.md`)](.brain/06-operations/troubleshooting-and-playbooks.md)
 
 ---
 
+<a id="regras-de-negocio-cobertura-de-testes"></a>
 ## Regras de Negócio & Cobertura de Testes (100%)
 
 Todas as regras de negócio são verificadas por testes automatizados vinculados no grafo via arestas `VERIFIED_BY` e auditadas na Matriz de Cobertura Corporativa:
 
 | ID | Regra de Negócio | Teste Associado (`VERIFIED_BY`) | Status |
 | :--- | :--- | :--- | :---: |
-| [`BR-BRAIN-001`](file:///Users/matheusbrito/tuf/pasta%20sem%20t%C3%ADtulo%204/brain/.brain/01-business/business-rules/BR-BRAIN-001.yaml) | Isolamento Multi-Tenant e Escopo Dinâmico por RBAC/RLS | `TEST-BR-BRAIN-001` | Coberta |
-| [`BR-BRAIN-002`](file:///Users/matheusbrito/tuf/pasta%20sem%20t%C3%ADtulo%204/brain/.brain/01-business/business-rules/BR-BRAIN-002.yaml) | Auditoria Imutável, Privacidade LGPD e Varredura de Segredos | `TEST-BR-BRAIN-002` | Coberta |
-| [`BR-BRAIN-003`](file:///Users/matheusbrito/tuf/pasta%20sem%20t%C3%ADtulo%204/brain/.brain/01-business/business-rules/BR-BRAIN-003.yaml) | Cotas FinOps por Departamento e Downgrade Automático de Modelo | `TEST-BR-BRAIN-003` | Coberta |
-| [`BR-BRAIN-004`](file:///Users/matheusbrito/tuf/pasta%20sem%20t%C3%ADtulo%204/brain/.brain/01-business/business-rules/BR-BRAIN-004.yaml) | Aprovação Human-in-the-Loop (HITL) e Concessões Just-In-Time (JIT) | `TEST-BR-BRAIN-004` | Coberta |
-| [`BR-BRAIN-005`](file:///Users/matheusbrito/tuf/pasta%20sem%20t%C3%ADtulo%204/brain/.brain/01-business/business-rules/BR-BRAIN-005.yaml) | Desacoplamento de Configurações Dinâmicas no PostgreSQL (`system_settings`) | `TEST-BR-BRAIN-005` | Coberta |
-| [`BR-BRAIN-006`](file:///Users/matheusbrito/tuf/pasta%20sem%20t%C3%ADtulo%204/brain/.brain/01-business/business-rules/BR-BRAIN-006.yaml) | Isolamento de Usuários Sem Projeto Vinculado e Escopo Global CASL (`__global__`) | `TEST-BR-BRAIN-006` | Coberta |
-| [`BR-BRAIN-007`](file:///Users/matheusbrito/tuf/pasta%20sem%20t%C3%ADtulo%204/brain/.brain/01-business/business-rules/BR-BRAIN-007.yaml) | Projetos Compartilháveis Globalmente (`isShared`) com Permissões CASL Dedicadas | `TEST-BR-BRAIN-007` | Coberta |
-| [`BR-BRAIN-008`](file:///Users/matheusbrito/tuf/pasta%20sem%20t%C3%ADtulo%204/brain/.brain/01-business/business-rules/BR-BRAIN-008.yaml) | Governança, Rastreabilidade e Proveniência de Conhecimento (`KnowledgeProvenance`) | `TEST-BR-BRAIN-008` | Coberta |
-| [`BR-BRAIN-009`](file:///Users/matheusbrito/tuf/pasta%20sem%20t%C3%ADtulo%204/brain/.brain/01-business/business-rules/BR-BRAIN-009.yaml) | Avaliação Prévia de Impacto de Mudanças e Detecção de Contradições Arquiteturais | `TEST-BR-BRAIN-009` | Coberta |
+| [`BR-BRAIN-001`](.brain/01-business/business-rules/BR-BRAIN-001.yaml) | Isolamento Multi-Tenant e Escopo Dinâmico por RBAC/RLS | `TEST-BR-BRAIN-001` | Coberta |
+| [`BR-BRAIN-002`](.brain/01-business/business-rules/BR-BRAIN-002.yaml) | Auditoria Imutável, Privacidade LGPD e Varredura de Segredos | `TEST-BR-BRAIN-002` | Coberta |
+| [`BR-BRAIN-003`](.brain/01-business/business-rules/BR-BRAIN-003.yaml) | Cotas FinOps por Departamento e Downgrade Automático de Modelo | `TEST-BR-BRAIN-003` | Coberta |
+| [`BR-BRAIN-004`](.brain/01-business/business-rules/BR-BRAIN-004.yaml) | Aprovação Human-in-the-Loop (HITL) e Concessões Just-In-Time (JIT) | `TEST-BR-BRAIN-004` | Coberta |
+| [`BR-BRAIN-005`](.brain/01-business/business-rules/BR-BRAIN-005.yaml) | Desacoplamento de Configurações Dinâmicas no PostgreSQL (`system_settings`) | `TEST-BR-BRAIN-005` | Coberta |
+| [`BR-BRAIN-006`](.brain/01-business/business-rules/BR-BRAIN-006.yaml) | Isolamento de Usuários Sem Projeto Vinculado e Escopo Global CASL (`__global__`) | `TEST-BR-BRAIN-006` | Coberta |
+| [`BR-BRAIN-007`](.brain/01-business/business-rules/BR-BRAIN-007.yaml) | Projetos Compartilháveis Globalmente (`isShared`) com Permissões CASL Dedicadas | `TEST-BR-BRAIN-007` | Coberta |
+| [`BR-BRAIN-008`](.brain/01-business/business-rules/BR-BRAIN-008.yaml) | Governança, Rastreabilidade e Proveniência de Conhecimento (`KnowledgeProvenance`) | `TEST-BR-BRAIN-008` | Coberta |
+| [`BR-BRAIN-009`](.brain/01-business/business-rules/BR-BRAIN-009.yaml) | Avaliação Prévia de Impacto de Mudanças e Detecção de Contradições Arquiteturais | `TEST-BR-BRAIN-009` | Coberta |
 
 ---
 
+<a id="skills-oficiais-de-engenharia"></a>
 ## Skills Oficiais de Engenharia (`.brain/skills/`)
 
-As skills de agentes estão integradas diretamente em [`brain/.brain/skills/`](file:///Users/matheusbrito/tuf/pasta%20sem%20t%C3%ADtulo%204/brain/.brain/skills) e indexadas no banco do Brain:
+As skills de agentes estão integradas diretamente em [`brain/.brain/skills/`](.brain/skills) e indexadas no banco do Brain:
 
-1. **[`git-workflow-craftsman`](file:///Users/matheusbrito/tuf/pasta%20sem%20t%C3%ADtulo%204/brain/.brain/skills/git-workflow-craftsman/SKILL.md)**: Conventional Commits 1.0.0 estritos, Trunk-Based Development, commits atômicos e higiene de rebase linear.
-2. **[`code-elegance-avoid-if-else`](file:///Users/matheusbrito/tuf/pasta%20sem%20t%C3%ADtulo%204/brain/.brain/skills/code-elegance-avoid-if-else/SKILL.md)**: Eliminação de cadeias de `if/else` com Guard Clauses, Lookup Tables $O(1)$, Strategy Pattern, Discriminated Unions exaustivas (`assertNever`) e pipelines funcionais.
-3. **[`frontend-architecture-craft`](file:///Users/matheusbrito/tuf/pasta%20sem%20t%C3%ADtulo%204/brain/.brain/skills/frontend-architecture-craft/SKILL.md)**: Vue 3 e Nuxt 3 modernos com `<script setup lang="ts">`, composables puros (`readonly`), `shallowRef` para grafos 2D/3D pesados e separação Dumb/Smart components.
-4. **[`backend-resilience-craft`](file:///Users/matheusbrito/tuf/pasta%20sem%20t%C3%ADtulo%204/brain/.brain/skills/backend-resilience-craft/SKILL.md)**: Clean Architecture com Fastify e Bun, validação TypeBox em runtime, transações PostgreSQL com RLS (`withTenantRls`), `BrainError` e graceful shutdown.
-5. **[`fullstack-testing-strategy`](file:///Users/matheusbrito/tuf/pasta%20sem%20t%C3%ADtulo%204/brain/.brain/skills/fullstack-testing-strategy/SKILL.md)**: Pirâmide de testes moderna (unitários com Bun Test, integração real contra PostgreSQL RLS e E2E com Fastify `app.inject()`), rastreabilidade `VERIFIED_BY` e determinismo.
-6. **[`modern-language-features`](file:///Users/matheusbrito/tuf/pasta%20sem%20t%C3%ADtulo%204/brain/.brain/skills/modern-language-features/SKILL.md)**: Recursos avançados de TypeScript 5+ (`satisfies`, `const` type parameters, `using` / `Symbol.dispose`), ES2024+ (`Object.groupBy`, `Promise.withResolvers`, `toSorted`, `structuredClone`), Bun nativo e PostgreSQL JSONB.
-7. **[`brain-mcp-advisor`](file:///Users/matheusbrito/tuf/pasta%20sem%20t%C3%ADtulo%204/brain/.brain/skills/brain-mcp-advisor/SKILL.md)**: Protocolo para agentes consultarem e atualizarem o MCP Brain antes, durante e após tarefas.
-8. **[`brain-knowledge-hygiene`](file:///Users/matheusbrito/tuf/pasta%20sem%20t%C3%ADtulo%204/brain/.brain/skills/brain-knowledge-hygiene/SKILL.md)**: Diretrizes para manter regras, ADRs, critérios de aceite e vínculos de testes sempre sincronizados.
+1. **[`git-workflow-craftsman`](.brain/skills/git-workflow-craftsman/SKILL.md)**: Conventional Commits 1.0.0 estritos, Trunk-Based Development, commits atômicos e higiene de rebase linear.
+2. **[`code-elegance-avoid-if-else`](.brain/skills/code-elegance-avoid-if-else/SKILL.md)**: Eliminação de cadeias de `if/else` com Guard Clauses, Lookup Tables $O(1)$, Strategy Pattern, Discriminated Unions exaustivas (`assertNever`) e pipelines funcionais.
+3. **[`frontend-architecture-craft`](.brain/skills/frontend-architecture-craft/SKILL.md)**: Vue 3 e Nuxt 3 modernos com `<script setup lang="ts">`, composables puros (`readonly`), `shallowRef` para grafos 2D/3D pesados e separação Dumb/Smart components.
+4. **[`backend-resilience-craft`](.brain/skills/backend-resilience-craft/SKILL.md)**: Clean Architecture com Fastify e Bun, validação TypeBox em runtime, transações PostgreSQL com RLS (`withTenantRls`), `BrainError` e graceful shutdown.
+5. **[`fullstack-testing-strategy`](.brain/skills/fullstack-testing-strategy/SKILL.md)**: Pirâmide de testes moderna (unitários com Bun Test, integração real contra PostgreSQL RLS e E2E com Fastify `app.inject()`), rastreabilidade `VERIFIED_BY` e determinismo.
+6. **[`modern-language-features`](.brain/skills/modern-language-features/SKILL.md)**: Recursos avançados de TypeScript 5+ (`satisfies`, `const` type parameters, `using` / `Symbol.dispose`), ES2024+ (`Object.groupBy`, `Promise.withResolvers`, `toSorted`, `structuredClone`), Bun nativo e PostgreSQL JSONB.
+7. **[`brain-mcp-advisor`](.brain/skills/brain-mcp-advisor/SKILL.md)**: Protocolo para agentes consultarem e atualizarem o MCP Brain antes, durante e após tarefas.
+8. **[`brain-knowledge-hygiene`](.brain/skills/brain-knowledge-hygiene/SKILL.md)**: Diretrizes para manter regras, ADRs, critérios de aceite e vínculos de testes sempre sincronizados.
 
 ---
 
+<a id="conectar-agentes-via-mcp"></a>
 ## Conectar Agentes via MCP (108+ Ferramentas)
 
 O Brain expõe mais de **108 ferramentas MCP** para agentes como **Antigravity**, **Cursor**, **Claude Code** e **Codex**:
 
-### Opção 1: Transporte Streamable HTTP (Recomendado)
+### Opção 1: Transporte Streamable HTTP com OAuth 2.1 PKCE (Recomendado)
 - **URL do Servidor MCP**: `http://localhost:3333/mcp`
-- Suporta autenticação via **Bearer Token** (`Authorization: Bearer <BRAIN_LOCAL_API_KEY>` ou JWT) e descoberta **OAuth 2.1 com PKCE**.
+- Suporta descoberta automática **OAuth 2.1 PKCE** (`/.well-known/oauth-protected-resource` e `/.well-known/oauth-authorization-server`), registro dinâmico (`/oauth/register`) e aprovação rápida via navegador (`/auth/oauth`), além de tokens Bearer configurados em **Acesso, CASL & Políticas**.
+- Consulte o catálogo completo em [`.brain/06-operations/mcp-tools-catalog.md`](.brain/06-operations/mcp-tools-catalog.md) e o fluxo detalhado em [`.brain/05-flows/mcp-oauth-flow.md`](.brain/05-flows/mcp-oauth-flow.md).
 
 ### Opção 2: Transporte `stdio` com Login 1-Clique
 ```bash
@@ -266,6 +303,7 @@ bun brain/apps/mcp-server/dist/index.js login
 
 ---
 
+<a id="seguranca-multi-tenancy-rls-casl-e-governanca"></a>
 ## Segurança, Multi-Tenancy (RLS + CASL) e Governança
 
 - **Row-Level Security (RLS) Forçado no PostgreSQL**: Todas as tabelas sensíveis validam `app.current_tenant_id`, `app.allowed_projects` e `app.allowed_policies` diretamente na engine do banco de dados.
