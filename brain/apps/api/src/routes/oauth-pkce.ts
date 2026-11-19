@@ -62,7 +62,7 @@ export function registerOAuthPkceRoutes(
     const grantTypes = Array.isArray(req.body?.grant_types) && req.body.grant_types.length > 0
       ? req.body.grant_types
       : ["authorization_code", "refresh_token"];
-    const scope = req.body?.scope?.trim() || "projects:all knowledge:read knowledge:write runner:execute";
+    const scope = req.body?.scope?.trim() || "brain";
 
     if (deps.mcpAuthRepo) {
       await deps.mcpAuthRepo.registerOAuthClient({ clientId, clientName, redirectUris, grantTypes, scope });

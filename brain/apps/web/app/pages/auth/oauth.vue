@@ -7,7 +7,7 @@ const clientId = computed(() => String(route.query.client_id ?? '').trim())
 const redirectUri = computed(() => String(route.query.redirect_uri ?? '').trim())
 const codeChallenge = computed(() => String(route.query.code_challenge ?? '').trim())
 const codeChallengeMethod = computed(() => String(route.query.code_challenge_method ?? 'S256').trim())
-const requestedScope = computed(() => String(route.query.scope ?? 'projects:all knowledge:read knowledge:write runner:execute').trim())
+const requestedScope = computed(() => String(route.query.scope ?? 'brain').trim())
 const oauthState = computed(() => String(route.query.state ?? '').trim())
 const isPkceMode = computed(() => Boolean(clientId.value && redirectUri.value && codeChallenge.value))
 
@@ -170,8 +170,8 @@ onMounted(loadConsentContext)
               <span class="font-medium text-highlighted">{{ clientInfo?.clientName || clientId }}</span>
             </div>
             <div class="flex justify-between">
-              <span class="text-muted">Escopo:</span>
-              <span class="font-mono text-default">{{ requestedScope }}</span>
+              <span class="text-muted">Permissões:</span>
+              <span class="text-default">Centralizadas no usuário (CASL / RBAC)</span>
             </div>
             <div class="flex justify-between gap-2">
               <span class="text-muted shrink-0">Callback:</span>
