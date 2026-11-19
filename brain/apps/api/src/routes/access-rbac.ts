@@ -18,7 +18,8 @@ export function registerAccessRbacRoutes(deps: ApiRouteDeps) {
     const ctx = await authenticateProjectRequest(req.headers.authorization, req.params.projectId);
     assertPermission(ctx, "roles:view");
     const dbUsers = authRepo ? await authRepo.listUsers(ctx.tenantId) : [];
-    const members = opRepo ? await opRepo.listAccessMembers(ctx, req.params.projectId) : [];
+    const hasProj = req.params.projectId !== "__global__" && ctx.allowedProjects.includes(req.params.projectId);
+    const members = opRepo && hasProj ? await opRepo.listAccessMembers(ctx, req.params.projectId) : [];
     const byId = new Map<
       string,
       {
@@ -135,7 +136,7 @@ export function registerAccessRbacRoutes(deps: ApiRouteDeps) {
 
       await recordAudit(ctx, {
         tenantId: ctx.tenantId,
-        projectId: req.params.projectId,
+        projectId: req.params.projectId === "__global__" ? (nextProjects[0] ?? "global") : req.params.projectId,
         accessPolicyId: "internal-project",
         actorId: ctx.actorId,
         actorType: ctx.actorType,
@@ -148,7 +149,7 @@ export function registerAccessRbacRoutes(deps: ApiRouteDeps) {
           roles: nextRoles,
           revokedSessions: req.body.revokeActiveSessions !== false
         }
-      });
+      }).catch(() => undefined);
 
       return {
         userId: targetId,
@@ -257,7 +258,8 @@ export function registerAccessRbacRoutes(deps: ApiRouteDeps) {
   app.get<{ Params: { projectId: string } }>("/v1/projects/:projectId/access/roles", async (req) => {
     const ctx = await authenticateProjectRequest(req.headers.authorization, req.params.projectId);
     assertPermission(ctx, "roles:view");
-    const roles = opRepo ? await opRepo.listRoles(ctx, req.params.projectId) : DEFAULT_ROLES;
+    const hasProj = req.params.projectId !== "__global__" && ctx.allowedProjects.includes(req.params.projectId);
+    const roles = opRepo && hasProj ? await opRepo.listRoles(ctx, req.params.projectId) : DEFAULT_ROLES;
     return { projectId: req.params.projectId, roles };
   });
 
@@ -323,7 +325,8 @@ export function registerAccessRbacRoutes(deps: ApiRouteDeps) {
   app.get<{ Params: { projectId: string } }>("/v1/projects/:projectId/access/assignments", async (req) => {
     const ctx = await authenticateProjectRequest(req.headers.authorization, req.params.projectId);
     assertPermission(ctx, "roles:view");
-    const assignments = opRepo ? await opRepo.listUserRoleAssignments(ctx, req.params.projectId) : [];
+    const hasProj = req.params.projectId !== "__global__" && ctx.allowedProjects.includes(req.params.projectId);
+    const assignments = opRepo && hasProj ? await opRepo.listUserRoleAssignments(ctx, req.params.projectId) : [];
     return { projectId: req.params.projectId, assignments };
   });
 

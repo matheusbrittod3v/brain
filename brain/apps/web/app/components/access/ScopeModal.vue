@@ -11,7 +11,7 @@ const emit = defineEmits<{
   saved: []
 }>()
 
-const { projectId, apiFetch, notify } = useBrainApi()
+const { projectId, currentUser, refreshAuthSession, apiFetch, notify } = useBrainApi()
 
 const saving = ref(false)
 const loadingOptions = ref(false)
@@ -31,9 +31,9 @@ const form = ref({
 async function loadOptions() {
   loadingOptions.value = true
   try {
-    const pid = encodeURIComponent(projectId.value)
+    const pid = encodeURIComponent(projectId.value || '__global__')
     const [projRes, rolesRes] = await Promise.all([
-      apiFetch<{ projects?: Array<{ projectId: string; name?: string }> }>('/v1/projects').catch(() => ({ projects: [] })),
+      apiFetch<{ projects?: Array<{ projectId: string; name?: string }> }>('/v1/projects?scope=catalog').catch(() => ({ projects: [] })),
       apiFetch<{ roles?: RoleItem[] }>(`/v1/projects/${pid}/access/roles`).catch(() => ({ roles: [] }))
     ])
     existingProjects.value = (projRes.projects ?? []).map((p) => ({
@@ -110,7 +110,7 @@ async function saveScopes() {
   if (!form.value.userId) return
   saving.value = true
   try {
-    const pid = encodeURIComponent(projectId.value)
+    const pid = encodeURIComponent(projectId.value || '__global__')
     const uid = encodeURIComponent(form.value.userId)
     await apiFetch(`/v1/projects/${pid}/access/users/${uid}/scopes`, {
       method: 'PUT',
@@ -121,11 +121,15 @@ async function saveScopes() {
         revokeActiveSessions: form.value.revokeActiveSessions
       })
     })
+    if (currentUser.value?.id === form.value.userId) {
+      await refreshAuthSession()
+      projectId.value = form.value.allowedProjects[0] ?? ''
+    }
     notify(
       'Escopos atualizados',
       form.value.allowedProjects.length > 0
         ? `${form.value.userName} (${form.value.allowedProjects.length} projeto(s) vinculado(s))`
-        : `${form.value.userName} (acesso automático aos projetos existentes)`,
+        : `${form.value.userName} (sem projetos vinculados)`,
       'success'
     )
     emit('update:open', false)

@@ -7,7 +7,7 @@ import {
   type AuditLogger,
   type RlsSessionContext
 } from "@brain/audit-engine";
-import { assertProjectAccess, authenticateRequest, buildAbilityForContext, subject, usersStore, type AuthContext } from "@brain/auth";
+import { assertProjectAccess, authenticateRequest, buildAbilityForContext, resolveDefaultPermissionsForRoles, subject, usersStore, type AuthContext } from "@brain/auth";
 import { ContextEngine } from "@brain/context-engine";
 import { BrainError, type KnowledgeItem } from "@brain/core";
 import { CrossServiceContractRegistry, PostgresCrossServiceRegistry } from "@brain/cross-service";
@@ -191,6 +191,12 @@ export function createApiRuntimeStores(deps: {
     const ctx = opRepo
       ? await opRepo.resolveDynamicMcpScope(baseCtx, freshUser ? [] : allowedProjects, allowedPolicies, systemDb)
       : baseCtx;
+    if (projectId === "__global__") {
+      return {
+        ...ctx,
+        permissions: ctx.permissions && ctx.permissions.length > 0 ? ctx.permissions : resolveDefaultPermissionsForRoles(ctx.roles)
+      };
+    }
     assertProjectAccess(ctx, projectId);
     if (opRepo) {
       return opRepo.resolveEffectiveAuthContext(ctx, projectId);

@@ -4,7 +4,8 @@ import { join, relative } from "node:path";
 import type { FastifyInstance } from "fastify";
 import { authenticateRequest, usersStore, type AuthContext } from "@brain/auth";
 import { BrainError, paginateCursor, type KnowledgeItem } from "@brain/core";
-import { createDatabaseClient } from "@brain/database";
+import { createDatabaseClient, projects as projectsTable } from "@brain/database";
+import { asc, eq } from "drizzle-orm";
 import { scanForSecrets } from "@brain/ingestion";
 import { assertSecretScanClean, redactPiiWithAiWorker, rerankWithAiWorker } from "../../services/ai-worker.js";
 import { configuredWorkspaceRoot } from "../../services/jobs.js";
@@ -31,7 +32,7 @@ export function registerProjectCoreRoutes(app: FastifyInstance, deps: ProjectsKn
 
   const systemDb = process.env.DATABASE_SYSTEM_URL ? createDatabaseClient(process.env.DATABASE_SYSTEM_URL).db : undefined;
 
-  app.get("/v1/projects", async (req) => {
+  app.get<{ Querystring: { scope?: string } }>("/v1/projects", async (req) => {
     const rawCtx = await authenticateRequest(req.headers.authorization, configuredApiKey, "default-org", allowedProjects, undefined, allowedPolicies);
     const dbUser = authRepo ? await authRepo.findUserById(rawCtx.actorId) : null;
     const memUser = !dbUser && rawCtx.actorId !== "local-dev" ? usersStore.getUserById(rawCtx.actorId) : null;
@@ -44,6 +45,23 @@ export function registerProjectCoreRoutes(app: FastifyInstance, deps: ProjectsKn
           allowedPolicies: freshUser.allowedPolicies
         }
       : rawCtx;
+    if (req.query.scope === "catalog" && systemDb) {
+      const rows = await systemDb
+        .select()
+        .from(projectsTable)
+        .where(eq(projectsTable.tenantId, baseCtx.tenantId))
+        .orderBy(asc(projectsTable.id));
+      return {
+        projects: rows.map((row) => ({
+          projectId: row.id,
+          tenantId: row.tenantId,
+          name: row.name,
+          description: row.description ?? undefined,
+          knowledgeRoot: row.knowledgeRoot,
+          createdAt: row.createdAt.toISOString()
+        }))
+      };
+    }
     const ctx = opRepo
       ? await opRepo.resolveDynamicMcpScope(baseCtx, freshUser ? [] : allowedProjects, allowedPolicies, systemDb)
       : baseCtx;

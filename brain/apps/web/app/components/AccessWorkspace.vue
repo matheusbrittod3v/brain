@@ -84,16 +84,8 @@ const tabs = computed(() => [
 
 async function loadAccessData() {
   accessError.value = null
-  if (!projectId.value) {
-    rolesList.value = []
-    usersList.value = []
-    assignmentsList.value = []
-    grantsList.value = []
-    permissionCatalog.value = []
-    return
-  }
   loading.value = true
-  const pid = encodeURIComponent(projectId.value)
+  const pid = encodeURIComponent(projectId.value || '__global__')
   try {
     const [rRes, uRes, aRes, gRes, pRes] = await Promise.allSettled([
       apiFetch<{ roles: RoleItem[] }>(`/v1/projects/${pid}/access/roles`),

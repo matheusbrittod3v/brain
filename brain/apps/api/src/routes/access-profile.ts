@@ -168,8 +168,9 @@ export function registerAccessProfileRoutes(
     const ctx = await authenticateProjectRequest(req.headers.authorization, req.params.projectId);
     requireAccessAdmin(ctx);
     const now = Date.now();
+    const hasProj = req.params.projectId !== "__global__" && ctx.allowedProjects.includes(req.params.projectId);
     const grants = opRepo
-      ? await opRepo.listTemporaryAccessGrants(ctx, req.params.projectId, new Date(now))
+      ? (hasProj ? await opRepo.listTemporaryAccessGrants(ctx, req.params.projectId, new Date(now)) : [])
       : [...temporaryGrants.values()].filter((g) => g.tenantId === ctx.tenantId && g.projectId === req.params.projectId && Date.parse(g.expiresAt) > now);
     return { projectId: req.params.projectId, grants };
   });
