@@ -26,12 +26,15 @@ export function useBrainApi() {
   const authConfig = useState<AuthConfig>('brain.authConfig', () => ({ registrationEnabled: true }))
   const authModalOpen = useState<boolean>('brain.authModalOpen', () => false)
   const authModalTab = useState<string>('brain.authModalTab', () => 'login')
+  const authRestoring = useState<boolean>('brain.authRestoring', () => true)
 
-  // Hydrate from localStorage on client
+  // Hydrate from localStorage on client synchronously before render
   if (import.meta.client) {
     const savedUrl = localStorage.getItem('brain.apiUrl')
     const savedKey = localStorage.getItem('brain.apiKey')
     const savedProj = localStorage.getItem('brain.projectId')
+    const savedUser = localStorage.getItem('brain.currentUser')
+
     if (savedUrl) {
       apiUrl.value = savedUrl
     } else if (typeof window !== 'undefined' && window.location.hostname === '127.0.0.1') {
@@ -39,6 +42,16 @@ export function useBrainApi() {
     }
     if (savedKey && !apiKey.value) apiKey.value = savedKey
     if (savedProj && projectId.value === 'brain') projectId.value = savedProj
+    if (savedUser && !currentUser.value) {
+      try {
+        currentUser.value = JSON.parse(savedUser)
+      } catch {
+        localStorage.removeItem('brain.currentUser')
+      }
+    }
+    if (!savedKey) {
+      authRestoring.value = false
+    }
   }
 
   function notify(title: string, description?: string, color: 'primary' | 'success' | 'warning' | 'error' = 'success') {
@@ -108,6 +121,9 @@ export function useBrainApi() {
         visibilityScope: me.visibilityScope,
         actorType: me.actorType
       }
+      if (import.meta.client) {
+        localStorage.setItem('brain.currentUser', JSON.stringify(currentUser.value))
+      }
     } catch (err) {
       const status = (err as { status?: number })?.status
       if (status === 401) {
@@ -115,17 +131,16 @@ export function useBrainApi() {
         apiKey.value = ''
         if (import.meta.client) {
           localStorage.removeItem('brain.apiKey')
+          localStorage.removeItem('brain.currentUser')
         }
       }
+    } finally {
+      authRestoring.value = false
     }
   }
 
   function setSessionToken(token: string, user?: Partial<AuthUserProfile>) {
     apiKey.value = token
-    if (import.meta.client) {
-      localStorage.setItem('brain.apiKey', token)
-      localStorage.setItem('brain.apiUrl', apiUrl.value)
-    }
     if (user?.id) {
       if (user.allowedProjects && user.allowedProjects.length > 0 && !user.allowedProjects.includes(projectId.value)) {
         projectId.value = user.allowedProjects[0]!
@@ -143,6 +158,14 @@ export function useBrainApi() {
         permissions: user.permissions ?? []
       }
     }
+    if (import.meta.client) {
+      localStorage.setItem('brain.apiKey', token)
+      localStorage.setItem('brain.apiUrl', apiUrl.value)
+      if (currentUser.value) {
+        localStorage.setItem('brain.currentUser', JSON.stringify(currentUser.value))
+      }
+    }
+    authRestoring.value = false
   }
 
   function hasPermission(permission: string): boolean {
@@ -158,8 +181,10 @@ export function useBrainApi() {
   function logout() {
     apiKey.value = ''
     currentUser.value = null
+    authRestoring.value = false
     if (import.meta.client) {
       localStorage.removeItem('brain.apiKey')
+      localStorage.removeItem('brain.currentUser')
     }
     notify('Sessão encerrada', undefined, 'warning')
   }
@@ -172,6 +197,7 @@ export function useBrainApi() {
     authConfig,
     authModalOpen,
     authModalTab,
+    authRestoring,
     apiFetch,
     notify,
     refreshAuthSession,

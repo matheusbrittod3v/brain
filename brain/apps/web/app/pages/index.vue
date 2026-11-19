@@ -7,6 +7,7 @@ const {
   currentUser,
   authModalOpen,
   authModalTab,
+  authRestoring,
   apiFetch,
   notify,
   refreshAuthSession,
@@ -273,7 +274,17 @@ defineShortcuts({
 </script>
 
 <template>
-  <LandingAuthGate v-if="!apiKey || !currentUser" @authenticated="loadWorkspaceData" />
+  <!-- Loading de transição enquanto restaura sessão pré-existente (sem piscar a landing page) -->
+  <div v-if="authRestoring && apiKey" class="min-h-screen w-full flex flex-col items-center justify-center bg-slate-950 text-slate-100">
+    <div class="w-12 h-12 rounded-2xl bg-gradient-to-br from-indigo-500/25 to-sky-500/20 border border-indigo-500/35 flex items-center justify-center shadow-lg animate-pulse mb-3">
+      <UIcon name="i-lucide-brain-circuit" class="w-6 h-6 text-primary" />
+    </div>
+    <div class="text-xs font-mono text-slate-400 flex items-center gap-2">
+      <UIcon name="i-lucide-loader-2" class="size-3.5 animate-spin text-primary" />
+      Carregando sessão do Brain...
+    </div>
+  </div>
+  <LandingAuthGate v-else-if="!apiKey || !currentUser" @authenticated="loadWorkspaceData" />
   <UDashboardGroup v-else unit="rem">
     <UDashboardSidebar
       v-model:collapsed="sidebarCollapsed"
