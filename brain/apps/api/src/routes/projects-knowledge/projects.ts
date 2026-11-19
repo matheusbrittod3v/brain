@@ -243,7 +243,7 @@ export function registerProjectCoreRoutes(app: FastifyInstance, deps: ProjectsKn
       throw new BrainError("BRAIN_ERR_NOT_FOUND", `Projeto '${projectId}' não encontrado.`, 404);
     }
     registeredProjects.delete(`${ctx.tenantId}:${projectId}`);
-    queryAwareRetrieval.invalidateCache?.(ctx.tenantId, projectId);
+    pgRetrieval?.invalidateCache?.(ctx.tenantId, projectId);
     await recordAudit(ctx, {
       tenantId: ctx.tenantId,
       projectId,
