@@ -81,7 +81,7 @@ async function approvePkce() {
         state: oauthState.value || undefined
       })
     })
-    doneMessage.value = 'Autorizado! Redirecionando para o cliente MCP...'
+    doneMessage.value = `Autorização OAuth2 concluída para ${clientInfo.value?.clientName || clientId.value}. Redirecionando para o cliente...`
     window.location.href = res.redirectTo
   } catch (err) {
     errorMessage.value = err instanceof Error ? err.message : String(err)

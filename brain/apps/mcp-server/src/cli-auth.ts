@@ -278,8 +278,36 @@ export async function runStdioHttpProxy(initialCredentials: StoredMcpCredentials
         });
 
       let res = await sendRequest(creds.accessToken);
-      if (res.status === 401 && creds.refreshToken) {
-        creds = await refreshIfNeeded(creds, true);
+      if (res.status === 401) {
+        const diskCreds = await loadStoredCredentials();
+        if (diskCreds?.accessToken && diskCreds.accessToken !== creds.accessToken) {
+          creds = diskCreds;
+          res = await sendRequest(creds.accessToken);
+        } else if (creds.refreshToken) {
+          creds = await refreshIfNeeded(creds, true);
+          res = await sendRequest(creds.accessToken);
+        }
+      }
+      if (res.status === 404 && mcpSessionId) {
+        mcpSessionId = null;
+        await fetch(endpoint, {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            accept: "application/json, text/event-stream",
+            authorization: `Bearer ${creds.accessToken}`,
+            "x-brain-client": "brain-mcp-stdio-proxy"
+          },
+          body: JSON.stringify({
+            jsonrpc: "2.0",
+            id: "auto-reinit",
+            method: "initialize",
+            params: { protocolVersion: "2024-11-05", capabilities: {}, clientInfo: { name: "brain-mcp-stdio-proxy", version: "0.1.0" } }
+          })
+        }).then((r) => {
+          const newSid = r.headers.get("mcp-session-id");
+          if (newSid) mcpSessionId = newSid;
+        }).catch(() => {});
         res = await sendRequest(creds.accessToken);
       }
 

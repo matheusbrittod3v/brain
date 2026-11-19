@@ -181,8 +181,16 @@ export function registerMcpGatewayRoutes(app: FastifyInstance, deps: McpGatewayD
     }
 
     const sessionId = typeof req.headers["mcp-session-id"] === "string" ? req.headers["mcp-session-id"] : undefined;
-    if (sessionId && activeSessions.has(sessionId)) {
-      const existingTransport = activeSessions.get(sessionId)!;
+    if (sessionId) {
+      const existingTransport = activeSessions.get(sessionId);
+      if (!existingTransport) {
+        reply.code(404).send({
+          jsonrpc: "2.0",
+          error: { code: -32001, message: "MCP session not found or expired. Re-initialize." },
+          id: null
+        });
+        return;
+      }
       reply.hijack();
       await existingTransport.handleRequest(req.raw, reply.raw, req.body);
       if (req.method === "DELETE") {

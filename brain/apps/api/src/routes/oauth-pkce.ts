@@ -175,7 +175,9 @@ export function registerOAuthPkceRoutes(
       code_verifier?: string;
       refresh_token?: string;
     };
-  }>("/oauth/token", async (req) => {
+  }>("/oauth/token", async (req, reply) => {
+    reply.header("Cache-Control", "no-store");
+    reply.header("Pragma", "no-cache");
     const body = req.body ?? {};
     const grantType = body.grant_type;
 
@@ -249,7 +251,14 @@ export function registerOAuthPkceRoutes(
         token_type: "Bearer",
         expires_in: 3600,
         refresh_token: refreshToken,
-        scope: authCode.scope
+        scope: authCode.scope,
+        status: "authenticated",
+        actor: {
+          id: authCode.userId,
+          email: dbUser?.email ?? `${authCode.userId}@brain.local`,
+          name: dbUser?.name ?? authCode.userId,
+          roles: dbUser?.roles ?? ["developer"]
+        }
       };
     }
 
