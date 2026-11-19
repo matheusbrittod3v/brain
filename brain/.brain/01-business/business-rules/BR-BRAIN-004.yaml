@@ -1,0 +1,10 @@
+id: BR-BRAIN-004
+title: Aprovação Human-in-the-Loop (HITL) e Concessões Just-In-Time (JIT)
+type: business_rule
+status: approved
+access_policy: internal-project
+knowledgeLayer: business
+description: >
+  Alterações críticas em regras de negócio ou acessos elevados exigem aprovação
+  explícita ou concessão temporária (temporary_access_grants com expiresAt)
+  auditada na trilha RLS e vinculada às regras CASL do usuário/agente.
