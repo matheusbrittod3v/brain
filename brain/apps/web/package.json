@@ -3,11 +3,11 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "nuxt build",
-    "dev": "nuxt dev --port 3000",
+    "build": "NUXT_TELEMETRY_DISABLED=1 nuxt build",
+    "dev": "NUXT_TELEMETRY_DISABLED=1 nuxt dev --port 3000",
     "start": "PORT=3000 bun .output/server/index.mjs",
-    "preview": "nuxt preview",
-    "postinstall": "nuxt prepare",
+    "preview": "NUXT_TELEMETRY_DISABLED=1 nuxt preview",
+    "postinstall": "NUXT_TELEMETRY_DISABLED=1 nuxt prepare",
     "lint": "eslint .",
     "typecheck": "nuxt typecheck"
   },

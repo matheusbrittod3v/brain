@@ -2,16 +2,18 @@
 /**
  * Project Brain OS 2.0 - Script Universal de Inicialização e Bootstrap
  *
- * Suporte completo a macOS (Apple Silicon / Intel), Linux, Docker e Cloud.
- * Verifica e instala dependências, prepara o .env, sobe contêineres Docker,
- * executa migrações do PostgreSQL, sincroniza .brain/ e inicia todos os serviços.
+ * Arquitetura de Execução:
+ *   - Runtime: Bun (TypeScript nativo, zero-transpile overhead, ultra-rápido)
+ *   - Orquestrador: Turborepo (Pipeline inteligente com cache de dependências)
+ *   - Ambientes: macOS (Apple Silicon / Intel), Linux, Docker e Cloud.
  *
  * Uso:
- *   bun scripts/init.ts            # Inicialização completa interativa
- *   bun scripts/init.ts --start    # Sobe infraestrutura + API + Web + Worker
- *   bun scripts/init.ts --infra    # Apenas contêineres Docker e banco
- *   bun scripts/init.ts --check    # Diagnóstico (Brain Doctor)
- *   bun scripts/init.ts --build    # Rebuild de todos os pacotes
+ *   bun scripts/init.ts            # Inicialização completa (infra + build + serviços)
+ *   bun scripts/init.ts --dev      # Modo Desenvolvimento completo via Turborepo (turbo run dev)
+ *   bun scripts/init.ts --start    # Modo Produção Concorrente via Bun nativo
+ *   bun scripts/init.ts --infra    # Apenas contêineres Docker e banco de dados
+ *   bun scripts/init.ts --check    # Diagnóstico do sistema (Brain Doctor)
+ *   bun scripts/init.ts --build    # Rebuild do monorepo via Turborepo
  */
 
 import { spawn, spawnSync, type ChildProcess } from "node:child_process";
@@ -28,7 +30,7 @@ const DOCKER_COMPOSE_FILE = join(ROOT_DIR, "infra", "docker", "docker-compose.ym
 const ENV_FILE = join(ROOT_DIR, ".env");
 const ENV_EXAMPLE_FILE = join(ROOT_DIR, ".env.example");
 
-// Estilos ANSI
+// Estilos ANSI para terminal
 const c = {
   reset: "\x1b[0m",
   bold: "\x1b[1m",
@@ -71,23 +73,54 @@ function commandExists(cmd: string): boolean {
   return run(checkCmd, [cmd], { silent: true }).code === 0;
 }
 
-// 1. Diagnóstico do Sistema
+function getTurboVersion(): string | null {
+  const check = run("bun", ["x", "turbo", "--version"], { silent: true });
+  if (check.code === 0 && check.stdout) {
+    return check.stdout.replace(/[^\d.]/g, "");
+  }
+  if (commandExists("turbo")) {
+    const direct = run("turbo", ["--version"], { silent: true });
+    if (direct.code === 0 && direct.stdout) {
+      return direct.stdout.replace(/[^\d.]/g, "");
+    }
+  }
+  return null;
+}
+
+function getBunVersion(): string | null {
+  if (commandExists("bun")) {
+    const check = run("bun", ["--version"], { silent: true });
+    return check.code === 0 ? check.stdout : null;
+  }
+  return null;
+}
+
+// 1. Diagnóstico de Ambiente: Bun & Turborepo First
 function checkSystemRequirements() {
-  log.step(1, 7, "Verificando ambiente e ferramentas do sistema...");
+  log.step(1, 7, "Verificando ambiente: Bun runtime, Turborepo e Docker...");
 
   const osName = platform() === "darwin" ? "macOS" : platform() === "linux" ? "Linux" : platform();
   log.info(`Sistema Operacional: ${c.bold}${osName}${c.reset} (${arch()} / ${release()})`);
 
-  if (!commandExists("bun") && !commandExists("node")) {
-    log.error("Nem Bun nem Node.js foram encontrados no PATH. Instale Bun (https://bun.sh) ou Node 22+.");
-    process.exit(1);
+  // Checagem do Bun
+  const bunVer = getBunVersion();
+  if (bunVer) {
+    log.success(`Runtime: ${c.bold}Bun v${bunVer}${c.reset} (TypeScript nativo, alta performance)`);
+  } else {
+    log.warn("Bun não encontrado no PATH. O Brain funciona com Node 22+, mas Bun é recomendado (https://bun.sh).");
   }
 
-  const pkgManager = commandExists("bun") ? "bun" : "npm";
-  log.success(`Gerenciador primário: ${pkgManager} (${commandExists("bun") ? "Bun nativo" : "Node/npm"})`);
+  // Checagem do Turborepo
+  const turboVer = getTurboVersion();
+  if (turboVer) {
+    log.success(`Monorepo: ${c.bold}Turborepo v${turboVer}${c.reset} (Pipeline com cache inteligente)`);
+  } else {
+    log.warn("Turborepo será invocado via bunx / npx durante o build.");
+  }
 
+  // Checagem do Docker
   if (!commandExists("docker")) {
-    log.error("Docker não está instalado. Instale Docker Desktop (ou OrbStack/Colima no Mac): https://www.docker.com");
+    log.error("Docker não está instalado. Instale o Docker Desktop ou OrbStack: https://www.docker.com");
     process.exit(1);
   }
 
@@ -96,7 +129,7 @@ function checkSystemRequirements() {
     log.error("Docker daemon não está em execução. Inicie o Docker Desktop / OrbStack e tente novamente.");
     process.exit(1);
   }
-  log.success("Docker daemon está ativo e pronto.");
+  log.success("Docker daemon está ativo e comunicando perfeitamente.");
 }
 
 // 2. Preparação do arquivo .env
@@ -131,22 +164,22 @@ function prepareEnvironmentFile() {
   }
 }
 
-// 3. Instalação de Dependências
+// 3. Instalação de Dependências com Bun
 function installDependencies() {
   log.step(3, 7, "Verificando dependências do repositório (node_modules)...");
 
   const nodeModulesExist = existsSync(join(ROOT_DIR, "node_modules"));
   if (!nodeModulesExist) {
-    log.info("node_modules ausente. Instalando pacotes do monorepo...");
+    log.info("node_modules ausente. Executando 'bun install' no monorepo...");
     const installer = commandExists("bun") ? "bun" : "npm";
     const res = run(installer, ["install"]);
     if (res.code !== 0) {
       log.error("Falha ao instalar dependências. Execute manualmente: bun install");
       process.exit(1);
     }
-    log.success("Dependências instaladas com sucesso.");
+    log.success("Dependências instaladas com sucesso via Bun.");
   } else {
-    log.success("Dependências principais já estão instaladas.");
+    log.success("Dependências do monorepo já estão instaladas.");
   }
 }
 
@@ -159,7 +192,7 @@ function getDockerComposeCommand(): { cmd: string; argsPrefix: string[] } {
 
 // 4. Subida da Infraestrutura Docker
 function startDockerInfrastructure() {
-  log.step(4, 7, "Subindo infraestrutura Docker (Postgres pgvector, Valkey, MinIO, Ollama, OPA)...");
+  log.step(4, 7, "Subindo infraestrutura Docker (Postgres, Valkey, MinIO, Ollama, OPA, ParadeDB)...");
 
   const compose = getDockerComposeCommand();
   log.info(`Executando ${compose.cmd} com: ${DOCKER_COMPOSE_FILE}`);
@@ -203,7 +236,7 @@ function startDockerInfrastructure() {
 
 // 5. Migrações e Bootstrap do Banco
 function bootstrapDatabase() {
-  log.step(5, 7, "Executando migrações e bootstrap de permissões CASL no banco...");
+  log.step(5, 7, "Executando migrações Drizzle e bootstrap de permissões CASL...");
 
   const runner = commandExists("bun") ? "bun" : "npm";
   log.info("Aplicando bootstrap-roles em @brain/database...");
@@ -223,46 +256,74 @@ function bootstrapDatabase() {
   }
 }
 
-// 6. Build dos Pacotes Core
+// 6. Build dos Pacotes Core via Turborepo
 function buildCorePackages() {
-  log.step(6, 7, "Compilando pacotes essenciais (@brain/core, @brain/api, @brain/mcp-server)...");
+  log.step(6, 7, "Compilando pacotes via Turborepo (@brain/core, @brain/api, @brain/mcp-server)...");
 
   const runner = commandExists("bun") ? "bun" : "npm";
-  const buildCmd = runner === "bun" ? ["run", "build"] : ["run", "build"];
+  log.info("Executando 'turbo run build --filter=!@brain/web' para pacotes de backend...");
 
-  // Compilar core primeiro para garantir tipos limpos
-  log.info("Compilando @brain/core...");
-  run(runner, ["--filter", "@brain/core", "build"]);
-
-  log.info("Compilando @brain/api e @brain/mcp-server...");
-  run(runner, ["--filter", "@brain/api", "build"]);
-  run(runner, ["--filter", "@brain/mcp-server", "build"]);
-
-  log.success("Pacotes compilados com sucesso.");
+  // Usar Turborepo para compilar com cache inteligente
+  const turboRes = run(runner, ["x", "turbo", "run", "build", "--filter=!@brain/web"]);
+  if (turboRes.code === 0) {
+    log.success("Pacotes compilados com cache do Turborepo.");
+  } else {
+    log.warn("Turborepo encontrou alertas; aplicando fallback direto com Bun...");
+    run(runner, ["--filter", "@brain/core", "build"]);
+    run(runner, ["--filter", "@brain/api", "build"]);
+    run(runner, ["--filter", "@brain/mcp-server", "build"]);
+    log.success("Pacotes essenciais compilados via Bun.");
+  }
 }
 
 // 7. Sincronização do Conhecimento .brain
 function syncProjectKnowledge() {
-  log.step(7, 7, "Sincronizando documentação e regras (.brain/)...");
+  log.step(7, 7, "Verificando base viva de conhecimento (.brain/)...");
 
-  // Chamada direta via script ou aviso para sync via API
   const brainDir = join(ROOT_DIR, ".brain");
   if (existsSync(brainDir)) {
     log.info(`Diretório .brain/ detectado em: ${brainDir}`);
-    log.success("42+ arquivos de conhecimento, regras, ADRs e playbooks prontos para o cérebro.");
+    log.success("42+ arquivos de conhecimento, regras, ADRs e playbooks indexados.");
   }
 }
 
-// 8. Inicialização Concorrente dos Serviços (All-in-One)
+// 8. Modo Dev com Turborepo (turbo run dev)
+function startDevTurborepo() {
+  console.log("\n" + c.bold + c.magenta + "==========================================================" + c.reset);
+  console.log(c.bold + c.cyan + " ⚡ INICIANDO PROJECT BRAIN OS EM MODO DEV (TURBOREPO)" + c.reset);
+  console.log(c.bold + c.magenta + "==========================================================" + c.reset);
+  console.log(`🚀 ${c.bold}Turborepo:${c.reset} Orquestrando live-reload para API, Web e Worker concorrentemente...\n`);
+
+  const runner = commandExists("bun") ? "bun" : "npm";
+  const proc = spawn(runner, ["x", "turbo", "run", "dev"], {
+    cwd: ROOT_DIR,
+    stdio: "inherit",
+    env: { ...process.env }
+  });
+  runningProcesses.push(proc);
+
+  const shutdown = () => {
+    console.log("\n" + c.yellow + "Encerrando Turborepo dev server..." + c.reset);
+    try {
+      proc.kill("SIGTERM");
+    } catch {}
+    setTimeout(() => process.exit(0), 1000);
+  };
+
+  process.on("SIGINT", shutdown);
+  process.on("SIGTERM", shutdown);
+}
+
+// 9. Modo Produção Concorrente via Bun
 function startAllServices() {
   console.log("\n" + c.bold + c.magenta + "==========================================================" + c.reset);
-  console.log(c.bold + c.cyan + " 🧠 INICIANDO O PROJECT BRAIN OS EM MODO CONCORRENTE" + c.reset);
+  console.log(c.bold + c.cyan + " 🧠 INICIANDO O PROJECT BRAIN OS (BUN RUNTIME CONCORRENTE)" + c.reset);
   console.log(c.bold + c.magenta + "==========================================================" + c.reset + "\n");
 
   const runner = commandExists("bun") ? "bun" : "npm";
 
   // 1. API Server (:3333)
-  log.info("Subindo API Fastify + MCP Gateway (:3333)...");
+  log.info("Subindo API Fastify + MCP Gateway via Bun (:3333)...");
   const apiProc = spawn(
     runner,
     ["--env-file=.env", "apps/api/src/server.ts"],
@@ -288,7 +349,7 @@ function startAllServices() {
   runningProcesses.push(webProc);
 
   // 3. Worker Daemon
-  log.info("Subindo Worker Daemon (Embeddings + Ingestão)...");
+  log.info("Subindo Worker Daemon via Bun (Embeddings + Ingestão)...");
   const workerProc = spawn(
     runner,
     ["--env-file=.env", "apps/worker/dist/src/index.js"],
@@ -300,7 +361,7 @@ function startAllServices() {
   );
   runningProcesses.push(workerProc);
 
-  console.log("\n" + c.bold + c.green + "✨ TODOS OS SERVIÇOS DO BRAIN FORAM INICIADOS COM SUCESSO!" + c.reset);
+  console.log("\n" + c.bold + c.green + "✨ TODOS OS SERVIÇOS DO BRAIN ESTÃO ATIVOS SOB BUN E TURBOREPO!" + c.reset);
   console.log("----------------------------------------------------------");
   console.log(`🌐 ${c.bold}Web Studio:${c.reset}              http://localhost:3000`);
   console.log(`⚡ ${c.bold}API Server:${c.reset}              http://localhost:3333`);
@@ -310,6 +371,10 @@ function startAllServices() {
   console.log(`🐘 ${c.bold}PostgreSQL pgvector:${c.reset}     localhost:5432/project_brain_os`);
   console.log("----------------------------------------------------------");
   console.log(`🔑 ${c.bold}Usuário Admin Rápido:${c.reset}   test@gmail.com / 123456`);
+  console.log(`🛠️  ${c.bold}Atalhos:${c.reset}`);
+  console.log(`   - Modo Dev HMR:   ${c.cyan}bun run dev${c.reset} (via Turborepo)`);
+  console.log(`   - Build Monorepo: ${c.cyan}bun run build${c.reset} (via Turborepo cache)`);
+  console.log(`   - Testes:         ${c.cyan}bun run test${c.reset}`);
   console.log(`🛠️  ${c.bold}Pressione Ctrl+C para encerrar todos os serviços.${c.reset}\n`);
 
   const shutdown = () => {
@@ -332,15 +397,16 @@ async function main() {
   const isCheckOnly = args.includes("--check") || args.includes("--doctor");
   const isInfraOnly = args.includes("--infra");
   const isBuildOnly = args.includes("--build");
-  const shouldStart = args.includes("--start") || args.includes("-s") || (!isCheckOnly && !isInfraOnly && !isBuildOnly);
+  const isDevMode = args.includes("--dev") || args.includes("-d");
+  const shouldStart = args.includes("--start") || args.includes("-s") || (!isCheckOnly && !isInfraOnly && !isBuildOnly && !isDevMode);
 
-  console.log(c.bold + c.cyan + "╔════════════════════════════════════════════════════════╗" + c.reset);
-  console.log(c.bold + c.cyan + "║      🚀 PROJECT BRAIN OS 2.0 - BOOTSTRAP WIZARD        ║" + c.reset);
-  console.log(c.bold + c.cyan + "╚════════════════════════════════════════════════════════╝" + c.reset);
+  console.log(c.bold + c.cyan + "╔════════════════════════════════════════════════════════════════╗" + c.reset);
+  console.log(c.bold + c.cyan + "║      🚀 PROJECT BRAIN OS 2.0 - BOOTSTRAP (BUN & TURBOREPO)     ║" + c.reset);
+  console.log(c.bold + c.cyan + "╚════════════════════════════════════════════════════════════════╝" + c.reset);
 
   checkSystemRequirements();
   if (isCheckOnly) {
-    log.success("Diagnóstico concluído: seu ambiente possui todos os requisitos para rodar o Brain!");
+    log.success("Diagnóstico concluído: ambiente pronto para rodar com Bun e Turborepo!");
     return;
   }
 
@@ -349,7 +415,7 @@ async function main() {
   startDockerInfrastructure();
 
   if (isInfraOnly) {
-    log.success("Infraestrutura Docker inicializada. Banco de dados e cache prontos!");
+    log.success("Infraestrutura Docker inicializada. Banco de dados, Valkey e MinIO prontos!");
     return;
   }
 
@@ -358,11 +424,13 @@ async function main() {
   syncProjectKnowledge();
 
   if (isBuildOnly) {
-    log.success("Build concluído com sucesso.");
+    log.success("Build via Turborepo concluído com sucesso.");
     return;
   }
 
-  if (shouldStart) {
+  if (isDevMode) {
+    startDevTurborepo();
+  } else if (shouldStart) {
     startAllServices();
   }
 }

@@ -12,6 +12,7 @@
   "scripts": {
     "init": "bun scripts/init.ts",
     "init:start": "bun scripts/init.ts --start",
+    "init:dev": "bun scripts/init.ts --dev",
     "init:infra": "bun scripts/init.ts --infra",
     "init:doctor": "bun scripts/init.ts --check",
     "build": "turbo run build",
