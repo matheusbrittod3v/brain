@@ -14,6 +14,7 @@ import {
   parseDocumentWithAiWorker,
   redactPiiWithAiWorker
 } from "../services/ai-worker.js";
+import { uploadObjectToMinio } from "../services/minio-storage.js";
 
 export function registerIngestDocumentRoutes(
   app: FastifyInstance,
@@ -90,7 +91,18 @@ export function registerIngestDocumentRoutes(
       item.sourceOrigin = "external_reference";
       item.sourceKind = "api";
       item.trustLevel = "untrusted";
-      item.metadata = { ...item.metadata, source: "document_upload", originalFileName: fileName, extractionEngine: parsedDocument.engine };
+      const minioObj = await uploadObjectToMinio({
+        key: `${ctx.tenantId}/${req.params.projectId}/documents/${Date.now()}-${normalizedName}`,
+        body: sourceBytes,
+        contentType: "application/octet-stream"
+      });
+      item.metadata = {
+        ...item.metadata,
+        source: "document_upload",
+        originalFileName: fileName,
+        extractionEngine: parsedDocument.engine,
+        ...(minioObj.uploaded ? { minioUri: minioObj.uri, minioHttpUrl: minioObj.httpUrl, minioBucket: minioObj.bucket } : {})
+      };
       assertPolicyAccess(ctx, item.accessPolicyId);
       await enforceOpa(ctx, { projectId: req.params.projectId, accessPolicyId: item.accessPolicyId, action: "write", domainId: item.domainId });
       await upsertKnowledgeItem(ctx, item);

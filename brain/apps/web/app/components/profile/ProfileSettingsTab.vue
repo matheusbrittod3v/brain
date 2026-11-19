@@ -30,6 +30,8 @@ const isAdmin = computed(() =>
 const categoryLabels: Record<string, string> = {
   embeddings: 'Embeddings & Ollama',
   runner: 'Agentes & Runner',
+  cache: 'Cache Distribuído (Valkey / Redis)',
+  storage: 'Object Storage (MinIO / S3)',
   github: 'GitHub & Repositórios',
   smtp: 'Servidor de Email (SMTP)',
   policies: 'Políticas & Escopos Padrão'

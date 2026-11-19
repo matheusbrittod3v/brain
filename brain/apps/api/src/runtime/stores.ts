@@ -69,7 +69,7 @@ export function createApiRuntimeStores(deps: {
   const policyEpochByProject = new Map<string, { epoch: number; revocationFingerprint: string | null; allowedPolicyFingerprint: string }>();
 
   const pgGraph = appPostgresClient && process.env.BRAIN_PG_STORES === "1" ? new PostgresGraphStore(appPostgresClient) : undefined;
-  const valkeyUrl = process.env.VALKEY_URL ?? process.env.REDIS_URL;
+  const valkeyUrl = process.env.VALKEY_URL ?? process.env.REDIS_URL ?? "redis://localhost:6379";
   const pgRetrieval =
     appPostgresClient && process.env.BRAIN_PG_STORES === "1"
       ? new PostgresRetrievalEngine(appPostgresClient as never, pgGraph, {

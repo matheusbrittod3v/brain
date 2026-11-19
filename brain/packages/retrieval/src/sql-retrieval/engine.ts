@@ -294,9 +294,7 @@ export class PostgresRetrievalEngine<
         valid_until, tags, access_policy_id, hit_count, context_sent_count, context_hit_count, metadata, deleted_at, created_at, updated_at,
         CASE
           WHEN ${normalizedQuery} = '' THEN 0.1
-          WHEN search_vector @@ websearch_to_tsquery('simple', ${normalizedQuery})
-            THEN ts_rank_cd(search_vector, websearch_to_tsquery('simple', ${normalizedQuery}))
-          ELSE 0
+          ELSE brain_bm25_rank(search_vector, id, title, summary, content, ${normalizedQuery})
         END AS lexical_rank
       FROM knowledge_items
       WHERE tenant_id = ${scope.resolved.tenantId}

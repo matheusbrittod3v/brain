@@ -130,7 +130,7 @@ export function createSqlBrainRuntime(
     throw new Error("createSqlBrainRuntime requires a valid audit logger.");
   }
   const graph = new PostgresGraphStore(targetClient, rlsContext);
-  const valkeyUrl = process.env.VALKEY_URL ?? process.env.REDIS_URL;
+  const valkeyUrl = process.env.VALKEY_URL ?? process.env.REDIS_URL ?? "redis://localhost:6379";
   const retrieval = new PostgresRetrievalEngine(targetClient, graph, {
     cache: valkeyUrl ? new ValkeyRetrievalCache(valkeyUrl) : undefined
   });

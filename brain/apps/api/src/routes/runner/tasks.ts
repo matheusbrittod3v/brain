@@ -3,6 +3,7 @@ import { Type } from "@sinclair/typebox";
 import type { FastifyInstance } from "fastify";
 import { BrainError } from "@brain/core";
 import { cancelRunnerSchedule, listRunnerSchedules } from "@brain/mcp-server";
+import { uploadObjectToMinio } from "../../services/minio-storage.js";
 import type { RunnerRouteDeps, RunnerSharedState } from "./security.js";
 
 export function registerRunnerTaskRoutes(
@@ -31,6 +32,11 @@ export function registerRunnerTaskRoutes(
       }
       const task = runner.enqueue(ctx, { projectId: req.params.projectId, instruction: req.body.instruction, priority: req.body.priority });
       if (opRepo) await opRepo.saveRunnerTask(ctx, task);
+      void uploadObjectToMinio({
+        key: `${ctx.tenantId}/${req.params.projectId}/runner-tasks/${task.taskId}/task-spec.json`,
+        body: JSON.stringify(task, null, 2),
+        contentType: "application/json"
+      });
       return task;
     }
   );
@@ -162,6 +168,46 @@ export function registerRunnerTaskRoutes(
         ? await opRepo.listRunnerTaskQuestions(ctx, req.params.projectId, req.params.taskId)
         : runner.listQuestions(ctx, req.params.taskId);
       return { questions };
+    }
+  );
+
+  app.post<{
+    Params: { projectId: string; taskId: string };
+    Body: { fileName: string; content: string; isBase64?: boolean; contentType?: string };
+  }>(
+    "/v1/projects/:projectId/runner/tasks/:taskId/artifacts",
+    {
+      schema: {
+        params: Type.Object({ projectId: Type.String(), taskId: Type.String() }),
+        body: Type.Object({
+          fileName: Type.String({ minLength: 1 }),
+          content: Type.String({ minLength: 1 }),
+          isBase64: Type.Optional(Type.Boolean()),
+          contentType: Type.Optional(Type.String())
+        })
+      }
+    },
+    async (req) => {
+      const ctx = await authenticateProjectRequest(req.headers.authorization, req.params.projectId);
+      const safeName = req.body.fileName.replace(/[^A-Za-z0-9._-]+/g, "-");
+      const bodyBuf = req.body.isBase64 ? Buffer.from(req.body.content, "base64") : Buffer.from(req.body.content, "utf8");
+      const uploaded = await uploadObjectToMinio({
+        key: `${ctx.tenantId}/${req.params.projectId}/runner-artifacts/${req.params.taskId}/${safeName}`,
+        body: bodyBuf,
+        contentType: req.body.contentType ?? "application/octet-stream"
+      });
+      await recordAudit(ctx, {
+        tenantId: ctx.tenantId,
+        projectId: req.params.projectId,
+        accessPolicyId: "internal-project",
+        actorId: ctx.actorId,
+        actorType: ctx.actorType,
+        action: "create",
+        targetType: "runner_task_artifact",
+        targetId: `${req.params.taskId}/${safeName}`,
+        metadata: { uri: uploaded.uri, httpUrl: uploaded.httpUrl, uploaded: uploaded.uploaded }
+      }).catch(() => undefined);
+      return uploaded;
     }
   );
 }
