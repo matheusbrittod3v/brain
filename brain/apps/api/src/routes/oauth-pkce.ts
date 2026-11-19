@@ -111,7 +111,13 @@ export function registerOAuthPkceRoutes(
     };
   }>("/v1/auth/oauth/authorize", async (req) => {
     const ctx = await deps.authenticateRequest(req.headers.authorization);
-    const { clientId, redirectUri, codeChallenge, codeChallengeMethod = "S256", scope = "projects:all", allowedProjects = [], state } =
+    if (deps.authRepo) {
+      const dbUser = await deps.authRepo.findUserById(ctx.actorId);
+      if (!dbUser) {
+        throw new BrainError("BRAIN_ERR_UNAUTHORIZED", "Sessão expirada ou usuário removido. Faça login novamente.", 401);
+      }
+    }
+    const { clientId, redirectUri, codeChallenge, codeChallengeMethod = "S256", scope = "brain", allowedProjects = [], state } =
       req.body ?? {};
 
     if (!clientId || !redirectUri || !codeChallenge) {

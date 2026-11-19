@@ -36,11 +36,20 @@ async function loadConsentContext() {
     }
 
     if (apiKey.value) {
-      const res = await apiFetch<{ items?: Array<{ id: string; name: string }> }>('/v1/projects').catch(() => ({ items: [] }))
-      availableProjects.value = res.items ?? []
+      try {
+        await apiFetch('/v1/auth/me')
+        const res = await apiFetch<{ items?: Array<{ id: string; name: string }> }>('/v1/projects').catch(() => ({ items: [] }))
+        availableProjects.value = res.items ?? []
+      } catch {
+        setSessionToken('')
+      }
     }
   } catch (err) {
-    errorMessage.value = err instanceof Error ? err.message : String(err)
+    const msg = err instanceof Error ? err.message : String(err)
+    if (msg.includes('401') || msg.toLowerCase().includes('usuário removido') || msg.toLowerCase().includes('sessão expirada')) {
+      setSessionToken('')
+    }
+    errorMessage.value = msg
   } finally {
     loading.value = false
   }
@@ -59,7 +68,11 @@ async function handleLogin() {
     await loadConsentContext()
     notify('Autenticado', `Bem-vindo, ${res.user.name}`, 'success')
   } catch (err) {
-    errorMessage.value = err instanceof Error ? err.message : String(err)
+    const msg = err instanceof Error ? err.message : String(err)
+    if (msg.includes('401') || msg.toLowerCase().includes('usuário removido') || msg.toLowerCase().includes('sessão expirada')) {
+      setSessionToken('')
+    }
+    errorMessage.value = msg
   } finally {
     loggingIn.value = false
   }
@@ -84,7 +97,11 @@ async function approvePkce() {
     doneMessage.value = `Autorização OAuth2 concluída para ${clientInfo.value?.clientName || clientId.value}. Redirecionando para o cliente...`
     window.location.href = res.redirectTo
   } catch (err) {
-    errorMessage.value = err instanceof Error ? err.message : String(err)
+    const msg = err instanceof Error ? err.message : String(err)
+    if (msg.includes('401') || msg.toLowerCase().includes('usuário removido') || msg.toLowerCase().includes('sessão expirada')) {
+      setSessionToken('')
+    }
+    errorMessage.value = msg
   } finally {
     submitting.value = false
   }
