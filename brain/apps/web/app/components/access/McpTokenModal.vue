@@ -64,6 +64,44 @@ async function revokeToken(tokenId: string) {
   }
 }
 
+async function deleteToken(tokenId: string) {
+  try {
+    await apiFetch(`/v1/auth/mcp-tokens/${encodeURIComponent(tokenId)}?permanent=true`, { method: 'DELETE' })
+    await loadTokens()
+    notify('Token apagado', 'Registro removido definitivamente.', 'success')
+  } catch (err) {
+    notify('Erro ao apagar', err instanceof Error ? err.message : String(err), 'error')
+  }
+}
+
+async function clearRevokedTokens() {
+  try {
+    const res = await apiFetch<{ deletedCount: number }>('/v1/auth/mcp-tokens/revoked', { method: 'DELETE' })
+    await loadTokens()
+    notify('Revogados apagados', `${res.deletedCount} registro(s) removido(s).`, 'success')
+  } catch (err) {
+    notify('Erro ao limpar', err instanceof Error ? err.message : String(err), 'error')
+  }
+}
+
+const tokenFilter = ref<'all' | 'active' | 'revoked'>('all')
+const isTokenExpired = (t: McpTokenItem) => Date.parse(t.expiresAt) <= Date.now()
+const isTokenActive = (t: McpTokenItem) => !t.revokedAt && !isTokenExpired(t)
+const resolveLoginType = (t: McpTokenItem) => {
+  const txt = `${t.label} ${t.clientName} ${t.clientId}`.toLowerCase()
+  if (txt.includes('oauth') || txt.includes('pkce') || txt.includes('codex')) return 'OAuth 2.1 PKCE'
+  if (txt.includes('cli') || txt.includes('stdio')) return 'CLI / Stdio'
+  return 'Bearer Token'
+}
+const filteredTokens = computed(() =>
+  tokens.value.filter((t) => {
+    if (tokenFilter.value === 'active') return isTokenActive(t)
+    if (tokenFilter.value === 'revoked') return !isTokenActive(t)
+    return true
+  })
+)
+const hasRevokedTokens = computed(() => tokens.value.some(t => !isTokenActive(t)))
+
 async function copyText(text: string, title: string) {
   await navigator.clipboard.writeText(text)
   notify(title, 'Conteúdo copiado para a área de transferência.', 'success')
@@ -129,25 +167,48 @@ watch(open, (isOpen) => {
         </div>
 
         <div class="pt-3 border-t border-default space-y-2">
-          <div class="flex items-center justify-between">
-            <span class="text-xs font-semibold text-highlighted">Clientes &amp; Tokens Conectados</span>
-            <UButton size="xs" variant="ghost" icon="i-lucide-refresh-cw" :loading="loadingTokens" @click="loadTokens" />
+          <div class="flex flex-wrap items-center justify-between gap-2">
+            <span class="text-xs font-semibold text-highlighted">Clientes &amp; Tokens Conectados ({{ tokens.length }})</span>
+            <div class="flex items-center gap-1.5">
+              <USelect
+                v-model="tokenFilter"
+                :items="[
+                  { label: 'Todos', value: 'all' },
+                  { label: 'Ativos', value: 'active' },
+                  { label: 'Revogados / Expirados', value: 'revoked' }
+                ]"
+                size="xs"
+                class="w-36"
+              />
+              <UButton v-if="hasRevokedTokens" size="xs" color="error" variant="ghost" icon="i-lucide-trash-2" @click="clearRevokedTokens">
+                Limpar
+              </UButton>
+              <UButton size="xs" variant="ghost" icon="i-lucide-refresh-cw" :loading="loadingTokens" @click="loadTokens" />
+            </div>
           </div>
-          <div v-if="tokens.length === 0" class="text-xs text-muted py-2">Nenhum token MCP emitido ainda.</div>
-          <div v-else class="space-y-1.5 max-h-48 overflow-y-auto">
+          <div v-if="filteredTokens.length === 0" class="text-xs text-muted py-2">Nenhum token encontrado para este filtro.</div>
+          <div v-else class="space-y-1.5 max-h-56 overflow-y-auto">
             <div
-              v-for="item in tokens"
+              v-for="item in filteredTokens"
               :key="item.id"
               class="flex items-center justify-between gap-2 rounded-lg border border-default bg-elevated/40 px-3 py-2 text-xs"
             >
-              <div class="min-w-0">
-                <div class="font-medium text-highlighted truncate">{{ item.label }}</div>
+              <div class="min-w-0 space-y-0.5">
+                <div class="flex items-center gap-1.5 flex-wrap">
+                  <span class="font-medium text-highlighted truncate">{{ item.label }}</span>
+                  <UBadge size="xs" color="info" variant="subtle">{{ resolveLoginType(item) }}</UBadge>
+                  <UBadge v-if="item.revokedAt" color="error" variant="subtle" size="xs">Revogado</UBadge>
+                  <UBadge v-else-if="isTokenExpired(item)" color="warning" variant="subtle" size="xs">Expirado</UBadge>
+                  <UBadge v-else color="success" variant="subtle" size="xs">Ativo</UBadge>
+                </div>
                 <div class="text-[11px] text-muted">
-                  {{ item.lastUsedAt ? `Último uso: ${new Date(item.lastUsedAt).toLocaleString()}` : 'Nunca usado' }}
+                  {{ item.clientName }} • {{ item.lastUsedAt ? `Último uso: ${new Date(item.lastUsedAt).toLocaleString()}` : 'Nunca usado' }}
                 </div>
               </div>
-              <UBadge v-if="item.revokedAt" color="neutral" size="xs">Revogado</UBadge>
-              <UButton v-else size="xs" color="error" variant="soft" @click="revokeToken(item.id)">Revogar</UButton>
+              <div class="flex items-center gap-1 shrink-0">
+                <UButton v-if="isTokenActive(item)" size="xs" color="error" variant="soft" @click="revokeToken(item.id)">Revogar</UButton>
+                <UButton v-else size="xs" color="error" variant="ghost" icon="i-lucide-trash-2" @click="deleteToken(item.id)">Apagar</UButton>
+              </div>
             </div>
           </div>
         </div>

@@ -185,6 +185,16 @@ async function revokeToken(tokenId: string) {
   }
 }
 
+async function deleteToken(tokenId: string) {
+  try {
+    await apiFetch(`/v1/auth/mcp-tokens/${encodeURIComponent(tokenId)}?permanent=true`, { method: 'DELETE' })
+    notify('Token apagado', 'Registro removido definitivamente.', 'success')
+    await loadAccessData()
+  } catch (err) {
+    notify('Erro ao apagar token', err instanceof Error ? err.message : String(err), 'error')
+  }
+}
+
 async function revokeUserTokens(userId: string) {
   try {
     const res = await apiFetch<{ revokedCount: number }>(`/v1/auth/mcp-tokens/revoke-user/${encodeURIComponent(userId)}`, { method: 'POST' })
@@ -289,6 +299,7 @@ async function revokeUserTokens(userId: string) {
       :tokens="tokensList"
       :can-manage-all="hasPermission('users:assign_roles')"
       @revoke-token="revokeToken"
+      @delete-token="deleteToken"
       @revoke-user-tokens="revokeUserTokens"
       @open-create-token="mcpTokenModalOpen = true"
     />

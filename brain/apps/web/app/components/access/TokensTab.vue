@@ -20,6 +20,7 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   revokeToken: [tokenId: string]
+  deleteToken: [tokenId: string]
   revokeUserTokens: [userId: string]
   openCreateToken: []
 }>()
@@ -205,6 +206,16 @@ function formatDate(iso?: string | null) {
               @click="emit('revokeToken', row.original.id)"
             >
               Revogar
+            </UButton>
+            <UButton
+              v-else
+              size="xs"
+              color="error"
+              variant="ghost"
+              icon="i-lucide-trash-2"
+              @click="emit('deleteToken', row.original.id)"
+            >
+              Apagar
             </UButton>
             <UButton
               v-if="canManageAll && isTokenActive(row.original)"

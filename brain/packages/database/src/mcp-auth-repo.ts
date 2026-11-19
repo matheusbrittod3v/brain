@@ -239,4 +239,29 @@ export class PgMcpAuthRepository {
       .returning({ id: authMcpTokens.id });
     return rows.length;
   }
+
+  async deleteMcpToken(id: string, tenantId: string, userId?: string): Promise<boolean> {
+    await this.ensureTables();
+    const rows = await this.db
+      .delete(authMcpTokens)
+      .where(
+        userId
+          ? and(eq(authMcpTokens.id, id), eq(authMcpTokens.tenantId, tenantId), eq(authMcpTokens.userId, userId))
+          : and(eq(authMcpTokens.id, id), eq(authMcpTokens.tenantId, tenantId))
+      )
+      .returning({ id: authMcpTokens.id });
+    return rows.length > 0;
+  }
+
+  async deleteRevokedTokens(tenantId: string, userId?: string): Promise<number> {
+    await this.ensureTables();
+    const all = await this.listMcpTokens(tenantId, userId);
+    const now = Date.now();
+    const removableIds = all.filter((t) => Boolean(t.revokedAt) || t.expiresAt.getTime() <= now).map((t) => t.id);
+    let deleted = 0;
+    for (const id of removableIds) {
+      if (await this.deleteMcpToken(id, tenantId, userId)) deleted += 1;
+    }
+    return deleted;
+  }
 }

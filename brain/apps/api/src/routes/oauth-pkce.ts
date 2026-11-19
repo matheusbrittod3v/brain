@@ -307,11 +307,24 @@ export function registerOAuthPkceRoutes(
     return { items };
   });
 
-  app.delete<{ Params: { tokenId: string } }>("/v1/auth/mcp-tokens/:tokenId", async (req) => {
+  app.delete<{ Params: { tokenId: string }; Querystring: { permanent?: string } }>("/v1/auth/mcp-tokens/:tokenId", async (req) => {
     const ctx = await deps.authenticateRequest(req.headers.authorization);
-    if (!deps.mcpAuthRepo) return { revoked: false };
+    if (!deps.mcpAuthRepo) return { revoked: false, deleted: false };
+    const isAdmin = ctx.roles.some((r) => ["admin", "owner"].includes(r.toLowerCase()));
+    if (req.query?.permanent === "true") {
+      const deleted = await deps.mcpAuthRepo.deleteMcpToken(req.params.tokenId, ctx.tenantId, isAdmin ? undefined : ctx.actorId);
+      return { deleted, tokenId: req.params.tokenId };
+    }
     const revoked = await deps.mcpAuthRepo.revokeMcpToken(req.params.tokenId, ctx.tenantId);
     return { revoked, tokenId: req.params.tokenId };
+  });
+
+  app.delete("/v1/auth/mcp-tokens/revoked", async (req) => {
+    const ctx = await deps.authenticateRequest(req.headers.authorization);
+    if (!deps.mcpAuthRepo) return { deletedCount: 0 };
+    const isAdmin = ctx.roles.some((r) => ["admin", "owner"].includes(r.toLowerCase()));
+    const deletedCount = await deps.mcpAuthRepo.deleteRevokedTokens(ctx.tenantId, isAdmin ? undefined : ctx.actorId);
+    return { deletedCount };
   });
 
   app.post<{ Params: { userId: string } }>("/v1/auth/mcp-tokens/revoke-user/:userId", async (req) => {
