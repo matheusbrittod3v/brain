@@ -83,8 +83,16 @@ const tabs = computed(() => [
 ])
 
 async function loadAccessData() {
-  loading.value = true
   accessError.value = null
+  if (!projectId.value) {
+    rolesList.value = []
+    usersList.value = []
+    assignmentsList.value = []
+    grantsList.value = []
+    permissionCatalog.value = []
+    return
+  }
+  loading.value = true
   const pid = encodeURIComponent(projectId.value)
   try {
     const [rRes, uRes, aRes, gRes, pRes] = await Promise.allSettled([

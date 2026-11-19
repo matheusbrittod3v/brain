@@ -371,29 +371,16 @@ defineShortcuts({
       </template>
 
       <template #body>
-        <div class="max-w-7xl w-full mx-auto">
-          <UCard v-if="!loadingData && projectsList.length === 0 && workspace !== 'profile'" class="border border-default">
-            <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-              <div class="space-y-1">
-                <h2 class="text-base font-semibold text-highlighted">Nenhum projeto vinculado</h2>
-                <p class="text-xs text-muted">
-                  Sua conta possui acesso ao sistema, mas não há projetos vinculados no momento. Nenhum dado de projeto está visível.
-                </p>
-              </div>
-              <div class="flex items-center gap-2 shrink-0">
-                <UButton
-                  size="sm"
-                  color="primary"
-                  variant="soft"
-                  icon="i-lucide-user-circle"
-                  @click="profileInitialTab = 'overview'; workspace = 'profile'"
-                >
-                  Abrir Perfil
-                </UButton>
-              </div>
-            </div>
-          </UCard>
-          <Transition v-else name="workspace-fade" mode="out-in">
+        <div class="max-w-7xl w-full mx-auto space-y-4">
+          <UAlert
+            v-if="!loadingData && projectsList.length === 0 && workspace !== 'profile'"
+            color="neutral"
+            variant="subtle"
+            icon="i-lucide-folder-x"
+            title="Nenhum projeto vinculado"
+            description="Você tem acesso ao sistema e às guias permitidas, mas nenhum projeto está vinculado à sua conta (os dados de projeto ficam ocultos)."
+          />
+          <Transition name="workspace-fade" mode="out-in">
             <!-- WORKSPACE: PROJECTS -->
             <ProjectsOverviewWorkspace
               v-if="workspace === 'projects'"

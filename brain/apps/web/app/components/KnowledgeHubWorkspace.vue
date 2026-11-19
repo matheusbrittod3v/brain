@@ -40,6 +40,10 @@ const inspected = ref<KnowledgeItemRow | null>(null)
 const inspectorTab = ref<'read' | 'edit' | 'versions' | 'relations'>('read')
 
 async function loadSkills() {
+  if (!projectId.value) {
+    fetchedSkills.value = []
+    return
+  }
   try {
     const res = await apiFetch<{ skills: KnowledgeItemRow[] }>(`/v1/projects/${encodeURIComponent(projectId.value)}/skills`)
     fetchedSkills.value = res.skills ?? []

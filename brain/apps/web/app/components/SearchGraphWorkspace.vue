@@ -31,6 +31,12 @@ const graphNodes = ref<Array<{ id: string; title?: string; type?: string; status
 const graphEdges = ref<Array<{ from: string; to: string; relation: string }>>([])
 
 async function runSearchAndGraph() {
+  if (!projectId.value) {
+    searchHits.value = []
+    graphNodes.value = []
+    graphEdges.value = []
+    return
+  }
   loading.value = true
   const pid = encodeURIComponent(projectId.value)
   try {

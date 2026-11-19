@@ -10,6 +10,10 @@ const enterpriseData = ref<{
 } | null>(null)
 
 async function loadEnterprise() {
+  if (!projectId.value) {
+    enterpriseData.value = null
+    return
+  }
   loading.value = true
   try {
     enterpriseData.value = await apiFetch(`/v1/projects/${encodeURIComponent(projectId.value)}/enterprise/views`)
