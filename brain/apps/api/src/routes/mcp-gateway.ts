@@ -14,6 +14,7 @@ import type { PostgresKnowledgeRepository } from "@brain/knowledge";
 import { createBrainMcpServer, createRunnerSchedule } from "@brain/mcp-server";
 import type { PostgresMemoryManager } from "@brain/memory";
 import type { AsyncRetrievalEngine, PostgresRetrievalEngine } from "@brain/retrieval";
+import { enqueueEmbedJob } from "@brain/worker";
 import { sha256Hex } from "./oauth-pkce.js";
 
 export interface McpGatewayDeps {
@@ -208,6 +209,25 @@ export function registerMcpGatewayRoutes(app: FastifyInstance, deps: McpGatewayD
             scheduleId: await createRunnerSchedule(input, input.cron, process.env.DATABASE_SYSTEM_URL ?? process.env.DATABASE_URL!)
           })
         : undefined,
+      enqueueEmbedding:
+        process.env.BRAIN_PG_BOSS === "1" && process.env.DATABASE_URL
+          ? async (item: {
+              tenantId: string;
+              projectId: string;
+              id: string;
+              sourceVersion: string;
+              accessPolicyId: string;
+              content: string;
+            }) =>
+              enqueueEmbedJob({
+                tenantId: item.tenantId,
+                projectId: item.projectId,
+                itemId: item.id,
+                sourceVersion: item.sourceVersion,
+                accessPolicyId: item.accessPolicyId,
+                content: item.content
+              })
+          : undefined,
       opRepo: deps.opRepo,
       memory: deps.pgMemory,
       knowledge: deps.pgKnowledge,

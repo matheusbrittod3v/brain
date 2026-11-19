@@ -170,6 +170,7 @@ export function registerCodeTopologyTools(
         });
         if (runtime.knowledge) await runtime.knowledge.upsertItem(ctx, item);
         if (runtime.retrieval.upsertItem) await runtime.retrieval.upsertItem(item);
+        if (runtime.enqueueEmbedding) await runtime.enqueueEmbedding(item).catch(() => null);
         indexed += 1;
       }
 
@@ -264,6 +265,7 @@ export function registerCodeTopologyTools(
       };
       if (runtime.knowledge) await runtime.knowledge.upsertItem(ctx, updated);
       if (runtime.retrieval.upsertItem) await runtime.retrieval.upsertItem(updated);
+      if (runtime.enqueueEmbedding) await runtime.enqueueEmbedding(updated).catch(() => null);
       runtime.retrieval.invalidateCache?.(ctx.tenantId, projectId);
       return okJson({ updated: true, item: updated });
     }
@@ -347,6 +349,7 @@ export function registerCodeTopologyTools(
       });
       if (runtime.knowledge) await runtime.knowledge.upsertItem(ctx, item);
       if (runtime.retrieval.upsertItem) await runtime.retrieval.upsertItem(item);
+      if (runtime.enqueueEmbedding) await runtime.enqueueEmbedding(item).catch(() => null);
       runtime.retrieval.invalidateCache?.(ctx.tenantId, projectId);
       return okJson({ registered: true, contract: item });
     }

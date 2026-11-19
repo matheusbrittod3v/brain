@@ -67,6 +67,7 @@ export interface BrainRuntime {
   approvals?: ApprovalQueue | PostgresApprovalQueue;
   crossServiceRegistry?: AnalyzeDistributedImpactOptions["crossServiceRegistry"];
   scheduleRunnerTask?: (input: RunnerSchedulePayload & { cron: string }) => Promise<{ scheduleId: string }>;
+  enqueueEmbedding?: (item: KnowledgeItem) => Promise<string | null>;
   opRepo?: PgOperationalRepository;
   memory?: Pick<PostgresMemoryManager, "listVisible">;
   knowledge?: Pick<KnowledgeRepository, "listVersions" | "upsertItem"> & {
@@ -83,6 +84,7 @@ export function createBrainRuntime(
     workspaceRoot?: string;
     workspaceRoots?: Readonly<Record<string, string>>;
     scheduleRunnerTask?: (input: RunnerSchedulePayload & { cron: string }) => Promise<{ scheduleId: string }>;
+  enqueueEmbedding?: (item: KnowledgeItem) => Promise<string | null>;
   } = {}
 ): BrainRuntime {
   if (!audit || typeof audit.record !== "function") {
@@ -110,6 +112,7 @@ export interface CreateSqlBrainRuntimeOptions {
   workspaceRoot?: string;
   workspaceRoots?: Readonly<Record<string, string>>;
   scheduleRunnerTask?: (input: RunnerSchedulePayload & { cron: string }) => Promise<{ scheduleId: string }>;
+  enqueueEmbedding?: (item: KnowledgeItem) => Promise<string | null>;
 }
 
 export function createSqlBrainRuntime(
