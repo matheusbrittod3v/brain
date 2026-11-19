@@ -130,17 +130,20 @@ const finopsTotalCost = computed(() => {
   return Number((llm + infra).toFixed(4))
 })
 
+const colorMode = useColorMode()
+const isDark = computed(() => colorMode.value === 'dark')
+
 const typeChartOption = computed<echarts.EChartsOption>(() => {
   const entries = Object.entries(props.overviewData?.summary?.byType ?? {})
   return {
     tooltip: { trigger: 'item' },
-    legend: { bottom: 0, textStyle: { color: '#94a3b8', fontSize: 11 } },
+    legend: { bottom: 0, textStyle: { color: isDark.value ? '#94a3b8' : '#475569', fontSize: 11 } },
     series: [
       {
         type: 'pie',
         radius: ['48%', '72%'],
         center: ['50%', '43%'],
-        itemStyle: { borderRadius: 6, borderColor: '#0f172a', borderWidth: 2 },
+        itemStyle: { borderRadius: 6, borderColor: isDark.value ? '#0f172a' : '#ffffff', borderWidth: 2 },
         label: { show: false },
         data: entries.map(([name, value]) => ({ name, value }))
       }

@@ -304,11 +304,11 @@ defineShortcuts({
 
 <template>
   <!-- Gate neutro até validar sessão no backend (sem piscar login ou painel antes da hora) -->
-  <div v-if="!authChecked || (authRestoring && apiKey)" class="min-h-screen w-full flex flex-col items-center justify-center bg-slate-950 text-slate-100">
+  <div v-if="!authChecked || (authRestoring && apiKey)" class="min-h-screen w-full flex flex-col items-center justify-center bg-default text-highlighted">
     <div class="w-12 h-12 rounded-2xl bg-gradient-to-br from-indigo-500/25 to-sky-500/20 border border-indigo-500/35 flex items-center justify-center shadow-lg animate-pulse mb-3">
       <UIcon name="i-lucide-brain-circuit" class="w-6 h-6 text-primary" />
     </div>
-    <div class="text-xs font-mono text-slate-400 flex items-center gap-2">
+    <div class="text-xs font-mono text-muted flex items-center gap-2">
       <UIcon name="i-lucide-loader-2" class="size-3.5 animate-spin text-primary" />
       Verificando sessão do Brain...
     </div>

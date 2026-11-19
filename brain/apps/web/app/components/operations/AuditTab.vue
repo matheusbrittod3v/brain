@@ -122,7 +122,7 @@ function copyInspectedJson() {
               {{ copied ? 'Copiado' : 'Copiar JSON' }}
             </UButton>
           </div>
-          <pre class="text-xs font-mono bg-slate-950 p-4 rounded-lg border border-default overflow-auto">{{ JSON.stringify(inspectedLog, null, 2) }}</pre>
+          <pre class="text-xs font-mono bg-elevated text-default p-4 rounded-lg border border-default overflow-auto">{{ JSON.stringify(inspectedLog, null, 2) }}</pre>
         </div>
       </template>
     </USlideover>

@@ -112,7 +112,7 @@ async function onRegister() {
 </script>
 
 <template>
-  <div class="min-h-screen flex flex-col justify-between bg-slate-950 text-slate-50 relative overflow-hidden">
+  <div class="min-h-screen flex flex-col justify-between bg-default text-highlighted relative overflow-hidden">
     <!-- Subtle Grid & Ambient Glow -->
     <div
       class="pointer-events-none absolute inset-0 opacity-[0.04]"
@@ -125,14 +125,14 @@ async function onRegister() {
     <header class="relative z-10 max-w-6xl w-full mx-auto px-6 py-5 flex items-center justify-between">
       <div class="flex items-center gap-2.5">
         <div class="w-9 h-9 rounded-xl bg-indigo-500/20 border border-indigo-400/40 flex items-center justify-center shadow-lg shadow-indigo-500/10">
-          <UIcon name="i-lucide-brain-circuit" class="w-5 h-5 text-indigo-400" />
+          <UIcon name="i-lucide-brain-circuit" class="w-5 h-5 text-indigo-500 dark:text-indigo-400" />
         </div>
         <span class="font-bold text-lg tracking-tight">Brain</span>
         <UBadge color="primary" variant="subtle" size="xs">Brain OS 2.0</UBadge>
       </div>
 
       <div class="flex items-center gap-3">
-        <span class="hidden sm:inline-flex items-center gap-1.5 text-xs text-slate-400 bg-slate-900/80 border border-slate-800 px-3 py-1.5 rounded-full">
+        <span class="hidden sm:inline-flex items-center gap-1.5 text-xs text-muted bg-elevated/80 border border-default px-3 py-1.5 rounded-full">
           <span class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
           Better Auth + Argon2id + CASL
         </span>
@@ -163,62 +163,62 @@ async function onRegister() {
     <main class="relative z-10 max-w-6xl w-full mx-auto px-6 py-8 lg:py-12 grid grid-cols-1 lg:grid-cols-12 gap-10 lg:gap-12 items-center">
       <!-- Left: Landing Hero -->
       <div class="lg:col-span-7 space-y-6">
-        <div class="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-indigo-500/10 border border-indigo-500/30 text-indigo-300 text-xs font-medium">
+        <div class="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-indigo-500/10 border border-indigo-500/30 text-indigo-600 dark:text-indigo-300 text-xs font-medium">
           <UIcon name="i-lucide-sparkles" class="w-3.5 h-3.5" />
           Engenharia Guiada por Conhecimento &amp; FinOps
         </div>
 
-        <h1 class="text-4xl sm:text-5xl font-extrabold tracking-tight leading-[1.08] bg-gradient-to-br from-white via-slate-100 to-slate-400 bg-clip-text text-transparent">
+        <h1 class="text-4xl sm:text-5xl font-extrabold tracking-tight leading-[1.08] bg-gradient-to-br from-slate-900 via-slate-800 to-slate-600 dark:from-white dark:via-slate-100 dark:to-slate-400 bg-clip-text text-transparent">
           O Cérebro Corporativo para Times &amp; Agentes Autônomos.
         </h1>
 
-        <p class="text-base text-slate-400 max-w-xl leading-relaxed">
+        <p class="text-base text-muted max-w-xl leading-relaxed">
           Centralize regras de negócio, ADRs, grafo de dependências e análise de impacto com isolamento multi-projeto, controle de acesso CASL e governança financeira em tempo real.
         </p>
 
         <div class="grid grid-cols-1 sm:grid-cols-3 gap-4 pt-2">
-          <div class="p-4 rounded-xl border border-slate-800/90 bg-slate-900/60 backdrop-blur hover:border-emerald-500/40 transition-colors">
-            <UIcon name="i-lucide-shield-check" class="w-5 h-5 text-emerald-400 mb-2.5" />
-            <div class="font-semibold text-sm text-slate-100">Acesso Zero-Trust</div>
-            <p class="text-xs text-slate-400 mt-1 leading-relaxed">RLS no PostgreSQL, CASL RBAC e OAuth2 Device Flow para MCP.</p>
+          <div class="p-4 rounded-xl border border-default bg-elevated/60 backdrop-blur hover:border-emerald-500/40 transition-colors">
+            <UIcon name="i-lucide-shield-check" class="w-5 h-5 text-emerald-500 dark:text-emerald-400 mb-2.5" />
+            <div class="font-semibold text-sm text-highlighted">Acesso Zero-Trust</div>
+            <p class="text-xs text-muted mt-1 leading-relaxed">RLS no PostgreSQL, CASL RBAC e OAuth2 Device Flow para MCP.</p>
           </div>
 
-          <div class="p-4 rounded-xl border border-slate-800/90 bg-slate-900/60 backdrop-blur hover:border-indigo-500/40 transition-colors">
-            <UIcon name="i-lucide-network" class="w-5 h-5 text-indigo-400 mb-2.5" />
-            <div class="font-semibold text-sm text-slate-100">Grafo &amp; Impacto</div>
-            <p class="text-xs text-slate-400 mt-1 leading-relaxed">Busca vetorial HNSW, AST Tree-sitter e blast radius antes do deploy.</p>
+          <div class="p-4 rounded-xl border border-default bg-elevated/60 backdrop-blur hover:border-indigo-500/40 transition-colors">
+            <UIcon name="i-lucide-network" class="w-5 h-5 text-indigo-500 dark:text-indigo-400 mb-2.5" />
+            <div class="font-semibold text-sm text-highlighted">Grafo &amp; Impacto</div>
+            <p class="text-xs text-muted mt-1 leading-relaxed">Busca vetorial HNSW, AST Tree-sitter e blast radius antes do deploy.</p>
           </div>
 
-          <div class="p-4 rounded-xl border border-slate-800/90 bg-slate-900/60 backdrop-blur hover:border-sky-500/40 transition-colors">
-            <UIcon name="i-lucide-zap" class="w-5 h-5 text-sky-400 mb-2.5" />
-            <div class="font-semibold text-sm text-slate-100">FinOps &amp; Downgrade</div>
-            <p class="text-xs text-slate-400 mt-1 leading-relaxed">Cotas por área com fallback automático para Ollama local.</p>
+          <div class="p-4 rounded-xl border border-default bg-elevated/60 backdrop-blur hover:border-sky-500/40 transition-colors">
+            <UIcon name="i-lucide-zap" class="w-5 h-5 text-sky-500 dark:text-sky-400 mb-2.5" />
+            <div class="font-semibold text-sm text-highlighted">FinOps &amp; Downgrade</div>
+            <p class="text-xs text-muted mt-1 leading-relaxed">Cotas por área com fallback automático para Ollama local.</p>
           </div>
         </div>
 
-        <div class="flex flex-wrap items-center gap-2 pt-2 text-[11px] text-slate-400">
-          <span class="px-2.5 py-1 rounded-md bg-slate-900/80 border border-slate-800 font-mono">Bun + Fastify</span>
-          <span class="px-2.5 py-1 rounded-md bg-slate-900/80 border border-slate-800 font-mono">PostgreSQL + pgvector HNSW</span>
-          <span class="px-2.5 py-1 rounded-md bg-slate-900/80 border border-slate-800 font-mono">MCP Streamable HTTP</span>
-          <span class="px-2.5 py-1 rounded-md bg-slate-900/80 border border-slate-800 font-mono">Arcjet WAF</span>
+        <div class="flex flex-wrap items-center gap-2 pt-2 text-[11px] text-muted">
+          <span class="px-2.5 py-1 rounded-md bg-elevated/80 border border-default font-mono">Bun + Fastify</span>
+          <span class="px-2.5 py-1 rounded-md bg-elevated/80 border border-default font-mono">PostgreSQL + pgvector HNSW</span>
+          <span class="px-2.5 py-1 rounded-md bg-elevated/80 border border-default font-mono">MCP Streamable HTTP</span>
+          <span class="px-2.5 py-1 rounded-md bg-elevated/80 border border-default font-mono">Arcjet WAF</span>
         </div>
       </div>
 
       <!-- Right: Auth Card -->
       <div class="lg:col-span-5">
-        <UCard class="border-slate-800/90 bg-slate-900/85 backdrop-blur-xl shadow-2xl shadow-indigo-950/30">
+        <UCard class="border-default bg-default/90 backdrop-blur-xl shadow-2xl shadow-indigo-500/10 dark:shadow-indigo-950/30">
           <template #header>
             <div class="space-y-1">
               <div class="flex items-center justify-between">
-                <h2 class="text-lg font-bold text-white">
+                <h2 class="text-lg font-bold text-highlighted">
                   {{ activeTab === 'login' ? 'Entrar no Command Center' : 'Criar sua Conta' }}
                 </h2>
                 <UIcon
                   :name="activeTab === 'login' ? 'i-lucide-lock' : 'i-lucide-user-plus'"
-                  class="w-5 h-5 text-indigo-400"
+                  class="w-5 h-5 text-indigo-500 dark:text-indigo-400"
                 />
               </div>
-              <p class="text-xs text-slate-400">
+              <p class="text-xs text-muted">
                 {{
                   activeTab === 'login'
                     ? 'Autentique-se com seu email e senha para desbloquear os workspaces.'
@@ -234,7 +234,7 @@ async function onRegister() {
               v-if="tabs.length > 1"
               role="tablist"
               aria-label="Modo de autenticação"
-              class="grid grid-cols-2 gap-1.5 p-1 rounded-xl bg-slate-950/90 border border-slate-800"
+              class="grid grid-cols-2 gap-1.5 p-1 rounded-xl bg-elevated border border-default"
             >
               <button
                 v-for="tab in tabs"
@@ -246,7 +246,7 @@ async function onRegister() {
                 :class="
                   activeTab === tab.value
                     ? 'bg-indigo-600 text-white shadow-sm shadow-indigo-600/30'
-                    : 'text-slate-400 hover:text-slate-200 hover:bg-slate-900/60'
+                    : 'text-muted hover:text-highlighted hover:bg-default/60'
                 "
                 @click="activeTab = tab.value"
               >
@@ -302,8 +302,8 @@ async function onRegister() {
                 Entrar no Brain
               </UButton>
 
-              <div class="pt-3 border-t border-slate-800/80 space-y-2">
-                <div class="text-[11px] text-slate-400 font-medium text-center">
+              <div class="pt-3 border-t border-default space-y-2">
+                <div class="text-[11px] text-muted font-medium text-center">
                   Acesso Rápido / Demonstração:
                 </div>
                 <div class="grid grid-cols-2 gap-2">
@@ -334,11 +334,11 @@ async function onRegister() {
                 </div>
               </div>
 
-              <p v-if="authConfig.registrationEnabled" class="text-center text-xs text-slate-400 pt-1">
+              <p v-if="authConfig.registrationEnabled" class="text-center text-xs text-muted pt-1">
                 Ainda não possui acesso?
                 <button
                   type="button"
-                  class="text-indigo-400 hover:text-indigo-300 font-medium underline underline-offset-2 cursor-pointer"
+                  class="text-indigo-600 dark:text-indigo-400 hover:text-indigo-500 dark:hover:text-indigo-300 font-medium underline underline-offset-2 cursor-pointer"
                   @click="activeTab = 'register'"
                 >
                   Criar conta agora
@@ -413,11 +413,11 @@ async function onRegister() {
                   Criar Conta
                 </UButton>
 
-                <p class="text-center text-xs text-slate-400 pt-1">
+                <p class="text-center text-xs text-muted pt-1">
                   Já possui conta?
                   <button
                     type="button"
-                    class="text-indigo-400 hover:text-indigo-300 font-medium underline underline-offset-2 cursor-pointer"
+                    class="text-indigo-600 dark:text-indigo-400 hover:text-indigo-500 dark:hover:text-indigo-300 font-medium underline underline-offset-2 cursor-pointer"
                     @click="activeTab = 'login'"
                   >
                     Entrar com email e senha
@@ -428,9 +428,9 @@ async function onRegister() {
           </div>
 
           <template #footer>
-            <div class="flex items-center justify-between text-[11px] text-slate-500">
+            <div class="flex items-center justify-between text-[11px] text-muted">
               <span>Login web exclusivo via usuário (CLI/MCP usam OAuth2)</span>
-              <span v-if="!authConfig.registrationEnabled" class="text-amber-400/90">Cadastro restrito</span>
+              <span v-if="!authConfig.registrationEnabled" class="text-amber-600 dark:text-amber-400/90">Cadastro restrito</span>
             </div>
           </template>
         </UCard>
@@ -438,7 +438,7 @@ async function onRegister() {
     </main>
 
     <!-- Footer -->
-    <footer class="relative z-10 max-w-6xl w-full mx-auto px-6 py-4 border-t border-slate-900 flex flex-wrap gap-2 items-center justify-between text-xs text-slate-500">
+    <footer class="relative z-10 max-w-6xl w-full mx-auto px-6 py-4 border-t border-default flex flex-wrap gap-2 items-center justify-between text-xs text-muted">
       <span>Brain Project Brain OS · Bun + Nuxt UI</span>
       <span>Isolamento RLS &amp; Conformidade LGPD</span>
     </footer>

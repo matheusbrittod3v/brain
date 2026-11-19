@@ -4,6 +4,8 @@ import IntentSearchModal from './daily/IntentSearchModal.vue'
 import Search3DGraph, { type GraphNodeItem } from './Search3DGraph.vue'
 
 const { projectId, apiFetch, notify, liveSyncTick } = useBrainApi()
+const colorMode = useColorMode()
+const isDark = computed(() => colorMode.value === 'dark')
 
 const emit = defineEmits<{
   inspect: [item: { title: string; content: string; type?: string; status?: string }]
@@ -214,7 +216,7 @@ function build2DGraphOption(layout: 'force' | 'circular' | 'none') {
       symbolSize: isRoot ? 32 : Math.min(28, 16 + deg * 2.2),
       itemStyle: {
         color: isRoot ? '#38bdf8' : n.status === 'approved' ? '#10b981' : n.status === 'draft' ? '#f59e0b' : '#6366f1',
-        borderColor: isRoot ? '#e0f2fe' : '#0f172a',
+        borderColor: isRoot ? (isDark.value ? '#e0f2fe' : '#0284c7') : (isDark.value ? '#0f172a' : '#ffffff'),
         borderWidth: isRoot ? 3 : 1.5
       }
     }
@@ -230,7 +232,7 @@ function build2DGraphOption(layout: 'force' | 'circular' | 'none') {
       opacity: 0.75,
       curveness: layout === 'circular' ? 0.28 : layout === 'none' ? 0.15 : 0.16
     },
-    label: { show: showEdgeLabels.value, formatter: e.relation, fontSize: 9, color: '#94a3b8' }
+    label: { show: showEdgeLabels.value, formatter: e.relation, fontSize: 9, color: isDark.value ? '#94a3b8' : '#475569' }
   }))
 
   return {
@@ -463,7 +465,7 @@ function exportGraphJson() {
         title="Nenhum nó indexado no grafo"
         description="Ingira regras de negócio, ADRs ou código-fonte neste projeto para visualizar a topologia."
       />
-      <div v-else class="relative bg-slate-950/85 min-h-[420px] rounded-b-xl overflow-hidden">
+      <div v-else class="relative bg-elevated/30 min-h-[420px] rounded-b-xl overflow-hidden">
         <!-- 1. 3D Orbit View -->
         <div v-if="graphViewMode === '3d_orbit'">
           <Search3DGraph
@@ -495,7 +497,7 @@ function exportGraphJson() {
             <h4 class="font-semibold text-sm text-highlighted">Matriz de Conexão entre Tipos de Nós</h4>
             <p class="text-xs text-muted">Intensidade de relacionamentos entre regras, ADRs, código e specs.</p>
           </div>
-          <div class="overflow-x-auto rounded-xl border border-default bg-slate-900/60 p-4">
+          <div class="overflow-x-auto rounded-xl border border-default bg-elevated/60 p-4">
             <table class="w-full text-xs text-left border-collapse">
               <thead>
                 <tr class="border-b border-default text-muted">
@@ -506,12 +508,12 @@ function exportGraphJson() {
                 </tr>
               </thead>
               <tbody>
-                <tr v-for="(row, rIdx) in matrixTypes.types" :key="row" class="border-b border-default/50 hover:bg-slate-800/40">
-                  <td class="p-2 font-medium font-mono text-sky-400">{{ row }}</td>
+                <tr v-for="(row, rIdx) in matrixTypes.types" :key="row" class="border-b border-default/50 hover:bg-elevated/60">
+                  <td class="p-2 font-medium font-mono text-sky-500 dark:text-sky-400">{{ row }}</td>
                   <td v-for="(col, cIdx) in matrixTypes.types" :key="col" class="p-2 text-center font-mono font-bold">
                     <span
                       class="inline-block px-2 py-0.5 rounded text-xs"
-                      :class="matrixTypes.matrix[rIdx]![cIdx]! > 0 ? 'bg-primary/20 text-primary-light border border-primary/30' : 'text-slate-600'"
+                      :class="matrixTypes.matrix[rIdx]![cIdx]! > 0 ? 'bg-primary/20 text-primary border border-primary/30' : 'text-muted'"
                     >
                       {{ matrixTypes.matrix[rIdx]![cIdx] }}
                     </span>
@@ -530,7 +532,7 @@ function exportGraphJson() {
               {{ mermaidCopied ? 'Copiado!' : 'Copiar Mermaid' }}
             </UButton>
           </div>
-          <pre class="p-4 rounded-xl bg-slate-900 border border-slate-800 text-slate-300 font-mono text-xs overflow-x-auto max-h-[420px] select-all"><code>{{ generatedMermaid }}</code></pre>
+          <pre class="p-4 rounded-xl bg-elevated border border-default text-default font-mono text-xs overflow-x-auto max-h-[420px] select-all"><code>{{ generatedMermaid }}</code></pre>
         </div>
       </div>
     </UCard>

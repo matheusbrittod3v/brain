@@ -2,6 +2,9 @@
 import type * as echarts from 'echarts'
 import { KNOWLEDGE_LAYERS, parseVisualGraphFromContent, type KnowledgeFormat } from './knowledgeUtils'
 
+const colorMode = useColorMode()
+const isDark = computed(() => colorMode.value === 'dark')
+
 const props = defineProps<{
   content: string
   format?: KnowledgeFormat
@@ -51,7 +54,7 @@ const chartOption = computed<echarts.EChartsOption>(() => {
           symbolSize: 26,
           itemStyle: {
             color: (n.layer && layerColorMap.get(n.layer as any)) || '#6366f1',
-            borderColor: '#0f172a',
+            borderColor: isDark.value ? '#0f172a' : '#ffffff',
             borderWidth: 2
           }
         })),
@@ -83,7 +86,7 @@ const chartOption = computed<echarts.EChartsOption>(() => {
     </div>
 
     <template v-if="hasVisual && viewMode === 'visual'">
-      <div v-if="parsedGraph" class="rounded-xl border border-default bg-slate-950/60 p-2">
+      <div v-if="parsedGraph" class="rounded-xl border border-default bg-elevated/40 p-2">
         <EChartBox :option="chartOption" height="320px" />
       </div>
 

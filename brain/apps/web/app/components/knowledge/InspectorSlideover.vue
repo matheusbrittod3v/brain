@@ -258,7 +258,7 @@ const targetRelationOptions = computed(() =>
                 Restaurar esta Versão
               </UButton>
             </div>
-            <div class="rounded-xl border border-default bg-slate-950 p-3 font-mono text-[11px] max-h-96 overflow-auto space-y-0.5">
+            <div class="rounded-xl border border-default bg-elevated p-3 font-mono text-[11px] max-h-96 overflow-auto space-y-0.5">
               <div
                 v-for="(line, i) in versionDiffLines"
                 :key="i"
@@ -268,7 +268,7 @@ const targetRelationOptions = computed(() =>
                     ? 'bg-emerald-500/15 text-emerald-300'
                     : line.kind === 'del'
                       ? 'bg-rose-500/15 text-rose-300 line-through'
-                      : 'text-slate-300'
+                      : 'text-default'
                 "
               >
                 <span class="select-none mr-1.5 opacity-60">{{ line.kind === 'add' ? '+' : line.kind === 'del' ? '-' : ' ' }}</span>{{ line.text || ' ' }}

@@ -30,6 +30,8 @@ const emit = defineEmits<{
 type ViewMode = '3d_stack' | '2d_force' | '2d_circular' | 'hierarchy_flow' | 'matrix' | 'mermaid'
 
 const viewMode = ref<ViewMode>('3d_stack')
+const colorMode = useColorMode()
+const isDark = computed(() => colorMode.value === 'dark')
 const searchQuery = ref('')
 const selectedLayer = ref<'all' | KnowledgeLayer>('all')
 const selectedNodeForDetail = ref<TopologyItem | null>(null)
@@ -159,12 +161,12 @@ const forceGraphOption = computed<echarts.EChartsOption>(() => {
       category: meta.id,
       itemStyle: {
         color: meta.color,
-        borderColor: '#0f172a',
+        borderColor: isDark.value ? '#0f172a' : '#ffffff',
         borderWidth: 3,
         shadowBlur: 14,
         shadowColor: meta.color
       },
-      label: { show: true, position: 'top', color: '#f8fafc', fontWeight: 'bold', fontSize: 11 }
+      label: { show: true, position: 'top', color: isDark.value ? '#f8fafc' : '#0f172a', fontWeight: 'bold', fontSize: 11 }
     })
   }
 
@@ -180,7 +182,7 @@ const forceGraphOption = computed<echarts.EChartsOption>(() => {
       itemStyle: {
         color: meta.color,
         opacity: 0.9,
-        borderColor: '#0f172a',
+        borderColor: isDark.value ? '#0f172a' : '#ffffff',
         borderWidth: 1.5
       },
       rawItem: item
@@ -222,9 +224,9 @@ const forceGraphOption = computed<echarts.EChartsOption>(() => {
         const layer = inferKnowledgeLayer(item)
         return `
           <div class="text-xs space-y-1 p-1">
-            <div class="font-bold text-slate-100">${item.title}</div>
-            <div class="text-slate-400">Tipo: <span class="text-sky-400 font-mono">${item.type}</span></div>
-            <div class="text-slate-400">Camada: <span class="font-semibold" style="color: ${layerMetaMap.get(layer)?.color}">${layerMetaMap.get(layer)?.label}</span></div>
+            <div class="font-bold">${item.title}</div>
+            <div class="opacity-80">Tipo: <span class="font-mono font-semibold">${item.type}</span></div>
+            <div class="opacity-80">Camada: <span class="font-semibold" style="color: ${layerMetaMap.get(layer)?.color}">${layerMetaMap.get(layer)?.label}</span></div>
           </div>
         `
       }
@@ -545,7 +547,7 @@ function handleNodeClick(item: any) {
       </template>
 
       <!-- View Containers -->
-      <div class="relative bg-slate-950/80 min-h-[520px] rounded-b-xl overflow-hidden">
+      <div class="relative bg-elevated/30 min-h-[520px] rounded-b-xl overflow-hidden">
         <!-- 1. 3D Isometric Canvas View -->
         <div v-if="viewMode === '3d_stack'" class="w-full h-full min-h-[520px]">
           <Isometric3DGraph :items="props.items" @inspect-item="handleNodeClick" />
@@ -585,7 +587,7 @@ function handleNodeClick(item: any) {
             <p class="text-xs text-muted">Mede a quantidade de regras, dependências e contratos conectando cada camada.</p>
           </div>
 
-          <div class="overflow-x-auto rounded-xl border border-default bg-slate-900/60 p-4">
+          <div class="overflow-x-auto rounded-xl border border-default bg-elevated/60 p-4">
             <table class="w-full text-xs text-left border-collapse">
               <thead>
                 <tr class="border-b border-default text-muted">
@@ -604,7 +606,7 @@ function handleNodeClick(item: any) {
                 <tr
                   v-for="(row, rIdx) in layerMatrixData.layers"
                   :key="row.id"
-                  class="border-b border-default/50 hover:bg-slate-800/40"
+                  class="border-b border-default/50 hover:bg-elevated/60"
                 >
                   <td class="p-2.5 font-medium" :style="{ color: row.color }">
                     {{ row.label }}
@@ -617,8 +619,8 @@ function handleNodeClick(item: any) {
                     <span
                       class="inline-block px-2 py-0.5 rounded text-xs"
                       :class="layerMatrixData.matrix[rIdx]![cIdx]! > 0
-                        ? 'bg-primary/20 text-primary-light border border-primary/30'
-                        : 'text-slate-600'"
+                        ? 'bg-primary/20 text-primary border border-primary/30'
+                        : 'text-muted'"
                     >
                       {{ layerMatrixData.matrix[rIdx]![cIdx] }}
                     </span>
@@ -645,7 +647,7 @@ function handleNodeClick(item: any) {
               {{ copied ? 'Copiado!' : 'Copiar Diagrama' }}
             </UButton>
           </div>
-          <pre class="p-4 rounded-xl bg-slate-900 border border-slate-800 text-slate-300 font-mono text-xs overflow-x-auto max-h-[460px] leading-relaxed select-all"><code>{{ generatedMermaidCode }}</code></pre>
+          <pre class="p-4 rounded-xl bg-elevated border border-default text-default font-mono text-xs overflow-x-auto max-h-[460px] leading-relaxed select-all"><code>{{ generatedMermaidCode }}</code></pre>
         </div>
       </div>
     </UCard>
@@ -679,7 +681,7 @@ function handleNodeClick(item: any) {
             </UBadge>
           </div>
 
-          <div class="p-3 bg-elevated rounded-lg max-h-60 overflow-y-auto text-xs font-mono text-slate-300 whitespace-pre-wrap border border-default">
+          <div class="p-3 bg-elevated rounded-lg max-h-60 overflow-y-auto text-xs font-mono text-default whitespace-pre-wrap border border-default">
             {{ selectedNodeForDetail.content.slice(0, 1000) }}
             <span v-if="selectedNodeForDetail.content.length > 1000" class="text-muted">...</span>
           </div>

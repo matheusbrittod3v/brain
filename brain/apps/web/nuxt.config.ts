@@ -12,7 +12,10 @@ export default defineNuxtConfig({
   app: {
     head: {
       style: [
-        { innerHTML: 'html,body{background-color:#020617;color:#f1f5f9;margin:0;}' }
+        {
+          innerHTML:
+            'html,body{background-color:#ffffff;color:#0f172a;margin:0;}html.dark,html.dark body{background-color:#020617;color:#f1f5f9;}'
+        }
       ]
     }
   },

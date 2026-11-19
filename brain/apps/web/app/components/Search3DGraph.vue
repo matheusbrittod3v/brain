@@ -1,4 +1,7 @@
 <script setup lang="ts">
+const colorMode = useColorMode()
+const isDark = computed(() => colorMode.value === 'dark')
+
 export interface GraphNodeItem {
   id: string
   title?: string
@@ -228,7 +231,7 @@ function drawScene() {
     ctx.arc(n.screenX, n.screenY, r, 0, Math.PI * 2)
     ctx.fill()
 
-    ctx.strokeStyle = isRoot ? '#f8fafc' : '#0f172a'
+    ctx.strokeStyle = isRoot ? (isDark.value ? '#f8fafc' : '#0f172a') : (isDark.value ? '#0f172a' : '#ffffff')
     ctx.lineWidth = isRoot ? 2.5 : 1.5
     ctx.stroke()
 
@@ -321,7 +324,7 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div ref="containerRef" class="relative w-full h-[450px] overflow-hidden rounded-xl bg-slate-950 select-none">
+  <div ref="containerRef" class="relative w-full h-[450px] overflow-hidden rounded-xl bg-elevated/40 select-none">
     <canvas
       ref="canvasRef"
       class="w-full h-full block cursor-grab active:cursor-grabbing"
@@ -334,11 +337,11 @@ onBeforeUnmount(() => {
     />
 
     <!-- 3D Controls Overlay -->
-    <div class="absolute bottom-3 right-3 flex items-center gap-1.5 bg-slate-900/80 backdrop-blur-md px-2.5 py-1.5 rounded-lg border border-slate-800 text-xs text-slate-300">
+    <div class="absolute bottom-3 right-3 flex items-center gap-1.5 bg-default/85 backdrop-blur-md px-2.5 py-1.5 rounded-lg border border-default text-xs text-default shadow-sm">
       <button
         type="button"
         class="px-2 py-0.5 rounded font-medium transition-colors"
-        :class="autoRotate ? 'bg-primary text-white shadow-xs' : 'text-slate-400 hover:text-white'"
+        :class="autoRotate ? 'bg-primary text-white shadow-xs' : 'text-muted hover:text-highlighted'"
         title="Ativar/Desativar Rotação Automática 360°"
         @click="autoRotate = !autoRotate"
       >
@@ -346,11 +349,11 @@ onBeforeUnmount(() => {
         Órbita
       </button>
 
-      <div class="h-3 w-px bg-slate-700 mx-1" />
+      <div class="h-3 w-px bg-default mx-1" />
 
       <button
         type="button"
-        class="px-1.5 py-0.5 text-slate-400 hover:text-white"
+        class="px-1.5 py-0.5 text-muted hover:text-highlighted"
         title="Aumentar Zoom"
         @click="zoom = Math.min(2.5, zoom * 1.15)"
       >
@@ -358,7 +361,7 @@ onBeforeUnmount(() => {
       </button>
       <button
         type="button"
-        class="px-1.5 py-0.5 text-slate-400 hover:text-white"
+        class="px-1.5 py-0.5 text-muted hover:text-highlighted"
         title="Diminuir Zoom"
         @click="zoom = Math.max(0.5, zoom * 0.85)"
       >
@@ -366,7 +369,7 @@ onBeforeUnmount(() => {
       </button>
       <button
         type="button"
-        class="px-1.5 py-0.5 text-slate-400 hover:text-white"
+        class="px-1.5 py-0.5 text-muted hover:text-highlighted"
         title="Resetar Câmera"
         @click="pitch = 25; yaw = -30; zoom = 1.1"
       >
@@ -377,16 +380,16 @@ onBeforeUnmount(() => {
     <!-- Node Hover Tooltip -->
     <div
       v-if="hoveredNode"
-      class="absolute z-20 pointer-events-none p-2.5 rounded-lg bg-slate-900/95 border border-slate-700/80 shadow-xl backdrop-blur-md text-xs text-slate-200 max-w-xs space-y-1"
+      class="absolute z-20 pointer-events-none p-2.5 rounded-lg bg-default/95 border border-default shadow-xl backdrop-blur-md text-xs text-default max-w-xs space-y-1"
       :style="{ left: `${tooltipPos.x}px`, top: `${tooltipPos.y}px` }"
     >
-      <div class="font-bold text-sky-400 font-mono truncate">{{ hoveredNode.id }}</div>
-      <div v-if="hoveredNode.title" class="text-slate-100 font-semibold text-xs">{{ hoveredNode.title }}</div>
-      <div class="flex items-center gap-2 text-[10px] text-slate-400 pt-0.5">
-        <span v-if="hoveredNode.type" class="px-1.5 py-0.5 rounded bg-slate-800 border border-slate-700">{{ hoveredNode.type }}</span>
-        <span v-if="hoveredNode.status" class="px-1.5 py-0.5 rounded bg-slate-800 border border-slate-700">{{ hoveredNode.status }}</span>
+      <div class="font-bold text-primary font-mono truncate">{{ hoveredNode.id }}</div>
+      <div v-if="hoveredNode.title" class="text-highlighted font-semibold text-xs">{{ hoveredNode.title }}</div>
+      <div class="flex items-center gap-2 text-[10px] text-muted pt-0.5">
+        <span v-if="hoveredNode.type" class="px-1.5 py-0.5 rounded bg-elevated border border-default">{{ hoveredNode.type }}</span>
+        <span v-if="hoveredNode.status" class="px-1.5 py-0.5 rounded bg-elevated border border-default">{{ hoveredNode.status }}</span>
       </div>
-      <div class="text-[10px] text-slate-400 italic">Clique para inspecionar</div>
+      <div class="text-[10px] text-muted italic">Clique para inspecionar</div>
     </div>
   </div>
 </template>

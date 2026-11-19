@@ -1,4 +1,7 @@
 <script setup lang="ts">
+const colorMode = useColorMode()
+const isDark = computed(() => colorMode.value === 'dark')
+
 import {
   KNOWLEDGE_LAYERS,
   inferKnowledgeLayer,
@@ -284,7 +287,7 @@ function drawScene() {
       ctx.lineWidth = 1.5
       ctx.stroke()
     } else {
-      ctx.strokeStyle = '#0f172a'
+      ctx.strokeStyle = isDark.value ? '#0f172a' : '#ffffff'
       ctx.lineWidth = 1.2
       ctx.stroke()
     }
@@ -292,7 +295,7 @@ function drawScene() {
     // Node Title (if zoomed in or hovered)
     if (zoom.value >= 1.05 || isHovered) {
       ctx.font = '9px monospace'
-      ctx.fillStyle = isHovered ? '#ffffff' : '#94a3b8'
+      ctx.fillStyle = isHovered ? (isDark.value ? '#ffffff' : '#0f172a') : (isDark.value ? '#94a3b8' : '#475569')
       ctx.fillText(n.item.title.slice(0, 15), n.screenX + 8, n.screenY + 3)
     }
   }
@@ -390,7 +393,7 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div ref="containerRef" class="relative rounded-xl border border-default bg-[#0a0f1d] overflow-hidden select-none">
+  <div ref="containerRef" class="relative rounded-xl border border-default bg-elevated/40 overflow-hidden select-none">
     <!-- 3D Canvas -->
     <canvas
       ref="canvasRef"
@@ -404,7 +407,7 @@ onBeforeUnmount(() => {
     />
 
     <!-- Interactive Overlay HUD -->
-    <div class="absolute top-3 left-3 flex flex-wrap items-center gap-2 bg-[#0f172a]/80 backdrop-blur border border-default/60 p-2 rounded-lg text-xs">
+    <div class="absolute top-3 left-3 flex flex-wrap items-center gap-2 bg-default/85 backdrop-blur border border-default/60 p-2 rounded-lg text-xs">
       <div class="flex items-center gap-1.5 pr-2 border-r border-default/60">
         <UIcon name="i-lucide-box" class="size-4 text-primary" />
         <span class="font-bold text-highlighted">3D Isometric Stack</span>
@@ -437,7 +440,7 @@ onBeforeUnmount(() => {
     </div>
 
     <!-- Sliders Overlay HUD -->
-    <div class="absolute bottom-3 left-3 flex items-center gap-4 bg-[#0f172a]/80 backdrop-blur border border-default/60 px-3 py-2 rounded-lg text-xs">
+    <div class="absolute bottom-3 left-3 flex items-center gap-4 bg-default/85 backdrop-blur border border-default/60 px-3 py-2 rounded-lg text-xs">
       <div class="flex items-center gap-2">
         <span class="text-muted text-[11px]">Espaçamento Z:</span>
         <input
@@ -466,7 +469,7 @@ onBeforeUnmount(() => {
     </div>
 
     <!-- Mini Layer Legend HUD -->
-    <div class="absolute top-3 right-3 flex flex-col gap-1 bg-[#0f172a]/80 backdrop-blur border border-default/60 p-2.5 rounded-lg text-[11px]">
+    <div class="absolute top-3 right-3 flex flex-col gap-1 bg-default/85 backdrop-blur border border-default/60 p-2.5 rounded-lg text-[11px]">
       <div
         v-for="layer in layersOrder"
         :key="layer"
@@ -482,7 +485,7 @@ onBeforeUnmount(() => {
     <!-- Node Hover Tooltip -->
     <div
       v-if="hoveredNode"
-      class="absolute pointer-events-none z-20 p-2.5 rounded-lg bg-[#0f172a]/95 border border-default shadow-xl text-xs space-y-1 max-w-xs"
+      class="absolute pointer-events-none z-20 p-2.5 rounded-lg bg-default/95 border border-default shadow-xl text-xs space-y-1 max-w-xs"
       :style="{ left: `${tooltipPos.x}px`, top: `${tooltipPos.y}px` }"
     >
       <div class="flex items-center justify-between gap-2">

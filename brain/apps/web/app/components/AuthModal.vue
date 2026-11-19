@@ -126,7 +126,7 @@ async function onRegister() {
 
         <!-- Tabs (somente quando não autenticado) -->
         <template v-if="!currentUser">
-        <div role="tablist" class="flex flex-wrap gap-1.5 p-1 rounded-xl bg-slate-950/90 border border-slate-800">
+        <div role="tablist" class="flex flex-wrap gap-1.5 p-1 rounded-xl bg-elevated border border-default">
           <button
             v-for="tab in tabs"
             :key="tab.value"
@@ -137,7 +137,7 @@ async function onRegister() {
             :class="
               authModalTab === tab.value
                 ? 'bg-indigo-600 text-white shadow-sm'
-                : 'text-slate-400 hover:text-slate-200 hover:bg-slate-900/60'
+                : 'text-muted hover:text-highlighted hover:bg-default/60'
             "
             @click="authModalTab = tab.value"
           >

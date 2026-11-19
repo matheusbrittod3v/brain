@@ -120,8 +120,8 @@ async function onCreateItem() {
           </UFormField>
         </div>
 
-        <div class="flex flex-wrap items-center gap-1.5 p-2 rounded-lg bg-slate-900/60 border border-slate-800/80">
-          <span class="text-[11px] text-slate-400 mr-1">Inserir Template:</span>
+        <div class="flex flex-wrap items-center gap-1.5 p-2 rounded-lg bg-elevated/60 border border-default">
+          <span class="text-[11px] text-muted mr-1">Inserir Template:</span>
           <UButton
             v-for="f in KNOWLEDGE_FORMAT_OPTIONS"
             :key="f.value"

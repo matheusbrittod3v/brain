@@ -13,6 +13,8 @@ const emit = defineEmits<{
 
 const chartMetric = ref<'tokens' | 'usd' | 'calls'>('tokens')
 const providerFilter = ref('all')
+const colorMode = useColorMode()
+const isDark = computed(() => colorMode.value === 'dark')
 
 const models = computed(() => props.finops?.modelUsage?.byModel ?? [])
 const providerCost = computed(() => props.finops?.modelUsage?.providerCostUsd ?? 0)
@@ -48,11 +50,12 @@ const barChartOption = computed<echarts.EChartsOption>(() => {
         : (m.totalTokens ?? 0)
   }))
 
+  const labelColor = isDark.value ? '#94a3b8' : '#475569'
   return {
     tooltip: { trigger: 'axis' },
     grid: { left: 48, right: 20, top: 20, bottom: 32 },
-    xAxis: { type: 'category', data: data.map(d => d.name), axisLabel: { color: '#94a3b8', fontSize: 11 } },
-    yAxis: { type: 'value', splitLine: { lineStyle: { color: 'rgba(148,163,184,0.1)' } }, axisLabel: { color: '#94a3b8', fontSize: 11 } },
+    xAxis: { type: 'category', data: data.map(d => d.name), axisLabel: { color: labelColor, fontSize: 11 } },
+    yAxis: { type: 'value', splitLine: { lineStyle: { color: isDark.value ? 'rgba(148,163,184,0.1)' : 'rgba(100,116,139,0.15)' } }, axisLabel: { color: labelColor, fontSize: 11 } },
     series: [
       {
         type: 'bar',
@@ -65,13 +68,13 @@ const barChartOption = computed<echarts.EChartsOption>(() => {
 
 const donutChartOption = computed<echarts.EChartsOption>(() => ({
   tooltip: { trigger: 'item', formatter: '{b}: ${c} ({d}%)' },
-  legend: { bottom: 0, textStyle: { color: '#94a3b8', fontSize: 11 } },
+  legend: { bottom: 0, textStyle: { color: isDark.value ? '#94a3b8' : '#475569', fontSize: 11 } },
   series: [
     {
       type: 'pie',
       radius: ['52%', '76%'],
       center: ['50%', '44%'],
-      itemStyle: { borderRadius: 6, borderColor: '#0f172a', borderWidth: 2 },
+      itemStyle: { borderRadius: 6, borderColor: isDark.value ? '#0f172a' : '#ffffff', borderWidth: 2 },
       label: { show: false },
       data: [
         { value: Number(providerCost.value.toFixed(4)), name: 'Provedores LLM', itemStyle: { color: '#6366f1' } },

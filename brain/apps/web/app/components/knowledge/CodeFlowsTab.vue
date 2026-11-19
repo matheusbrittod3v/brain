@@ -204,7 +204,7 @@ async function copyMermaid(code: string) {
               {{ copied ? 'Copiado!' : 'Copiar Mermaid' }}
             </UButton>
           </div>
-          <pre class="p-3 rounded-lg bg-slate-900 border border-slate-800 text-slate-300 font-mono text-xs overflow-x-auto max-h-56 select-all"><code>{{ selectedFlow.mermaidDiagram }}</code></pre>
+          <pre class="p-3 rounded-lg bg-elevated border border-default text-default font-mono text-xs overflow-x-auto max-h-56 select-all"><code>{{ selectedFlow.mermaidDiagram }}</code></pre>
         </div>
       </div>
     </div>
