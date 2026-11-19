@@ -16,6 +16,16 @@ const showEdgeLabels = ref(false)
 const expandedGraph = ref(false)
 const loading = ref(false)
 
+interface SearchExplain {
+  lexicalScore: number
+  vectorScore: number
+  rrfScore: number
+  graphProximity: number
+  authorityWeight: number
+  recencyDecay: number
+  matchReasons: Array<'textual' | 'semantic' | 'graph'>
+}
+
 interface SearchItem {
   id: string
   title: string
@@ -24,11 +34,47 @@ interface SearchItem {
   content: string
   accessPolicyId?: string
   score?: number
+  sharedFromProjectId?: string
+  explain?: SearchExplain
+}
+
+interface BenchmarkSummary {
+  totalQuestions: number
+  hitRateAt1: number
+  meanRecallAt5: number
+  mrr: number
+  avgLatencyMs: number
 }
 
 const searchHits = ref<SearchItem[]>([])
 const graphNodes = ref<Array<{ id: string; title?: string; type?: string; status?: string }>>([])
 const graphEdges = ref<Array<{ from: string; to: string; relation: string }>>([])
+const evaluatingBenchmark = ref(false)
+const benchmarkSummary = ref<BenchmarkSummary | null>(null)
+const zeroHitQueries = ref<Array<{ query: string; count: number }>>([])
+const staleItemsCount = ref(0)
+const untestedRulesCount = ref(0)
+
+async function runBenchmarkEvaluation() {
+  if (!projectId.value) return
+  evaluatingBenchmark.value = true
+  const pid = encodeURIComponent(projectId.value)
+  try {
+    const [bRes, eRes] = await Promise.all([
+      apiFetch<{ zeroHitQueries?: Array<{ query: string; count: number }>; staleItems?: unknown[]; untestedRules?: unknown[] }>(`/v1/projects/${pid}/search/benchmark`),
+      apiFetch<{ summary: BenchmarkSummary }>(`/v1/projects/${pid}/search/evaluate`, { method: 'POST' })
+    ])
+    zeroHitQueries.value = bRes.zeroHitQueries ?? []
+    staleItemsCount.value = bRes.staleItems?.length ?? 0
+    untestedRulesCount.value = bRes.untestedRules?.length ?? 0
+    benchmarkSummary.value = eRes.summary
+    notify('Benchmark de Busca Concluído', `Hit@1: ${Math.round(eRes.summary.hitRateAt1 * 100)}% • Recall@5: ${Math.round(eRes.summary.meanRecallAt5 * 100)}% • MRR: ${eRes.summary.mrr}`, 'success')
+  } catch (err) {
+    notify('Erro no benchmark', err instanceof Error ? err.message : String(err), 'error')
+  } finally {
+    evaluatingBenchmark.value = false
+  }
+}
 
 async function runSearchAndGraph() {
   if (!projectId.value) {
@@ -299,12 +345,43 @@ const graphOption = computed<echarts.EChartsOption>(() => {
     <!-- Resultados da Busca Híbrida -->
     <UCard>
       <template #header>
-        <div class="flex items-center justify-between">
+        <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
           <div>
-            <h3 class="font-semibold text-sm">Resultados da Busca Híbrida</h3>
-            <p class="text-xs text-muted">Passe o mouse nos nós do grafo para destacar conexões ou clique em Focar.</p>
+            <h3 class="font-semibold text-sm">Resultados da Busca Híbrida &amp; Explicabilidade</h3>
+            <p class="text-xs text-muted">Veja por que cada resultado apareceu (BM25 Textual, Vetorial bge-m3 ou Grafo) e avalie a precisão com o Benchmark de Referência.</p>
           </div>
-          <UBadge color="neutral" variant="subtle" size="xs">{{ filteredSearchHits.length }} itens</UBadge>
+          <div class="flex items-center gap-2">
+            <UButton size="xs" color="primary" variant="soft" icon="i-lucide-flask-conical" :loading="evaluatingBenchmark" @click="runBenchmarkEvaluation">
+              Avaliar Benchmark (8 Perguntas)
+            </UButton>
+            <UBadge color="neutral" variant="subtle" size="xs">{{ filteredSearchHits.length }} itens</UBadge>
+          </div>
+        </div>
+        <div v-if="benchmarkSummary" class="grid grid-cols-2 sm:grid-cols-6 gap-2 mt-3 pt-3 border-t border-default text-xs">
+          <div class="rounded-lg bg-elevated/50 p-2">
+            <div class="text-[10px] text-muted">Hit@1 (Precisão Topo)</div>
+            <div class="font-mono font-bold text-success">{{ Math.round(benchmarkSummary.hitRateAt1 * 100) }}%</div>
+          </div>
+          <div class="rounded-lg bg-elevated/50 p-2">
+            <div class="text-[10px] text-muted">Recall@5</div>
+            <div class="font-mono font-bold text-primary">{{ Math.round(benchmarkSummary.meanRecallAt5 * 100) }}%</div>
+          </div>
+          <div class="rounded-lg bg-elevated/50 p-2">
+            <div class="text-[10px] text-muted">MRR</div>
+            <div class="font-mono font-bold text-highlighted">{{ benchmarkSummary.mrr }}</div>
+          </div>
+          <div class="rounded-lg bg-elevated/50 p-2">
+            <div class="text-[10px] text-muted">Latência Média</div>
+            <div class="font-mono font-bold text-highlighted">{{ benchmarkSummary.avgLatencyMs }}ms</div>
+          </div>
+          <div class="rounded-lg bg-elevated/50 p-2">
+            <div class="text-[10px] text-muted">Buscas Sem Resposta</div>
+            <div class="font-mono font-bold text-highlighted">{{ zeroHitQueries.length }}</div>
+          </div>
+          <div class="rounded-lg bg-elevated/50 p-2">
+            <div class="text-[10px] text-muted">Desatualizados / Sem Teste</div>
+            <div class="font-mono font-bold text-highlighted">{{ staleItemsCount }} / {{ untestedRulesCount }}</div>
+          </div>
         </div>
       </template>
 
@@ -322,7 +399,7 @@ const graphOption = computed<echarts.EChartsOption>(() => {
           { accessorKey: 'id', header: 'ID' },
           { accessorKey: 'title', header: 'Título' },
           { accessorKey: 'type', header: 'Tipo' },
-          { accessorKey: 'status', header: 'Status' },
+          { accessorKey: 'explain', header: 'Por que apareceu?' },
           { accessorKey: 'score', header: 'Relevância' },
           { id: 'actions', header: '' }
         ]"
@@ -333,10 +410,36 @@ const graphOption = computed<echarts.EChartsOption>(() => {
         <template #type-cell="{ row }">
           <UBadge color="neutral" variant="outline" size="xs">{{ row.original.type }}</UBadge>
         </template>
-        <template #status-cell="{ row }">
-          <UBadge :color="row.original.status === 'approved' ? 'success' : 'warning'" variant="subtle" size="xs">
-            {{ row.original.status === 'approved' ? 'Aprovado' : row.original.status }}
-          </UBadge>
+        <template #explain-cell="{ row }">
+          <div class="flex flex-wrap items-center gap-1">
+            <UBadge
+              v-if="row.original.explain?.matchReasons?.includes('textual')"
+              color="info"
+              variant="subtle"
+              size="xs"
+            >
+              BM25 {{ ((row.original.explain.lexicalScore ?? 0) * 100).toFixed(0) }}%
+            </UBadge>
+            <UBadge
+              v-if="row.original.explain?.matchReasons?.includes('semantic')"
+              color="primary"
+              variant="subtle"
+              size="xs"
+            >
+              Semântica {{ ((row.original.explain.vectorScore ?? 0) * 100).toFixed(0) }}%
+            </UBadge>
+            <UBadge
+              v-if="row.original.explain?.matchReasons?.includes('graph') || (row.original.explain?.graphProximity ?? 0) > 0"
+              color="success"
+              variant="subtle"
+              size="xs"
+            >
+              Grafo {{ ((row.original.explain?.graphProximity ?? 0) * 100).toFixed(0) }}%
+            </UBadge>
+            <UBadge v-if="row.original.sharedFromProjectId" color="warning" variant="subtle" size="xs">
+              Global: {{ row.original.sharedFromProjectId }}
+            </UBadge>
+          </div>
         </template>
         <template #score-cell="{ row }">
           <span class="font-mono text-xs text-primary">

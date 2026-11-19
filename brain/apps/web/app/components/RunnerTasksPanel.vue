@@ -42,6 +42,13 @@ const runnerState = reactive({
 
 const dispatching = ref(false)
 const cancellingId = ref<string | null>(null)
+const retryingId = ref<string | null>(null)
+const comparingProviders = ref(false)
+const compareResult = ref<{
+  prompt: string
+  linkedKnowledgeIds: string[]
+  results: Array<{ provider: string; model: string; latencyMs: number; estimatedCostUsd: number; output: string }>
+} | null>(null)
 const statusFilter = ref<'all' | 'active' | 'completed' | 'failed'>('all')
 const searchQuery = ref('')
 const inspectedTask = ref<RunnerTaskItem | null>(null)
@@ -163,6 +170,45 @@ function reuseInstruction(task: RunnerTaskItem) {
     runnerState.priority = task.priority
   }
   inspectedTask.value = null
+}
+
+async function retryTask(task: RunnerTaskItem) {
+  if (!projectId.value) return
+  retryingId.value = task.taskId
+  try {
+    await apiFetch(`/v1/projects/${encodeURIComponent(projectId.value)}/runner/tasks/${encodeURIComponent(task.taskId)}/retry`, {
+      method: 'POST',
+      body: JSON.stringify({ linkedRuleIds: ['BR-BRAIN-001', 'BR-BRAIN-005'] })
+    })
+    notify('Tarefa retomada!', `Nova execução criada a partir de ${task.taskId}.`, 'success')
+    emit('refresh')
+  } catch (err) {
+    notify('Erro ao retomar tarefa', err instanceof Error ? err.message : String(err), 'error')
+  } finally {
+    retryingId.value = null
+  }
+}
+
+async function runProviderComparison() {
+  if (!projectId.value) return
+  comparingProviders.value = true
+  try {
+    compareResult.value = await apiFetch(`/v1/projects/${encodeURIComponent(projectId.value)}/runner/compare`, {
+      method: 'POST',
+      body: JSON.stringify({
+        prompt: runnerState.instruction.trim() || 'Validar conformidade das regras de negócio e arquitetura ativa.',
+        leftProvider: 'codex',
+        leftModel: 'gpt-5.6-luna',
+        rightProvider: 'ollama',
+        rightModel: 'gemma2:2b'
+      })
+    })
+    notify('Comparação concluída', 'Resultados entre provedores gerados lado a lado.', 'success')
+  } catch (err) {
+    notify('Erro ao comparar provedores', err instanceof Error ? err.message : String(err), 'error')
+  } finally {
+    comparingProviders.value = false
+  }
 }
 
 function onTextareaKeydown(e: KeyboardEvent) {
@@ -374,6 +420,46 @@ function onTextareaKeydown(e: KeyboardEvent) {
       </div>
     </UCard>
 
+    <!-- Comparação Lado a Lado entre Provedores (Prioridade 6) -->
+    <UCard class="border border-default">
+      <template #header>
+        <div class="flex items-center justify-between">
+          <div>
+            <h3 class="text-sm font-semibold text-highlighted">Comparar Resultados entre Provedores &amp; Contexto Vinculado</h3>
+            <p class="text-xs text-muted">Compare latência, custo FinOps e aderência às regras/ADRs entre o provedor Primário e Local.</p>
+          </div>
+          <UButton size="xs" color="primary" variant="soft" icon="i-lucide-git-compare" :loading="comparingProviders" @click="runProviderComparison">
+            Comparar Provedores
+          </UButton>
+        </div>
+      </template>
+
+      <div v-if="compareResult" class="space-y-3">
+        <div class="flex items-center gap-1.5 flex-wrap text-xs">
+          <span class="text-muted">Regras &amp; Documentos vinculados:</span>
+          <UBadge v-for="id in compareResult.linkedKnowledgeIds" :key="id" color="primary" variant="subtle" size="xs" class="font-mono">
+            {{ id }}
+          </UBadge>
+        </div>
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+          <div
+            v-for="res in compareResult.results"
+            :key="`${res.provider}-${res.model}`"
+            class="rounded-xl border border-default bg-elevated/40 p-3 space-y-2"
+          >
+            <div class="flex items-center justify-between">
+              <span class="text-xs font-mono font-semibold text-highlighted">{{ res.provider }} / {{ res.model }}</span>
+              <UBadge color="success" variant="subtle" size="xs">{{ res.latencyMs }}ms • ${{ res.estimatedCostUsd.toFixed(4) }}</UBadge>
+            </div>
+            <pre class="text-xs whitespace-pre-wrap font-mono text-default">{{ res.output }}</pre>
+          </div>
+        </div>
+      </div>
+      <div v-else class="text-xs text-muted">
+        Clique em <strong>Comparar Provedores</strong> para avaliar a instrução atual em dois modelos simultaneamente com vínculo automático de regras.
+      </div>
+    </UCard>
+
     <!-- Slideover de Detalhes da Tarefa -->
     <USlideover
       :open="!!inspectedTask"
@@ -417,6 +503,17 @@ function onTextareaKeydown(e: KeyboardEvent) {
           </div>
 
           <div class="flex items-center justify-end gap-2 pt-2 border-t border-default">
+            <UButton
+              v-if="hasPermission('runner:execute')"
+              size="sm"
+              color="primary"
+              variant="soft"
+              icon="i-lucide-play"
+              :loading="retryingId === inspectedTask.taskId"
+              @click="retryTask(inspectedTask)"
+            >
+              Retomar / Reexecutar com Etapas
+            </UButton>
             <UButton
               v-if="hasPermission('runner:execute')"
               size="sm"

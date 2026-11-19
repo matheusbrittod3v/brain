@@ -9,6 +9,7 @@ import { asc, eq } from "drizzle-orm";
 import { scanForSecrets } from "@brain/ingestion";
 import { assertSecretScanClean, redactPiiWithAiWorker, rerankWithAiWorker } from "../../services/ai-worker.js";
 import { configuredWorkspaceRoot } from "../../services/jobs.js";
+import { recordZeroHitQuery } from "../evolution-priorities.js";
 import type { ProjectsKnowledgeDeps } from "./types.js";
 
 export function registerProjectCoreRoutes(app: FastifyInstance, deps: ProjectsKnowledgeDeps) {
@@ -240,13 +241,34 @@ export function registerProjectCoreRoutes(app: FastifyInstance, deps: ProjectsKn
     };
   });
 
-  app.post<{ Params: { projectId: string }; Body: { query: string; domains?: number[]; limit?: number; cursor?: string; atDate?: string; includeShared?: boolean } }>(
+  app.post<{ Params: { projectId: string }; Body: { query: string; domains?: number[]; limit?: number; cursor?: string; atDate?: string; includeShared?: boolean; explain?: boolean } }>(
     "/v1/projects/:projectId/search",
     async (req) => {
       const ctx = await authenticateProjectRequest(req.headers.authorization, req.params.projectId);
       const { query, domains, limit, cursor, atDate, includeShared } = req.body;
-      const hits = await queryAwareRetrieval.search(ctx, { projectId: req.params.projectId, query, domains, atDate, limit: 100 });
-      const mapped: Array<KnowledgeItem & { score: number; sharedFromProjectId?: string }> = hits.map((h) => ({ ...h.item, score: h.score }));
+      const hits = await queryAwareRetrieval.search(ctx, { projectId: req.params.projectId, query, domains, atDate, limit: 100, explain: true });
+      const buildExplain = (h: (typeof hits)[number]) => {
+        const exp = (h as { explain?: { lexicalScore?: number; vectorScore?: number; rrfScore?: number; graphProximity?: number; authorityWeight?: number; recencyDecay?: number } }).explain;
+        const reasons: Array<"textual" | "semantic" | "graph"> = [];
+        if ((exp?.lexicalScore ?? 0) > 0.05) reasons.push("textual");
+        if ((exp?.vectorScore ?? 0) > 0.25) reasons.push("semantic");
+        if ((exp?.graphProximity ?? 0) > 0) reasons.push("graph");
+        if (reasons.length === 0) reasons.push("textual");
+        return {
+          lexicalScore: Number((exp?.lexicalScore ?? 0).toFixed(3)),
+          vectorScore: Number((exp?.vectorScore ?? 0).toFixed(3)),
+          rrfScore: Number((exp?.rrfScore ?? h.score).toFixed(3)),
+          graphProximity: Number((exp?.graphProximity ?? 0).toFixed(3)),
+          authorityWeight: Number((exp?.authorityWeight ?? 1).toFixed(2)),
+          recencyDecay: Number((exp?.recencyDecay ?? 1).toFixed(2)),
+          matchReasons: reasons
+        };
+      };
+      const mapped: Array<KnowledgeItem & { score: number; sharedFromProjectId?: string; explain?: ReturnType<typeof buildExplain> }> = hits.map((h) => ({
+        ...h.item,
+        score: h.score,
+        explain: buildExplain(h)
+      }));
 
       if (includeShared !== false && opRepo && hasPermission(ctx, "projects:shared:read")) {
         const sharedProjects = await opRepo.listSharedProjects(ctx.tenantId, systemDb);
@@ -257,14 +279,18 @@ export function registerProjectCoreRoutes(app: FastifyInstance, deps: ProjectsKn
             allowedProjects: [...new Set([...ctx.allowedProjects, sp.projectId])]
           };
           const sharedHits = await queryAwareRetrieval
-            .search(sharedCtx, { projectId: sp.projectId, query, domains, atDate, limit: 50 })
+            .search(sharedCtx, { projectId: sp.projectId, query, domains, atDate, limit: 50, explain: true })
             .catch(() => []);
           for (const sh of sharedHits) {
             if (!mapped.some((m) => m.id === sh.item.id && m.projectId === sh.item.projectId)) {
-              mapped.push({ ...sh.item, score: sh.score, sharedFromProjectId: sp.projectId });
+              mapped.push({ ...sh.item, score: sh.score, sharedFromProjectId: sp.projectId, explain: buildExplain(sh) });
             }
           }
         }
+      }
+
+      if (mapped.length === 0 && query.trim().length > 0) {
+        recordZeroHitQuery(req.params.projectId, query, ctx.actorId);
       }
 
       const reranked = await rerankWithAiWorker(query, mapped);

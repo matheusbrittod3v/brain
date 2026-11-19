@@ -26,9 +26,10 @@ const filteredAuditLogs = computed(() => {
 const auditColumns = [
   { accessorKey: 'createdAt', header: 'Quando' },
   { accessorKey: 'actorId', header: 'Ator' },
+  { accessorKey: 'projectId', header: 'Projeto' },
   { accessorKey: 'action', header: 'Ação' },
   { accessorKey: 'targetType', header: 'Alvo' },
-  { accessorKey: 'targetId', header: 'ID' },
+  { accessorKey: 'targetId', header: 'ID / Resultado' },
   { id: 'actions', header: '' }
 ]
 
@@ -78,6 +79,11 @@ function copyInspectedJson() {
         </template>
         <template #actorId-cell="{ row }">
           <span class="font-mono text-xs">{{ row.original.actorId }}</span>
+        </template>
+        <template #projectId-cell="{ row }">
+          <UBadge color="neutral" variant="subtle" size="xs" class="font-mono">
+            {{ (row.original as { projectId?: string }).projectId || 'brain' }}
+          </UBadge>
         </template>
         <template #action-cell="{ row }">
           <UBadge

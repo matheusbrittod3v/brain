@@ -96,12 +96,22 @@ export function registerIngestDocumentRoutes(
         body: sourceBytes,
         contentType: "application/octet-stream"
       });
+      const syncedAt = new Date().toISOString();
       item.metadata = {
         ...item.metadata,
         source: "document_upload",
         originalFileName: fileName,
         extractionEngine: parsedDocument.engine,
-        ...(minioObj.uploaded ? { minioUri: minioObj.uri, minioHttpUrl: minioObj.httpUrl, minioBucket: minioObj.bucket } : {})
+        syncedAt,
+        sourceVersion: item.sourceVersion,
+        sizeBytes: sourceBytes.length,
+        ...(minioObj.uploaded
+          ? {
+              minioUri: minioObj.uri,
+              minioBucket: minioObj.bucket,
+              minioObjectKey: minioObj.key
+            }
+          : {})
       };
       assertPolicyAccess(ctx, item.accessPolicyId);
       await enforceOpa(ctx, { projectId: req.params.projectId, accessPolicyId: item.accessPolicyId, action: "write", domainId: item.domainId });

@@ -12,7 +12,7 @@ const emit = defineEmits<{
 
 const { projectId, apiFetch, notify } = useBrainApi()
 
-const activeTab = ref<'overview' | 'live-usage' | 'quotas' | 'audit'>('overview')
+const activeTab = ref<'overview' | 'health-doctor' | 'live-usage' | 'quotas' | 'audit'>('overview')
 const period = ref<'7d' | '30d' | '90d' | 'all'>('30d')
 const selectedDowngradeModel = ref<string | undefined>(undefined)
 
@@ -28,6 +28,7 @@ const periodOptions = [
 
 const tabs = computed(() => [
   { label: 'Visão Geral & Modelos', value: 'overview', icon: 'i-lucide-activity' },
+  { label: 'Saúde, Conectores & Doctor', value: 'health-doctor', icon: 'i-lucide-stethoscope' },
   { label: 'Consumo ao Vivo', value: 'live-usage', icon: 'i-lucide-bar-chart-3', badge: liveUsage.value?.summary?.totalRequests || undefined },
   { label: 'Cotas & Simulador ROI', value: 'quotas', icon: 'i-lucide-wallet', badge: props.finops?.departmentQuotas?.length || undefined },
   { label: 'Trilha de Auditoria', value: 'audit', icon: 'i-lucide-scroll-text', badge: props.auditLogs.length || undefined }
@@ -84,6 +85,10 @@ function handleUseAsFallback(model: string) {
       :finops="finops"
       :period="period"
       @use-as-fallback="handleUseAsFallback"
+    />
+
+    <OperationsHealthConnectorsDoctorTab
+      v-else-if="activeTab === 'health-doctor'"
     />
 
     <OperationsLiveUsageTab

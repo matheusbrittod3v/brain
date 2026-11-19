@@ -17,7 +17,7 @@ export interface ProjectsKnowledgeDeps {
   ) => Promise<void>;
   recordAudit: (ctx: AuthContext, event: Parameters<AuditLogger["record"]>[0]) => Promise<unknown>;
   upsertKnowledgeItem: (ctx: AuthContext, item: KnowledgeItem) => Promise<void>;
-  queryAwareRetrieval: { search: (ctx: AuthContext, q: { projectId: string; query: string; domains?: number[]; atDate?: string; limit: number }) => Promise<Array<{ item: KnowledgeItem; score: number }>> };
+  queryAwareRetrieval: { search: (ctx: AuthContext, q: { projectId: string; query: string; domains?: number[]; atDate?: string; limit: number; explain?: boolean }) => Promise<Array<{ item: KnowledgeItem; score: number; explain?: unknown }>> };
   projectVerifiedTests: (ctx: AuthContext, projectId: string, items: KnowledgeItem[]) => Promise<any>;
   projectHealth: (items: KnowledgeItem[], verifiedTests: Map<string, string[]>, linkedTestsByRule?: Map<string, string[]>) => any;
   configuredApiKey: string;

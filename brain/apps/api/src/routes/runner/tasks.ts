@@ -3,7 +3,7 @@ import { Type } from "@sinclair/typebox";
 import type { FastifyInstance } from "fastify";
 import { BrainError } from "@brain/core";
 import { cancelRunnerSchedule, listRunnerSchedules } from "@brain/mcp-server";
-import { uploadObjectToMinio } from "../../services/minio-storage.js";
+import { MAX_ARTIFACT_BYTES, uploadObjectToMinio, validateSafeArtifactName } from "../../services/minio-storage.js";
 import type { RunnerRouteDeps, RunnerSharedState } from "./security.js";
 
 export function registerRunnerTaskRoutes(
@@ -177,10 +177,11 @@ export function registerRunnerTaskRoutes(
   }>(
     "/v1/projects/:projectId/runner/tasks/:taskId/artifacts",
     {
+      bodyLimit: 12 * 1024 * 1024,
       schema: {
         params: Type.Object({ projectId: Type.String(), taskId: Type.String() }),
         body: Type.Object({
-          fileName: Type.String({ minLength: 1 }),
+          fileName: Type.String({ minLength: 1, maxLength: 180 }),
           content: Type.String({ minLength: 1 }),
           isBase64: Type.Optional(Type.Boolean()),
           contentType: Type.Optional(Type.String())
@@ -189,12 +190,28 @@ export function registerRunnerTaskRoutes(
     },
     async (req) => {
       const ctx = await authenticateProjectRequest(req.headers.authorization, req.params.projectId);
-      const safeName = req.body.fileName.replace(/[^A-Za-z0-9._-]+/g, "-");
+      await enforceOpa(ctx, { projectId: req.params.projectId, accessPolicyId: "internal-project", action: "write" });
+      if (!/^[A-Za-z0-9_-]{3,80}$/.test(req.params.taskId)) {
+        throw new BrainError("BRAIN_ERR_INVALID_INPUT", "taskId inválido.", 422);
+      }
+      const projectTasks = opRepo
+        ? await opRepo.listRunnerTasks(ctx, req.params.projectId)
+        : runner.listTasks(ctx, req.params.projectId);
+      const taskRecord = projectTasks.find((t) => t.taskId === req.params.taskId);
+      if (!taskRecord) {
+        throw new BrainError("BRAIN_ERR_NOT_FOUND", `Tarefa '${req.params.taskId}' não pertence ao projeto '${req.params.projectId}'.`, 404);
+      }
+
+      const { safeName } = validateSafeArtifactName(req.body.fileName);
       const bodyBuf = req.body.isBase64 ? Buffer.from(req.body.content, "base64") : Buffer.from(req.body.content, "utf8");
+      if (bodyBuf.length === 0 || bodyBuf.length > MAX_ARTIFACT_BYTES) {
+        throw new BrainError("BRAIN_ERR_INVALID_INPUT", "Artefato vazio ou acima do limite máximo de 8 MiB.", 422);
+      }
       const uploaded = await uploadObjectToMinio({
         key: `${ctx.tenantId}/${req.params.projectId}/runner-artifacts/${req.params.taskId}/${safeName}`,
         body: bodyBuf,
-        contentType: req.body.contentType ?? "application/octet-stream"
+        contentType: req.body.contentType ?? "application/octet-stream",
+        presignExpiresSeconds: 900
       });
       await recordAudit(ctx, {
         tenantId: ctx.tenantId,
@@ -205,9 +222,64 @@ export function registerRunnerTaskRoutes(
         action: "create",
         targetType: "runner_task_artifact",
         targetId: `${req.params.taskId}/${safeName}`,
-        metadata: { uri: uploaded.uri, httpUrl: uploaded.httpUrl, uploaded: uploaded.uploaded }
+        metadata: {
+          uri: uploaded.uri,
+          sizeBytes: bodyBuf.length,
+          expiresInSeconds: uploaded.expiresInSeconds,
+          uploaded: uploaded.uploaded
+        }
       }).catch(() => undefined);
       return uploaded;
+    }
+  );
+
+  app.post<{
+    Params: { projectId: string; taskId: string };
+    Body: { instructionOverride?: string; linkedRuleIds?: string[]; linkedDocIds?: string[] };
+  }>(
+    "/v1/projects/:projectId/runner/tasks/:taskId/retry",
+    async (req) => {
+      const ctx = await authenticateProjectRequest(req.headers.authorization, req.params.projectId);
+      await enforceOpa(ctx, { projectId: req.params.projectId, accessPolicyId: "internal-project", action: "write" });
+      const projectTasks = opRepo
+        ? await opRepo.listRunnerTasks(ctx, req.params.projectId)
+        : runner.listTasks(ctx, req.params.projectId);
+      const original = projectTasks.find((t) => t.taskId === req.params.taskId);
+      if (!original) {
+        throw new BrainError("BRAIN_ERR_NOT_FOUND", `Tarefa '${req.params.taskId}' não encontrada.`, 404);
+      }
+      const retried = runner.enqueue(ctx, {
+        projectId: req.params.projectId,
+        instruction: req.body?.instructionOverride?.trim() || original.instruction,
+        priority: (["low", "normal", "high"].includes(original.priority) ? original.priority : "normal") as "low" | "normal" | "high"
+      });
+      if (opRepo) await opRepo.saveRunnerTask(ctx, retried);
+      await recordAudit(ctx, {
+        tenantId: ctx.tenantId,
+        projectId: req.params.projectId,
+        accessPolicyId: "internal-project",
+        actorId: ctx.actorId,
+        actorType: ctx.actorType,
+        action: "create",
+        targetType: "runner_task_retry",
+        targetId: retried.taskId,
+        metadata: {
+          retriedFromTaskId: original.taskId,
+          linkedRuleIds: req.body?.linkedRuleIds ?? [],
+          linkedDocIds: req.body?.linkedDocIds ?? []
+        }
+      }).catch(() => undefined);
+      return {
+        ...retried,
+        retriedFromTaskId: original.taskId,
+        linkedRuleIds: req.body?.linkedRuleIds ?? [],
+        linkedDocIds: req.body?.linkedDocIds ?? [],
+        steps: [
+          { step: 1, title: "Carregar Context Pack & Regras Vinculadas", status: "completed" },
+          { step: 2, title: "Executar Agente Primário com Validação CASL", status: "running" },
+          { step: 3, title: "Persistir Artefato Assinado & Handoff", status: "pending" }
+        ]
+      };
     }
   );
 }

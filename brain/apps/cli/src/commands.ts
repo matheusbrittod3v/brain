@@ -105,12 +105,43 @@ export function runDoctor(rootDir: string, env: NodeJS.ProcessEnv = process.env)
     }
   }
 
+  const checks = [
+    {
+      id: "database",
+      ok: Boolean(env.DATABASE_URL),
+      detail: env.DATABASE_URL ? "DATABASE_URL configurada" : "DATABASE_URL ausente",
+      suggestedFix: env.DATABASE_URL ? null : "Configure DATABASE_URL no .env apontando para PostgreSQL 16 (:5432)."
+    },
+    {
+      id: "auth-jwt",
+      ok: Boolean(env.BRAIN_JWT_SECRET && env.BRAIN_LOCAL_API_KEY),
+      detail: env.BRAIN_JWT_SECRET ? "Segredos JWT e API Key presentes" : "BRAIN_JWT_SECRET ou BRAIN_LOCAL_API_KEY ausente",
+      suggestedFix: env.BRAIN_JWT_SECRET ? null : "Defina BRAIN_JWT_SECRET e BRAIN_LOCAL_API_KEY no .env."
+    },
+    {
+      id: "pg-stores-boss",
+      ok: env.BRAIN_PG_STORES === "1" && env.BRAIN_PG_BOSS === "1",
+      detail: `BRAIN_PG_STORES=${env.BRAIN_PG_STORES ?? "0"}, BRAIN_PG_BOSS=${env.BRAIN_PG_BOSS ?? "0"}`,
+      suggestedFix: env.BRAIN_PG_STORES === "1" ? null : "Ative BRAIN_PG_STORES=1 e BRAIN_PG_BOSS=1 no .env."
+    },
+    {
+      id: "mcp-gateway",
+      ok: true,
+      detail: `Endpoint MCP HTTP esperado em http://localhost:${env.PORT || "3333"}/mcp`,
+      suggestedFix: null
+    }
+  ];
+
+  const suggestedFixes = checks.map((c) => c.suggestedFix).filter((f): f is string => Boolean(f));
+
   return {
     nodeVersion,
     platform: process.platform,
     arch: process.arch,
     totalRamGb: Math.round(os.totalmem() / 1024 ** 3),
-    missingEnvVars
+    missingEnvVars,
+    checks,
+    suggestedFixes
   };
 }
 
