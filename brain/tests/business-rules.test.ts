@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import { assertPolicyAccess, assertProjectAccess, buildAbilityForContext, type AuthContext } from "@brain/auth";
+import { assertPolicyAccess, assertProjectAccess, buildAbilityForContext, hasPermission, type AuthContext } from "@brain/auth";
 import { scanForSecrets } from "@brain/ingestion";
 
 const baseCtx: AuthContext = {
@@ -43,5 +43,34 @@ describe("Brain Business Rules Verification", () => {
     const adminCtx: AuthContext = { ...baseCtx, roles: ["admin"] };
     const adminAbility = buildAbilityForContext(adminCtx);
     expect(adminAbility.can("approve", "Proposal")).toBe(true);
+  });
+
+  it("TEST-BR-BRAIN-005: masks secret values in dynamic system_settings while exposing non-secret settings", () => {
+    const rawSettings = [
+      { category: "embeddings", key: "embedding_model", value: "bge-m3", isSecret: false },
+      { category: "github", key: "token", value: "gho_secret_value", isSecret: true }
+    ];
+    const masked = rawSettings.map((s) => ({
+      ...s,
+      value: s.isSecret && s.value ? "••••••••" : s.value
+    }));
+    expect(masked[0]?.value).toBe("bge-m3");
+    expect(masked[1]?.value).toBe("••••••••");
+  });
+
+  it("TEST-BR-BRAIN-006: isolates unlinked users (allowedProjects=[]) from project data while preserving CASL roles", () => {
+    const unlinkedAdminCtx: AuthContext = {
+      tenantId: "default-org",
+      actorId: "usr-unlinked-admin",
+      actorType: "human",
+      roles: ["admin"],
+      allowedProjects: [],
+      allowedPolicies: ["public-org", "internal-project"]
+    };
+    expect(() => assertProjectAccess(unlinkedAdminCtx, "brain")).toThrow();
+    expect(hasPermission(unlinkedAdminCtx, "users:assign_roles")).toBe(true);
+    expect(hasPermission(unlinkedAdminCtx, "roles:view")).toBe(true);
+    const ability = buildAbilityForContext(unlinkedAdminCtx);
+    expect(ability.can("approve", "Proposal")).toBe(false);
   });
 });

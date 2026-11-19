@@ -1,0 +1,27 @@
+id: BR-BRAIN-006
+type: business_rule
+title: Isolamento de Usuários Sem Projeto Vinculado e Escopo Global CASL (__global__)
+domainId: 1
+status: approved
+owner: security-iam
+accessPolicyId: internal-project
+tags:
+  - rbac
+  - casl
+  - multi-tenant
+  - zero-project
+  - access-control
+summary: >
+  Usuários autenticados com allowedProjects vazio ([]) mantêm acesso ao sistema e às guias
+  compatíveis com suas permissões CASL (como Perfil e Acesso, CASL & Políticas via escopo
+  __global__), porém não recebem acesso nem visualizam dados de nenhum projeto do tenant
+  até que um vínculo explícito seja atribuído.
+invariants:
+  - Desvincular projetos de um usuário via PUT /v1/projects/:projectId/access/users/:userId/scopes remove imediatamente vínculos residuais em project_access_members via syncUserProjectMemberships.
+  - Usuários reais (actorId != local-dev) com allowedProjects=[] recebem projects=[] em GET /v1/projects e não herdam automaticamente projetos do tenant.
+  - O escopo __global__ em /v1/projects/__global__/access/* permite consultar e gerenciar usuários, cargos (DEFAULT_ROLES) e catálogo CASL (PERMISSION_CATALOG) respeitando roles:view, roles:manage e users:assign_roles mesmo sem projeto vinculado.
+  - O catálogo administrativo GET /v1/projects?scope=catalog lista os projetos existentes do tenant exclusivamente para seleção e vinculação em modais de escopo.
+verification:
+  testIds:
+    - TEST-BR-BRAIN-006
+  testFile: tests/business-rules.test.ts

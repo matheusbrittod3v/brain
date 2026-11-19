@@ -1,0 +1,27 @@
+id: BR-BRAIN-005
+type: business_rule
+title: Desacoplamento de Configurações Dinâmicas no PostgreSQL (system_settings) e .env Minimalista
+domainId: 4
+status: approved
+owner: platform-architecture
+accessPolicyId: internal-project
+tags:
+  - system-settings
+  - postgresql
+  - configuration
+  - security
+  - mcp
+summary: >
+  Todas as configurações operacionais e de provedores (Embeddings/Ollama, Modelos do Runner,
+  GitHub, SMTP e Políticas Padrão) devem ser persistidas na tabela PostgreSQL system_settings
+  com mascaramento automático de segredos, mantendo no arquivo .env apenas variáveis essenciais
+  de bootstrap (banco de dados, porta, URL base/CORS, segredo JWT e chave de API local).
+invariants:
+  - O arquivo .env contém exclusivamente credenciais de banco (DATABASE_*), flags de store/fila (BRAIN_PG_STORES, BRAIN_PG_BOSS), rede (PORT, BRAIN_CORS_ORIGIN) e segredos de bootstrap (BRAIN_JWT_SECRET, BRAIN_LOCAL_API_KEY).
+  - Parâmetros categorizados em embeddings, runner, github, smtp e policies residem em system_settings por tenantId.
+  - Segredos marcados com isSecret=true nunca são retornados em texto puro nas listagens REST (/v1/system/settings) ou MCP (brain_system_settings_get), sendo mascarados como "••••••••".
+  - Apenas atores com papéis administrativos (admin, owner, tech-lead) podem criar, alterar ou excluir registros em system_settings.
+verification:
+  testIds:
+    - TEST-BR-BRAIN-005
+  testFile: tests/business-rules.test.ts
