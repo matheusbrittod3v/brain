@@ -61,12 +61,6 @@ variable "minio_bucket_name" {
   default     = "noema-artifacts"
 }
 
-variable "keycloak_realm" {
-  description = "Keycloak OIDC realm for Noema tenant authentication"
-  type        = string
-  default     = "noema"
-}
-
 resource "kubernetes_namespace" "noema" {
   metadata {
     name = var.namespace
@@ -101,9 +95,6 @@ resource "helm_release" "noema" {
       postgres = {
         pgBossEnabled = true
         host          = "noema-postgres.${var.namespace}.svc.cluster.local"
-      }
-      keycloak = {
-        enabled = true
       }
     })
   ]
@@ -155,29 +146,6 @@ resource "helm_release" "minio" {
   }
 }
 
-resource "helm_release" "keycloak" {
-  name       = "noema-keycloak"
-  repository = "https://charts.bitnami.com/bitnami"
-  chart      = "keycloak"
-  version    = "22.2.2"
-  namespace  = kubernetes_namespace.noema.metadata[0].name
-
-  set {
-    name  = "image.tag"
-    value = "26.0"
-  }
-
-  set {
-    name  = "extraEnvVars[0].name"
-    value = "KC_REALM"
-  }
-
-  set {
-    name  = "extraEnvVars[0].value"
-    value = var.keycloak_realm
-  }
-}
-
 output "noema_hub_topology" {
-  value = "PostgreSQL 16 (pgvector + pg-boss, ${var.postgres_instance_class}) + MinIO (${var.minio_bucket_name}) + Keycloak (${var.keycloak_realm}) + apps/api + apps/worker (${var.environment})"
+  value = "PostgreSQL 16 (pgvector + pg-boss, ${var.postgres_instance_class}) + MinIO (${var.minio_bucket_name}) + apps/api + apps/worker (${var.environment})"
 }

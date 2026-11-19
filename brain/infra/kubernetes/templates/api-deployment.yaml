@@ -43,8 +43,6 @@ spec:
             - name: OPA_URL
               value: "http://{{ .Release.Name }}-opa:8181"
             {{- end }}
-            - name: KEYCLOAK_ENABLED
-              value: "{{ .Values.keycloak.enabled }}"
           livenessProbe:
             httpGet:
               path: /v1/health

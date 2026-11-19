@@ -142,7 +142,7 @@ export function createApiRuntimeStores(deps: {
   };
 
   const departmentQuotas = new Map<string, { department: string; monthlyTokenLimit: number; monthlyUsdLimit: number; updatedAt: string }>();
-  const accessMembers = new Map<string, { actorId: string; roles: string[]; allowedPolicies: string[]; updatedAt: string; syncedWithKeycloak: boolean }>();
+  const accessMembers = new Map<string, { actorId: string; roles: string[]; allowedPolicies: string[]; updatedAt: string }>();
   const temporaryGrants = new Map<string, { grantId: string; tenantId: string; projectId: string; actorId: string; roles: string[]; policyIds: string[]; expiresAt: string; grantedBy: string; createdAt: string }>();
   const customPolicyCatalog = new Map<string, { policyId: string; label: string; description: string; allowedRoles: string[]; updatedAt: string }>();
   const shreddedSubjectKeys = new Set<string>();

@@ -456,7 +456,6 @@ export const projectAccessMembers = pgTable("project_access_members", {
   actorId: text("actor_id").notNull(),
   roles: text("roles").array().notNull(),
   allowedPolicies: text("allowed_policies").array().notNull(),
-  syncedWithKeycloak: boolean("synced_with_keycloak").default(false).notNull(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull()
 }, (t) => [
   primaryKey({ columns: [t.tenantId, t.projectId, t.actorId] }),

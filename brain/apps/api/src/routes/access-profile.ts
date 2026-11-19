@@ -18,7 +18,7 @@ export function registerAccessProfileRoutes(
     opRepo?: PgOperationalRepository;
     customPolicyCatalog: Map<string, { policyId: string; label: string; description: string; allowedRoles: string[]; updatedAt: string }>;
     customPolicyKey: (ctx: AuthContext, projectId: string, policyId: string) => string;
-    accessMembers: Map<string, { actorId: string; roles: string[]; allowedPolicies: string[]; updatedAt: string; syncedWithKeycloak: boolean }>;
+    accessMembers: Map<string, { actorId: string; roles: string[]; allowedPolicies: string[]; updatedAt: string }>;
     accessMemberKey: (ctx: AuthContext, projectId: string, actorId: string) => string;
     temporaryGrants: Map<string, {
       grantId: string;
@@ -127,25 +127,11 @@ export function registerAccessProfileRoutes(
       if (!Array.isArray(req.body.roles) || req.body.roles.length === 0) {
         throw new BrainError("BRAIN_ERR_CONFLICT", "roles deve ser uma lista não vazia.", 400);
       }
-      let syncedWithKeycloak = false;
-      if (process.env.KEYCLOAK_ADMIN_URL && process.env.KEYCLOAK_ADMIN_TOKEN) {
-        try {
-          const res = await fetch(`${process.env.KEYCLOAK_ADMIN_URL.replace(/\/$/, "")}/users/${encodeURIComponent(req.params.actorId)}/role-mappings/realm`, {
-            method: "POST",
-            headers: { authorization: `Bearer ${process.env.KEYCLOAK_ADMIN_TOKEN}`, "content-type": "application/json" },
-            body: JSON.stringify(req.body.roles.map((name) => ({ name })))
-          });
-          syncedWithKeycloak = res.ok;
-        } catch {
-          syncedWithKeycloak = false;
-        }
-      }
       const record = {
         actorId: req.params.actorId,
         roles: [...new Set(req.body.roles)],
         allowedPolicies: req.body.allowedPolicies ? [...new Set(req.body.allowedPolicies)] : ["internal-project"],
-        updatedAt: new Date().toISOString(),
-        syncedWithKeycloak
+        updatedAt: new Date().toISOString()
       };
       if (opRepo) await opRepo.saveAccessMember(ctx, req.params.projectId, record);
       else accessMembers.set(accessMemberKey(ctx, req.params.projectId, req.params.actorId), record);
@@ -158,7 +144,7 @@ export function registerAccessProfileRoutes(
         action: "update",
         targetType: "access_member_roles",
         targetId: req.params.actorId,
-        metadata: { roles: record.roles, allowedPolicies: record.allowedPolicies, syncedWithKeycloak }
+        metadata: { roles: record.roles, allowedPolicies: record.allowedPolicies }
       });
       return record;
     }

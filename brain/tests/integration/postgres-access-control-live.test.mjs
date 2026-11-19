@@ -36,7 +36,7 @@ test("live access control survives repository restart and remains tenant/project
 
     try {
       await operational.saveAccessMember(ctx, projectId, {
-        actorId, roles: ["developer", "reviewer"], allowedPolicies: ["internal-project"], syncedWithKeycloak: false
+        actorId, roles: ["developer", "reviewer"], allowedPolicies: ["internal-project"]
       });
     } catch (error) {
       console.error("access member persistence cause:", error.cause?.message ?? error.message);

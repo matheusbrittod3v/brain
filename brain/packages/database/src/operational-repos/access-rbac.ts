@@ -36,8 +36,7 @@ export class PgAccessRbacRepo {
       actorId: projectAccessMembers.actorId,
       roles: projectAccessMembers.roles,
       allowedPolicies: projectAccessMembers.allowedPolicies,
-      updatedAt: projectAccessMembers.updatedAt,
-      syncedWithKeycloak: projectAccessMembers.syncedWithKeycloak
+      updatedAt: projectAccessMembers.updatedAt
     }).from(projectAccessMembers).where(and(
       eq(projectAccessMembers.tenantId, ctx.tenantId),
       eq(projectAccessMembers.projectId, projectId),
@@ -48,7 +47,7 @@ export class PgAccessRbacRepo {
   async saveAccessMember(
     ctx: AuthContext,
     projectId: string,
-    input: { actorId: string; roles: string[]; allowedPolicies: string[]; syncedWithKeycloak: boolean }
+    input: { actorId: string; roles: string[]; allowedPolicies: string[] }
   ) {
     this.assertAccessAdminScope(ctx, projectId);
     return withTenantRls(this.db, ctx, async (tx) => {
@@ -59,22 +58,19 @@ export class PgAccessRbacRepo {
         actorId: input.actorId,
         roles: [...new Set(input.roles)],
         allowedPolicies: [...new Set(input.allowedPolicies)],
-        syncedWithKeycloak: input.syncedWithKeycloak,
         updatedAt: new Date()
       }).onConflictDoUpdate({
         target: [projectAccessMembers.tenantId, projectAccessMembers.projectId, projectAccessMembers.actorId],
         set: {
           roles: [...new Set(input.roles)],
           allowedPolicies: [...new Set(input.allowedPolicies)],
-          syncedWithKeycloak: input.syncedWithKeycloak,
           updatedAt: new Date()
         }
       }).returning({
         actorId: projectAccessMembers.actorId,
         roles: projectAccessMembers.roles,
         allowedPolicies: projectAccessMembers.allowedPolicies,
-        updatedAt: projectAccessMembers.updatedAt,
-        syncedWithKeycloak: projectAccessMembers.syncedWithKeycloak
+        updatedAt: projectAccessMembers.updatedAt
       });
       if (!row) throw new BrainError("BRAIN_ERR_STORAGE_UNAVAILABLE", "Member access record was not persisted.", 503);
       return row;

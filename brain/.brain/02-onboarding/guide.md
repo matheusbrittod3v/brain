@@ -11,7 +11,7 @@ knowledgeLayer: flows
 
 ## 1. Stack e Pré-requisitos
 - **Runtime**: Bun `1.4+`, TypeScript, Fastify (`apps/api`), Nuxt 4 (`apps/web`), MCP Server (`apps/mcp-server`), Worker (`apps/worker`), Runner (`apps/agent-runner`).
-- **Infra Docker**: `bun run infra:up` (PostgreSQL 16 + `pgvector`, Ollama `bge-m3`, Temporal, Keycloak, OPA).
+- **Infra Docker**: `bun run infra:up` (PostgreSQL 16 + `pgvector`, Ollama `bge-m3`, Temporal, OPA).
 
 ## 2. Comandos Principais
 - **Build completo**: `bun run build`
