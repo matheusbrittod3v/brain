@@ -10,9 +10,11 @@ const PERMISSION_FALLBACKS: Partial<Record<SystemPermission, SystemPermission>> 
 export function requiredPermissionForRoute(method: string, routeUrl: string): SystemPermission | null {
   const m = method.toUpperCase();
   if (m === "POST" && routeUrl === "/v1/projects") return "projects:create";
+  if (m === "GET" && routeUrl === "/v1/projects/shared") return "projects:shared:read";
   if (m === "GET" && routeUrl === "/v1/audit-logs") return "audit:view";
   if (!routeUrl.startsWith("/v1/projects/:projectId/")) return null;
   const sub = routeUrl.slice("/v1/projects/:projectId/".length);
+  if (sub === "share") return "projects:share";
   if (sub === "access/profile" || sub === "access/permissions") return null;
   if (sub.startsWith("access/roles")) return m === "GET" ? "roles:view" : "roles:manage";
   if (

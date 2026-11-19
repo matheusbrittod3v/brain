@@ -58,6 +58,8 @@ export const PERMISSION_CATALOG = [
   { id: "proposals:decide", group: "Propostas", label: "Aprovar, revisar ou rejeitar propostas" },
   // Projetos & Agentes
   { id: "projects:create", group: "Projetos & Runner", label: "Criar e atualizar projetos" },
+  { id: "projects:share", group: "Projetos & Runner", label: "Marcar projeto como compartilhável e reutilizável globalmente" },
+  { id: "projects:shared:read", group: "Projetos & Runner", label: "Consultar e reutilizar skills, regras e dados de projetos compartilhados" },
   { id: "runner:view", group: "Projetos & Runner", label: "Ver execuções do Brain Runner" },
   { id: "runner:execute", group: "Projetos & Runner", label: "Executar e delegar tarefas ao Runner" },
   { id: "runner:cancel", group: "Projetos & Runner", label: "Cancelar tarefas do Runner" },
@@ -151,7 +153,8 @@ export const DEFAULT_ROLES: RoleDefinition[] = [
       "runner:task:read",
       "runner:tool:use",
       "impact:analyze",
-      "templates:view"
+      "templates:view",
+      "projects:shared:read"
     ],
     allowedPolicies: ["public-org", "internal-project"],
     isSystem: true
@@ -168,7 +171,8 @@ export const DEFAULT_ROLES: RoleDefinition[] = [
       "knowledge:view",
       "knowledge:read",
       "knowledge:search",
-      "templates:view"
+      "templates:view",
+      "projects:shared:read"
     ],
     allowedPolicies: ["public-org", "internal-project"],
     isSystem: true
@@ -185,7 +189,8 @@ export const DEFAULT_ROLES: RoleDefinition[] = [
       "knowledge:view",
       "knowledge:read",
       "knowledge:search",
-      "templates:view"
+      "templates:view",
+      "projects:shared:read"
     ],
     allowedPolicies: ["public-org", "internal-project"],
     isSystem: true

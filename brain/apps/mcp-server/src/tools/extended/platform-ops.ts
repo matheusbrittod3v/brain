@@ -1,6 +1,6 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { assertProjectAccess, type AuthContext } from "@brain/auth";
+import { assertPermission, assertProjectAccess, hasPermission, type AuthContext } from "@brain/auth";
 import { buildTechRadar, computeProjectHealthReport } from "@brain/enterprise-views";
 import { scanForSecrets } from "@brain/ingestion";
 import { describeMcpTool, type McpConnectionProfileName } from "../../connection-profile.js";
@@ -20,19 +20,90 @@ export function registerPlatformOpsTools(
 ) {
   server.tool(
     "brain_list_projects",
-    describeMcpTool(profile, "Lista todos os projetos acessíveis pelo usuário autenticado."),
+    describeMcpTool(profile, "Lista todos os projetos acessíveis pelo usuário autenticado (incluindo projetos marcados como compartilháveis/globais)."),
     {},
     async () => {
-      const items = ctx.allowedProjects.map((projectId) => {
+      const sharedList = runtime.opRepo && hasPermission(ctx, "projects:shared:read")
+        ? await runtime.opRepo.listSharedProjects(ctx.tenantId).catch(() => [])
+        : [];
+      const sharedMap = new Map(sharedList.map((p) => [p.projectId, p]));
+      const allIds = [...new Set([...ctx.allowedProjects, ...sharedList.map((p) => p.projectId)])];
+      const items = allIds.map((projectId) => {
         const reg = runtime.registeredProjects?.get(`${ctx.tenantId}:${projectId}`);
+        const sharedMeta = sharedMap.get(projectId);
         return {
           projectId,
-          name: reg?.name ?? projectId,
-          description: reg?.description,
-          knowledgeRoot: reg?.knowledgeRoot ?? ".brain/"
+          name: sharedMeta?.name ?? reg?.name ?? projectId,
+          description: sharedMeta?.description ?? reg?.description,
+          knowledgeRoot: sharedMeta?.knowledgeRoot ?? reg?.knowledgeRoot ?? ".brain/",
+          isShared: Boolean(sharedMeta?.isShared),
+          accessScope: ctx.allowedProjects.includes(projectId) ? "linked" : "shared"
         };
       });
       return okJson({ tenantId: ctx.tenantId, count: items.length, projects: items });
+    }
+  );
+
+  server.tool(
+    "brain_project_set_shared",
+    describeMcpTool(profile, "Marca ou desmarca um projeto como compartilhável e reutilizável globalmente entre projetos e agentes MCP (requer permissão projects:share)."),
+    {
+      projectId: z.string().min(1),
+      isShared: z.boolean()
+    },
+    async ({ projectId, isShared }) => {
+      assertProjectAccess(ctx, projectId);
+      assertPermission(ctx, "projects:share");
+      if (!runtime.opRepo) {
+        return okJson({ saved: false, reason: "PostgreSQL operational repository unavailable." });
+      }
+      const updated = await runtime.opRepo.setProjectShared(ctx, projectId, isShared);
+      return okJson({ saved: true, projectId, isShared, project: updated });
+    }
+  );
+
+  server.tool(
+    "brain_list_shared_projects",
+    describeMcpTool(profile, "Lista projetos marcados como compartilháveis/reutilizáveis (isShared=true) e suas skills, regras de negócio e especificações globais (requer projects:shared:read)."),
+    {
+      includeItems: z.boolean().optional()
+    },
+    async ({ includeItems }) => {
+      assertPermission(ctx, "projects:shared:read");
+      if (!runtime.opRepo) {
+        return okJson({ count: 0, projects: [] });
+      }
+      const sharedProjects = await runtime.opRepo.listSharedProjects(ctx.tenantId);
+      const projects = await Promise.all(
+        sharedProjects.map(async (sp) => {
+          const sharedCtx: AuthContext = {
+            ...ctx,
+            allowedProjects: [...new Set([...ctx.allowedProjects, sp.projectId])]
+          };
+          const hits = await runtime.retrieval.search(sharedCtx, { projectId: sp.projectId, query: "", limit: 200 });
+          const active = hits.map((h) => h.item).filter((i) => i.status !== "deprecated");
+          const skills = active.filter((i) => i.type === "skill");
+          const rules = active.filter((i) => i.type === "business_rule");
+          const specs = active.filter((i) => i.type === "spec" || i.type === "architecture_decision");
+          return {
+            ...sp,
+            counts: {
+              total: active.length,
+              skills: skills.length,
+              rules: rules.length,
+              specs: specs.length
+            },
+            ...(includeItems !== false
+              ? {
+                  skills: skills.map((i) => ({ id: i.id, title: i.title, summary: i.summary ?? i.content.slice(0, 180) })),
+                  rules: rules.map((i) => ({ id: i.id, title: i.title, summary: i.summary ?? i.content.slice(0, 180) })),
+                  specs: specs.map((i) => ({ id: i.id, type: i.type, title: i.title }))
+                }
+              : {})
+          };
+        })
+      );
+      return okJson({ tenantId: ctx.tenantId, count: projects.length, projects });
     }
   );
 

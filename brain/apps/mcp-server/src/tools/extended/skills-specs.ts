@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { assertPolicyAccess, assertProjectAccess, type AuthContext } from "@brain/auth";
+import { assertPolicyAccess, assertProjectAccess, hasPermission, type AuthContext } from "@brain/auth";
 import { BrainError, type KnowledgeItem } from "@brain/core";
 import { describeMcpTool, type McpConnectionProfileName } from "../../connection-profile.js";
 import { okJson } from "../../helpers.js";
@@ -59,7 +59,36 @@ export function registerExtendedSkillsSpecsTools(
           // __org__ optional
         }
       }
-      const skills = [...projectSkills, ...orgSkills];
+      const sharedSkills: Array<typeof projectSkills[number] & { sharedFromProjectId?: string }> = [];
+      if (runtime.opRepo && hasPermission(ctx, "projects:shared:read")) {
+        const sharedProjects = await runtime.opRepo.listSharedProjects(ctx.tenantId).catch(() => []);
+        for (const sp of sharedProjects) {
+          if (sp.projectId === projectId) continue;
+          const sharedCtx: AuthContext = {
+            ...ctx,
+            allowedProjects: [...new Set([...ctx.allowedProjects, sp.projectId])]
+          };
+          const spHits = await Promise.resolve(
+            runtime.retrieval.search(sharedCtx, { projectId: sp.projectId, query: "", limit: 200 })
+          ).catch(() => []);
+          for (const h of spHits) {
+            if (h.item.type === "skill" && h.item.status !== "deprecated") {
+              sharedSkills.push({
+                id: h.item.id,
+                title: h.item.title,
+                scope: "project" as const,
+                sharedFromProjectId: sp.projectId,
+                summary: h.item.summary ?? "",
+                tags: h.item.tags,
+                status: h.item.status,
+                version: h.item.version,
+                ...(includeContent ? { content: h.item.content } : {})
+              });
+            }
+          }
+        }
+      }
+      const skills = [...projectSkills, ...orgSkills, ...sharedSkills];
       return okJson({ projectId, count: skills.length, skills });
     }
   );

@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { join, relative } from "node:path";
 import type { FastifyInstance } from "fastify";
-import { authenticateRequest, usersStore, type AuthContext } from "@brain/auth";
+import { assertPermission, authenticateRequest, hasPermission, usersStore, type AuthContext } from "@brain/auth";
 import { BrainError, paginateCursor, type KnowledgeItem } from "@brain/core";
 import { createDatabaseClient, projects as projectsTable } from "@brain/database";
 import { asc, eq } from "drizzle-orm";
@@ -58,6 +58,7 @@ export function registerProjectCoreRoutes(app: FastifyInstance, deps: ProjectsKn
           name: row.name,
           description: row.description ?? undefined,
           knowledgeRoot: row.knowledgeRoot,
+          isShared: Boolean(row.isShared),
           createdAt: row.createdAt.toISOString()
         }))
       };
@@ -73,7 +74,75 @@ export function registerProjectCoreRoutes(app: FastifyInstance, deps: ProjectsKn
     return { projects };
   });
 
-  app.post<{ Body: { projectId: string; name?: string; description?: string; knowledgeRoot?: string } }>(
+  app.get("/v1/projects/shared", async (req) => {
+    const rawCtx = await authenticateRequest(req.headers.authorization, configuredApiKey, "default-org", allowedProjects, undefined, allowedPolicies);
+    const dbUser = authRepo ? await authRepo.findUserById(rawCtx.actorId) : null;
+    const memUser = !dbUser && rawCtx.actorId !== "local-dev" ? usersStore.getUserById(rawCtx.actorId) : null;
+    const freshUser = dbUser ?? memUser;
+    const ctx: AuthContext = freshUser
+      ? {
+          ...rawCtx,
+          roles: freshUser.roles,
+          allowedProjects: freshUser.allowedProjects,
+          allowedPolicies: freshUser.allowedPolicies
+        }
+      : rawCtx;
+    assertPermission(ctx, "projects:shared:read");
+    const sharedProjects = opRepo ? await opRepo.listSharedProjects(ctx.tenantId, systemDb) : [];
+    const enriched = await Promise.all(
+      sharedProjects.map(async (proj) => {
+        const sharedCtx: AuthContext = {
+          ...ctx,
+          allowedProjects: [...new Set([...ctx.allowedProjects, proj.projectId])]
+        };
+        const hits = await queryAwareRetrieval
+          .search(sharedCtx, { projectId: proj.projectId, query: "", limit: 200 })
+          .catch(() => []);
+        const items = hits.map((h) => h.item).filter((i) => i.status !== "deprecated");
+        return {
+          ...proj,
+          counts: {
+            total: items.length,
+            skills: items.filter((i) => i.type === "skill").length,
+            rules: items.filter((i) => i.type === "business_rule").length,
+            specs: items.filter((i) => i.type === "spec" || i.type === "architecture_decision").length
+          }
+        };
+      })
+    );
+    return { projects: enriched };
+  });
+
+  app.put<{ Params: { projectId: string }; Body: { isShared: boolean } }>(
+    "/v1/projects/:projectId/share",
+    async (req) => {
+      const ctx = await authenticateProjectRequest(req.headers.authorization, req.params.projectId);
+      assertPermission(ctx, "projects:share");
+      const isShared = Boolean(req.body?.isShared);
+      const updated = opRepo
+        ? await opRepo.setProjectShared(ctx, req.params.projectId, isShared, systemDb)
+        : null;
+      const key = `${ctx.tenantId}:${req.params.projectId}`;
+      const existing = registeredProjects.get(key);
+      if (existing) {
+        registeredProjects.set(key, { ...existing, isShared } as typeof existing);
+      }
+      await recordAudit(ctx, {
+        tenantId: ctx.tenantId,
+        projectId: req.params.projectId,
+        accessPolicyId: "internal-project",
+        actorId: ctx.actorId,
+        actorType: ctx.actorType,
+        action: "update",
+        targetType: "project_share",
+        targetId: req.params.projectId,
+        metadata: { isShared }
+      }).catch(() => undefined);
+      return { projectId: req.params.projectId, isShared, project: updated };
+    }
+  );
+
+  app.post<{ Body: { projectId: string; name?: string; description?: string; knowledgeRoot?: string; isShared?: boolean } }>(
     "/v1/projects",
     async (req) => {
       const projectId = req.body.projectId?.trim();
@@ -81,13 +150,17 @@ export function registerProjectCoreRoutes(app: FastifyInstance, deps: ProjectsKn
         throw new BrainError("BRAIN_ERR_CONFLICT", "projectId deve usar slug minúsculo alfanumérico/hífens (ex.: 'billing-api').", 400);
       }
       const ctx = await authenticateProjectRequest(req.headers.authorization, projectId);
+      if (req.body.isShared) {
+        assertPermission(ctx, "projects:share");
+      }
       await enforceOpa(ctx, { projectId, accessPolicyId: "internal-project", action: "write" });
       const name = req.body.name?.trim() || projectId;
       const description = req.body.description?.trim() || undefined;
       const knowledgeRoot = req.body.knowledgeRoot?.trim() || ".brain/";
+      const isShared = req.body.isShared !== undefined ? Boolean(req.body.isShared) : undefined;
 
       const result = opRepo
-        ? await opRepo.registerProject(ctx, { projectId, name, description, knowledgeRoot })
+        ? await opRepo.registerProject(ctx, { projectId, name, description, knowledgeRoot, isShared })
         : (() => {
             const key = `${ctx.tenantId}:${projectId}`;
             const existing = registeredProjects.get(key);
@@ -167,13 +240,33 @@ export function registerProjectCoreRoutes(app: FastifyInstance, deps: ProjectsKn
     };
   });
 
-  app.post<{ Params: { projectId: string }; Body: { query: string; domains?: number[]; limit?: number; cursor?: string; atDate?: string } }>(
+  app.post<{ Params: { projectId: string }; Body: { query: string; domains?: number[]; limit?: number; cursor?: string; atDate?: string; includeShared?: boolean } }>(
     "/v1/projects/:projectId/search",
     async (req) => {
       const ctx = await authenticateProjectRequest(req.headers.authorization, req.params.projectId);
-      const { query, domains, limit, cursor, atDate } = req.body;
+      const { query, domains, limit, cursor, atDate, includeShared } = req.body;
       const hits = await queryAwareRetrieval.search(ctx, { projectId: req.params.projectId, query, domains, atDate, limit: 100 });
-      const mapped = hits.map((h) => ({ ...h.item, score: h.score }));
+      const mapped: Array<KnowledgeItem & { score: number; sharedFromProjectId?: string }> = hits.map((h) => ({ ...h.item, score: h.score }));
+
+      if (includeShared !== false && opRepo && hasPermission(ctx, "projects:shared:read")) {
+        const sharedProjects = await opRepo.listSharedProjects(ctx.tenantId, systemDb);
+        for (const sp of sharedProjects) {
+          if (sp.projectId === req.params.projectId) continue;
+          const sharedCtx: AuthContext = {
+            ...ctx,
+            allowedProjects: [...new Set([...ctx.allowedProjects, sp.projectId])]
+          };
+          const sharedHits = await queryAwareRetrieval
+            .search(sharedCtx, { projectId: sp.projectId, query, domains, atDate, limit: 50 })
+            .catch(() => []);
+          for (const sh of sharedHits) {
+            if (!mapped.some((m) => m.id === sh.item.id && m.projectId === sh.item.projectId)) {
+              mapped.push({ ...sh.item, score: sh.score, sharedFromProjectId: sp.projectId });
+            }
+          }
+        }
+      }
+
       const reranked = await rerankWithAiWorker(query, mapped);
       const page = paginateCursor(reranked, limit ?? 20, cursor);
       return { items: page.items, ...(page.nextCursor ? { nextCursor: page.nextCursor } : {}) };
@@ -188,20 +281,26 @@ export function registerProjectCoreRoutes(app: FastifyInstance, deps: ProjectsKn
       .filter((item) => item.type === "skill" && item.status !== "deprecated")
       .map((item) => ({ ...item, scope: "project" as const }));
 
-    let orgSkills: Array<KnowledgeItem & { scope: "org" }> = [];
-    if (req.params.projectId !== "__org__" && (ctx.allowedProjects.includes("__org__") || ctx.roles.includes("admin"))) {
-      try {
-        const orgCtx = { ...ctx, allowedProjects: [...new Set([...ctx.allowedProjects, "__org__"])] };
-        const orgHits = await queryAwareRetrieval.search(orgCtx, { projectId: "__org__", query: "", limit: 200 });
-        orgSkills = orgHits
-          .map((h) => h.item)
-          .filter((item) => item.type === "skill" && item.status !== "deprecated")
-          .map((item) => ({ ...item, scope: "org" as const }));
-      } catch {
-        // __org__ optional
+    const sharedSkills: Array<KnowledgeItem & { scope: "org" | "shared"; sharedFromProjectId?: string }> = [];
+    if (opRepo && hasPermission(ctx, "projects:shared:read")) {
+      const sharedProjects = await opRepo.listSharedProjects(ctx.tenantId, systemDb);
+      for (const sp of sharedProjects) {
+        if (sp.projectId === req.params.projectId) continue;
+        const sharedCtx: AuthContext = {
+          ...ctx,
+          allowedProjects: [...new Set([...ctx.allowedProjects, sp.projectId])]
+        };
+        const spHits = await queryAwareRetrieval
+          .search(sharedCtx, { projectId: sp.projectId, query: "", limit: 200 })
+          .catch(() => []);
+        for (const h of spHits) {
+          if (h.item.type === "skill" && h.item.status !== "deprecated") {
+            sharedSkills.push({ ...h.item, scope: "shared" as const, sharedFromProjectId: sp.projectId });
+          }
+        }
       }
     }
-    return { projectId: req.params.projectId, skills: [...projectSkills, ...orgSkills] };
+    return { projectId: req.params.projectId, skills: [...projectSkills, ...sharedSkills] };
   });
 
   app.post<{ Params: { projectId: string }; Body: { workspacePath?: string } }>(

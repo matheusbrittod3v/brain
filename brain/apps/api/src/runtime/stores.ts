@@ -197,6 +197,15 @@ export function createApiRuntimeStores(deps: {
         permissions: ctx.permissions && ctx.permissions.length > 0 ? ctx.permissions : resolveDefaultPermissionsForRoles(ctx.roles)
       };
     }
+    if (!ctx.allowedProjects.includes(projectId) && opRepo) {
+      const effectivePerms = ctx.permissions && ctx.permissions.length > 0 ? ctx.permissions : resolveDefaultPermissionsForRoles(ctx.roles);
+      if (effectivePerms.includes("projects:shared:read")) {
+        const sharedList = await opRepo.listSharedProjects(ctx.tenantId, systemDb);
+        if (sharedList.some((p) => p.projectId === projectId)) {
+          ctx.allowedProjects = [...new Set([...ctx.allowedProjects, projectId])];
+        }
+      }
+    }
     assertProjectAccess(ctx, projectId);
     if (opRepo) {
       return opRepo.resolveEffectiveAuthContext(ctx, projectId);

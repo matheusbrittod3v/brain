@@ -1,6 +1,6 @@
 import { and, asc, eq, gt, inArray, lt, sql } from "drizzle-orm";
 import type { AuthContext } from "@brain/auth";
-import { withTenantRls } from "./client.js";
+import { withTenantRls, type BrainDb } from "./client.js";
 import { PgRunnerHandoffsRepo } from "./operational-repos/runner-handoffs.js";
 import type { MemoryLayer } from "./operational-repos/shared.js";
 import {
@@ -421,14 +421,70 @@ export class PgOperationalRepository extends PgRunnerHandoffsRepo {
         name: row.name,
         description: row.description ?? undefined,
         knowledgeRoot: row.knowledgeRoot,
+        isShared: Boolean(row.isShared),
         createdAt: row.createdAt.toISOString()
       }));
     });
   }
 
+  async listSharedProjects(tenantId: string, systemDb?: BrainDb) {
+    type ProjectRow = typeof projects.$inferSelect;
+    const query = (tx: BrainDb): Promise<ProjectRow[]> =>
+      tx
+        .select()
+        .from(projects)
+        .where(and(eq(projects.tenantId, tenantId), eq(projects.isShared, true)))
+        .orderBy(asc(projects.id));
+    const rows: ProjectRow[] = systemDb
+      ? await query(systemDb).catch(() => [] as ProjectRow[])
+      : await withTenantRls(
+          this.db,
+          {
+            tenantId,
+            actorId: "system",
+            actorType: "agent",
+            roles: ["admin"],
+            allowedProjects: ["__shared_lookup__"],
+            allowedPolicies: ["public-org", "internal-project"]
+          },
+          (tx) => query(tx as unknown as BrainDb)
+        ).catch(() => [] as ProjectRow[]);
+    return rows.map((row) => ({
+      projectId: row.id,
+      tenantId: row.tenantId,
+      name: row.name,
+      description: row.description ?? undefined,
+      knowledgeRoot: row.knowledgeRoot,
+      isShared: Boolean(row.isShared),
+      createdAt: row.createdAt.toISOString()
+    }));
+  }
+
+  async setProjectShared(ctx: AuthContext, projectId: string, isShared: boolean, systemDb?: BrainDb) {
+    const run = async (tx: BrainDb) => {
+      const [updated] = await tx
+        .update(projects)
+        .set({ isShared })
+        .where(and(eq(projects.tenantId, ctx.tenantId), eq(projects.id, projectId)))
+        .returning();
+      if (!updated) return null;
+      return {
+        projectId: updated.id,
+        tenantId: updated.tenantId,
+        name: updated.name,
+        description: updated.description ?? undefined,
+        knowledgeRoot: updated.knowledgeRoot,
+        isShared: Boolean(updated.isShared),
+        createdAt: updated.createdAt.toISOString()
+      };
+    };
+    if (systemDb) return run(systemDb);
+    return withTenantRls(this.db, ctx, (tx) => run(tx as unknown as BrainDb));
+  }
+
   async registerProject(
     ctx: AuthContext,
-    input: { projectId: string; name: string; description?: string; knowledgeRoot?: string }
+    input: { projectId: string; name: string; description?: string; knowledgeRoot?: string; isShared?: boolean }
   ) {
     return withTenantRls(this.db, ctx, async (tx) => {
       await tx
@@ -448,7 +504,8 @@ export class PgOperationalRepository extends PgRunnerHandoffsRepo {
           .set({
             name: input.name,
             description: input.description ?? existing[0].description,
-            knowledgeRoot: input.knowledgeRoot ?? existing[0].knowledgeRoot
+            knowledgeRoot: input.knowledgeRoot ?? existing[0].knowledgeRoot,
+            ...(input.isShared !== undefined ? { isShared: input.isShared } : {})
           })
           .where(and(eq(projects.tenantId, ctx.tenantId), eq(projects.id, input.projectId)))
           .returning();
@@ -460,6 +517,7 @@ export class PgOperationalRepository extends PgRunnerHandoffsRepo {
             name: updated!.name,
             description: updated!.description ?? undefined,
             knowledgeRoot: updated!.knowledgeRoot,
+            isShared: Boolean(updated!.isShared),
             createdAt: updated!.createdAt.toISOString()
           }
         };
@@ -472,7 +530,8 @@ export class PgOperationalRepository extends PgRunnerHandoffsRepo {
           tenantId: ctx.tenantId,
           name: input.name,
           description: input.description ?? null,
-          knowledgeRoot: input.knowledgeRoot ?? ".brain/"
+          knowledgeRoot: input.knowledgeRoot ?? ".brain/",
+          isShared: Boolean(input.isShared)
         })
         .returning();
 
@@ -484,6 +543,7 @@ export class PgOperationalRepository extends PgRunnerHandoffsRepo {
           name: inserted!.name,
           description: inserted!.description ?? undefined,
           knowledgeRoot: inserted!.knowledgeRoot,
+          isShared: Boolean(inserted!.isShared),
           createdAt: inserted!.createdAt.toISOString()
         }
       };

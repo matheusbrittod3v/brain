@@ -21,7 +21,7 @@ const newProjectOpen = ref(false)
 const loadingData = ref(false)
 
 // Data states
-const projectsList = ref<Array<{ projectId: string; name: string; description?: string }>>([])
+const projectsList = ref<Array<{ projectId: string; name: string; description?: string; isShared?: boolean }>>([])
 const overviewData = ref<{
   totalItems?: number
   approvedCount?: number
@@ -65,7 +65,7 @@ async function loadWorkspaceData() {
   const pid = encodeURIComponent(projectId.value)
 
   try {
-    const pRes = await apiFetch<{ projects: Array<{ projectId: string; name: string; description?: string }> }>('/v1/projects')
+    const pRes = await apiFetch<{ projects: Array<{ projectId: string; name: string; description?: string; isShared?: boolean }> }>('/v1/projects')
     projectsList.value = pRes.projects ?? []
     if (projectsList.value.length === 0) {
       projectId.value = ''
@@ -222,7 +222,7 @@ const projectSchema = z.object({
   name: z.string().min(2, 'Nome obrigatório'),
   description: z.string().optional()
 })
-const newProjectState = reactive({ projectId: '', name: '', description: '' })
+const newProjectState = reactive({ projectId: '', name: '', description: '', isShared: false })
 const creatingProject = ref(false)
 
 async function onCreateProject() {
@@ -235,6 +235,7 @@ async function onCreateProject() {
     newProjectState.projectId = ''
     newProjectState.name = ''
     newProjectState.description = ''
+    newProjectState.isShared = false
     await loadWorkspaceData()
   } catch (err) {
     notify('Erro ao criar projeto', err instanceof Error ? err.message : String(err), 'error')
@@ -338,7 +339,7 @@ defineShortcuts({
               <USelect
                 v-if="projectsList.length > 0"
                 v-model="projectId"
-                :items="projectsList.map(p => ({ label: `${p.projectId} — ${p.name}`, value: p.projectId }))"
+                :items="projectsList.map(p => ({ label: `${p.projectId} — ${p.name}${p.isShared ? ' (Global)' : ''}`, value: p.projectId }))"
                 size="sm"
                 class="w-48 sm:w-60"
               />
@@ -475,6 +476,11 @@ defineShortcuts({
           <UFormField label="Slug (ID)" name="projectId">
             <UInput v-model="newProjectState.projectId" placeholder="meu-projeto" class="w-full font-mono" />
           </UFormField>
+          <UCheckbox
+            v-if="hasPermission('projects:share')"
+            v-model="newProjectState.isShared"
+            label="Compartilhável e reutilizável entre projetos (skills, regras e specs globais no MCP)"
+          />
           <div class="flex justify-end gap-2">
             <UButton color="neutral" variant="ghost" @click="newProjectOpen = false">Cancelar</UButton>
             <UButton type="submit" :loading="creatingProject">Criar</UButton>

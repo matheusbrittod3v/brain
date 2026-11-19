@@ -1,5 +1,12 @@
 import { describe, expect, it } from "bun:test";
-import { assertPolicyAccess, assertProjectAccess, buildAbilityForContext, hasPermission, type AuthContext } from "@brain/auth";
+import {
+  assertPolicyAccess,
+  assertProjectAccess,
+  buildAbilityForContext,
+  hasPermission,
+  PERMISSION_CATALOG,
+  type AuthContext
+} from "@brain/auth";
 import { scanForSecrets } from "@brain/ingestion";
 
 const baseCtx: AuthContext = {
@@ -72,5 +79,18 @@ describe("Brain Business Rules Verification", () => {
     expect(hasPermission(unlinkedAdminCtx, "roles:view")).toBe(true);
     const ability = buildAbilityForContext(unlinkedAdminCtx);
     expect(ability.can("approve", "Proposal")).toBe(false);
+  });
+
+  it("TEST-BR-BRAIN-007: enforces dedicated permissions (projects:share and projects:shared:read) for globally shareable projects", () => {
+    const catalogIds = PERMISSION_CATALOG.map((p) => p.id);
+    expect(catalogIds).toContain("projects:share");
+    expect(catalogIds).toContain("projects:shared:read");
+
+    expect(hasPermission(baseCtx, "projects:shared:read")).toBe(true);
+    expect(hasPermission(baseCtx, "projects:share")).toBe(false);
+
+    const adminCtx: AuthContext = { ...baseCtx, roles: ["admin"] };
+    expect(hasPermission(adminCtx, "projects:share")).toBe(true);
+    expect(hasPermission(adminCtx, "projects:shared:read")).toBe(true);
   });
 });

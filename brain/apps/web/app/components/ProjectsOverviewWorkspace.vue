@@ -3,7 +3,7 @@ import type * as echarts from 'echarts'
 
 const props = defineProps<{
   projectId: string
-  projectsList?: Array<{ projectId: string; name: string; description?: string }>
+  projectsList?: Array<{ projectId: string; name: string; description?: string; isShared?: boolean }>
   overviewData: {
     totalItems?: number
     approvedCount?: number
@@ -42,9 +42,65 @@ const emit = defineEmits<{
   navigate: [workspace: 'inbox' | 'knowledge' | 'search' | 'agents' | 'impact' | 'operations']
 }>()
 
+const { apiFetch, notify, hasPermission } = useBrainApi()
+
 const currentProject = computed(() =>
   props.projectsList?.find(p => p.projectId === props.projectId)
 )
+
+const togglingShare = ref(false)
+const sharedCatalog = ref<Array<{
+  projectId: string
+  name: string
+  description?: string
+  isShared: boolean
+  counts?: { total: number; skills: number; rules: number; specs: number }
+}>>([])
+
+const isCurrentShared = computed(() =>
+  Boolean(currentProject.value?.isShared || sharedCatalog.value.some(s => s.projectId === props.projectId))
+)
+
+async function loadSharedProjects() {
+  if (!hasPermission('projects:shared:read')) {
+    sharedCatalog.value = []
+    return
+  }
+  try {
+    const res = await apiFetch<{ projects?: typeof sharedCatalog.value }>('/v1/projects/shared')
+    sharedCatalog.value = res.projects ?? []
+  } catch {
+    sharedCatalog.value = []
+  }
+}
+
+async function toggleProjectShared() {
+  if (!props.projectId) return
+  togglingShare.value = true
+  try {
+    const nextShared = !isCurrentShared.value
+    await apiFetch(`/v1/projects/${encodeURIComponent(props.projectId)}/share`, {
+      method: 'PUT',
+      body: JSON.stringify({ isShared: nextShared })
+    })
+    notify(
+      nextShared ? 'Projeto marcado como compartilhável!' : 'Compartilhamento global desativado',
+      nextShared
+        ? `Skills, regras e dados de '${props.projectId}' agora são reutilizáveis entre projetos e agentes MCP.`
+        : `O projeto '${props.projectId}' voltou ao escopo isolado.`,
+      'success'
+    )
+    await loadSharedProjects()
+    emit('refresh')
+  } catch (err) {
+    notify('Erro ao atualizar compartilhamento', err instanceof Error ? err.message : String(err), 'error')
+  } finally {
+    togglingShare.value = false
+  }
+}
+
+onMounted(loadSharedProjects)
+watch(() => props.projectId, loadSharedProjects)
 
 const totalItems = computed(() => props.overviewData?.totalItems ?? 0)
 const approvedCount = computed(() => props.overviewData?.approvedCount ?? 0)
@@ -152,6 +208,17 @@ const recentLogs = computed(() => (props.auditLogs ?? []).slice(0, 5))
       icon="i-lucide-folder-git-2"
     >
       <template #actions>
+        <UButton
+          v-if="projectId && hasPermission('projects:share')"
+          size="sm"
+          :color="isCurrentShared ? 'success' : 'neutral'"
+          :variant="isCurrentShared ? 'soft' : 'outline'"
+          :icon="isCurrentShared ? 'i-lucide-globe' : 'i-lucide-share-2'"
+          :loading="togglingShare"
+          @click="toggleProjectShared"
+        >
+          {{ isCurrentShared ? 'Compartilhável Global (Ativo)' : 'Tornar Compartilhável (Global MCP)' }}
+        </UButton>
         <UButton size="sm" variant="soft" icon="i-lucide-folder-plus" @click="emit('newProject')">
           Novo Projeto
         </UButton>
@@ -160,6 +227,40 @@ const recentLogs = computed(() => (props.auditLogs ?? []).slice(0, 5))
         </UButton>
       </template>
     </UiPageHeader>
+
+    <UCard v-if="sharedCatalog.length > 0" class="border border-default">
+      <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-3">
+        <div class="flex items-center gap-2">
+          <UIcon name="i-lucide-globe" class="size-4 text-success" />
+          <h3 class="text-sm font-semibold text-highlighted">Projetos Compartilháveis &amp; Reutilizáveis (Global MCP)</h3>
+          <UBadge color="success" variant="subtle" size="xs">{{ sharedCatalog.length }}</UBadge>
+        </div>
+        <span class="text-xs text-muted">
+          Skills, regras e especificações abaixo ficam disponíveis globalmente entre projetos e agentes MCP.
+        </span>
+      </div>
+      <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+        <div
+          v-for="sp in sharedCatalog"
+          :key="sp.projectId"
+          class="rounded-xl border border-default bg-elevated/40 p-3 flex flex-col justify-between gap-2"
+        >
+          <div>
+            <div class="flex items-center justify-between gap-2">
+              <span class="text-xs font-mono font-semibold text-highlighted">{{ sp.projectId }}</span>
+              <UBadge color="success" variant="subtle" size="xs">Global MCP</UBadge>
+            </div>
+            <div class="text-xs font-medium text-default mt-0.5">{{ sp.name }}</div>
+            <p v-if="sp.description" class="text-[11px] text-muted mt-0.5 line-clamp-2">{{ sp.description }}</p>
+          </div>
+          <div class="flex items-center gap-2 flex-wrap pt-2 border-t border-default/60 text-[11px] text-muted">
+            <UBadge color="primary" variant="subtle" size="xs">{{ sp.counts?.skills ?? 0 }} skills</UBadge>
+            <UBadge color="neutral" variant="subtle" size="xs">{{ sp.counts?.rules ?? 0 }} regras</UBadge>
+            <UBadge color="neutral" variant="subtle" size="xs">{{ sp.counts?.specs ?? 0 }} specs/ADRs</UBadge>
+          </div>
+        </div>
+      </div>
+    </UCard>
 
     <!-- KPIs Principais -->
     <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">

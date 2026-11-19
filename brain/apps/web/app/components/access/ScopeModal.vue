@@ -33,12 +33,12 @@ async function loadOptions() {
   try {
     const pid = encodeURIComponent(projectId.value || '__global__')
     const [projRes, rolesRes] = await Promise.all([
-      apiFetch<{ projects?: Array<{ projectId: string; name?: string }> }>('/v1/projects?scope=catalog').catch(() => ({ projects: [] })),
+      apiFetch<{ projects?: Array<{ projectId: string; name?: string; isShared?: boolean }> }>('/v1/projects?scope=catalog').catch(() => ({ projects: [] })),
       apiFetch<{ roles?: RoleItem[] }>(`/v1/projects/${pid}/access/roles`).catch(() => ({ roles: [] }))
     ])
     existingProjects.value = (projRes.projects ?? []).map((p) => ({
       projectId: p.projectId,
-      name: p.name || p.projectId
+      name: `${p.name || p.projectId}${p.isShared ? ' [Global]' : ''}`
     }))
     availableRoles.value = rolesRes.roles ?? []
   } finally {

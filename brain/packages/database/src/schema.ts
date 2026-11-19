@@ -36,6 +36,7 @@ export const projects = pgTable("projects", {
   name: text("name").notNull(),
   description: text("description"),
   knowledgeRoot: text("knowledge_root").default(".brain/").notNull(),
+  isShared: boolean("is_shared").default(false).notNull(),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull()
 });
 

@@ -3,7 +3,7 @@ import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { assertProjectAccess, type AuthContext } from "@brain/auth";
+import { assertProjectAccess, hasPermission, type AuthContext } from "@brain/auth";
 import type { IntentType } from "@brain/context-engine";
 import { paginateCursor } from "@brain/core";
 import { hashWorkspaceSources } from "@brain/workspace-detection";
@@ -180,11 +180,30 @@ export function registerCoreRetrievalTools(
       domains: z.array(z.number()).optional(),
       atDate: z.string().optional(),
       limit: z.number().optional(),
-      cursor: z.string().optional()
+      cursor: z.string().optional(),
+      includeShared: z.boolean().optional()
     },
-    async ({ projectId, query, domains, atDate, limit, cursor }) => {
+    async ({ projectId, query, domains, atDate, limit, cursor, includeShared }) => {
       assertProjectAccess(ctx, projectId);
-      const hits = await runtime.retrieval.search(ctx, { projectId, query, domains, atDate, limit: 100 });
+      const hits = [...(await runtime.retrieval.search(ctx, { projectId, query, domains, atDate, limit: 100 }))];
+      if (includeShared !== false && runtime.opRepo && hasPermission(ctx, "projects:shared:read")) {
+        const sharedProjects = await runtime.opRepo.listSharedProjects(ctx.tenantId).catch(() => []);
+        for (const sp of sharedProjects) {
+          if (sp.projectId === projectId) continue;
+          const sharedCtx: AuthContext = {
+            ...ctx,
+            allowedProjects: [...new Set([...ctx.allowedProjects, sp.projectId])]
+          };
+          const spHits = await Promise.resolve(
+            runtime.retrieval.search(sharedCtx, { projectId: sp.projectId, query, domains, atDate, limit: 50 })
+          ).catch(() => []);
+          for (const sh of spHits) {
+            if (!hits.some((existing) => existing.item.id === sh.item.id && existing.item.projectId === sh.item.projectId)) {
+              hits.push(sh);
+            }
+          }
+        }
+      }
       const mapped = hits.map((h) => {
         const layer = inferKnowledgeLayer(h.item);
         const format = inferKnowledgeFormat(h.item);
@@ -302,11 +321,30 @@ export function registerCoreRetrievalTools(
       serviceId: z.string().optional(),
       tags: z.array(z.string()).optional(),
       limit: z.number().optional(),
-      cursor: z.string().optional()
+      cursor: z.string().optional(),
+      includeShared: z.boolean().optional()
     },
-    async ({ projectId, query, serviceId, tags, limit, cursor }) => {
+    async ({ projectId, query, serviceId, tags, limit, cursor, includeShared }) => {
       assertProjectAccess(ctx, projectId);
-      const hits = await runtime.retrieval.search(ctx, { projectId, query: query ?? serviceId ?? "regra", domains: [2, 4, 7], limit: 100 });
+      const hits = [...(await runtime.retrieval.search(ctx, { projectId, query: query ?? serviceId ?? "regra", domains: [2, 4, 7], limit: 100 }))];
+      if (includeShared !== false && runtime.opRepo && hasPermission(ctx, "projects:shared:read")) {
+        const sharedProjects = await runtime.opRepo.listSharedProjects(ctx.tenantId).catch(() => []);
+        for (const sp of sharedProjects) {
+          if (sp.projectId === projectId) continue;
+          const sharedCtx: AuthContext = {
+            ...ctx,
+            allowedProjects: [...new Set([...ctx.allowedProjects, sp.projectId])]
+          };
+          const spHits = await Promise.resolve(
+            runtime.retrieval.search(sharedCtx, { projectId: sp.projectId, query: query ?? serviceId ?? "regra", domains: [2, 4, 7], limit: 50 })
+          ).catch(() => []);
+          for (const sh of spHits) {
+            if (!hits.some((existing) => existing.item.id === sh.item.id && existing.item.projectId === sh.item.projectId)) {
+              hits.push(sh);
+            }
+          }
+        }
+      }
       const filtered = tags?.length
         ? hits.filter((h) => tags.some((tag) => h.item.tags.includes(tag)))
         : hits;

@@ -1,0 +1,26 @@
+id: BR-BRAIN-007
+type: business_rule
+title: Projetos Compartilháveis e Reutilizáveis Globalmente (isShared) com Permissões CASL Dedicadas
+domainId: 3
+status: approved
+owner: platform-architecture
+accessPolicyId: internal-project
+tags:
+  - shared-projects
+  - reusable-knowledge
+  - mcp
+  - rbac
+  - skills
+summary: >
+  Projetos marcados com isShared=true disponibilizam suas skills, regras de negócio, ADRs e
+  especificações de forma global e reutilizável entre todos os projetos do tenant e ações do MCP,
+  governados pelas permissões dedicadas projects:share (marcar/desmarcar compartilhamento) e
+  projects:shared:read (consultar e reutilizar conhecimento compartilhado).
+invariants:
+  - Apenas atores com a permissão CASL projects:share podem alterar o atributo isShared de um projeto via PUT /v1/projects/:projectId/share, POST /v1/projects ou MCP brain_project_set_shared.
+  - Atores e agentes MCP com a permissão projects:shared:read consultam automaticamente skills, regras e itens de projetos com isShared=true em brain_search, brain_get_active_rules, brain_list_skills, brain_list_shared_projects e GET /v1/projects/shared.
+  - Ambas as permissões (projects:share e projects:shared:read) fazem parte do PERMISSION_CATALOG para vinculação dinâmica a qualquer cargo na guia Acesso, CASL & Políticas.
+verification:
+  testIds:
+    - TEST-BR-BRAIN-007
+  testFile: tests/business-rules.test.ts
