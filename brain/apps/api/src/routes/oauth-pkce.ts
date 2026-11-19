@@ -314,6 +314,17 @@ export function registerOAuthPkceRoutes(
     return { revoked, tokenId: req.params.tokenId };
   });
 
+  app.post<{ Params: { userId: string } }>("/v1/auth/mcp-tokens/revoke-user/:userId", async (req) => {
+    const ctx = await deps.authenticateRequest(req.headers.authorization);
+    const isAdmin = ctx.roles.some((r) => ["admin", "owner"].includes(r.toLowerCase()));
+    if (!isAdmin && req.params.userId !== ctx.actorId) {
+      throw new BrainError("BRAIN_ERR_POLICY_DENIED", "Sem permissão para revogar tokens de outro usuário.", 403);
+    }
+    if (!deps.mcpAuthRepo) return { revokedCount: 0, userId: req.params.userId };
+    const revokedCount = await deps.mcpAuthRepo.revokeTokensByUser(ctx.tenantId, req.params.userId);
+    return { revokedCount, userId: req.params.userId };
+  });
+
   app.post("/v1/auth/mcp-tokens/revoke-current", async (req) => {
     const ctx = await deps.authenticateRequest(req.headers.authorization);
     const raw = req.headers.authorization?.replace(/^Bearer\s+/i, "").trim();

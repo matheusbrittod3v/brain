@@ -350,7 +350,8 @@ export function buildApp(
     authenticateProjectRequest,
     recordAudit,
     opRepo,
-    authRepo
+    authRepo,
+    mcpAuthRepo
   });
 
   const { projectVerifiedTests, projectHealth, projectModelUsage } = createProjectMetricsService({

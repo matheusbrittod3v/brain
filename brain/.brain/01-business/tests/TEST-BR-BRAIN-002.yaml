@@ -1,0 +1,11 @@
+id: TEST-BR-BRAIN-002
+title: "TEST-BR-BRAIN-002: detects secrets before ingestion and allows clean markdown"
+type: test
+status: approved
+access_policy: internal-project
+knowledgeLayer: verification
+sourceUri: tests/business-rules.test.ts
+relatedIds:
+  - BR-BRAIN-002
+description: >
+  Caso de teste automatizado em tests/business-rules.test.ts que verifica BR-BRAIN-002 (detects secrets before ingestion and allows clean markdown).

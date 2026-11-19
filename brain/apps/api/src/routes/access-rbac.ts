@@ -12,7 +12,7 @@ import { BrainError } from "@brain/core";
 import type { ApiRouteDeps } from "./types.js";
 
 export function registerAccessRbacRoutes(deps: ApiRouteDeps) {
-  const { app, authenticateProjectRequest, recordAudit, opRepo, authRepo } = deps;
+  const { app, authenticateProjectRequest, recordAudit, opRepo, authRepo, mcpAuthRepo } = deps;
 
   app.get<{ Params: { projectId: string } }>("/v1/projects/:projectId/access/users", async (req) => {
     const ctx = await authenticateProjectRequest(req.headers.authorization, req.params.projectId);
@@ -158,6 +158,49 @@ export function registerAccessRbacRoutes(deps: ApiRouteDeps) {
         roles: nextRoles,
         sessionsRevoked: req.body.revokeActiveSessions !== false
       };
+    }
+  );
+
+  app.delete<{ Params: { projectId: string; userId: string } }>(
+    "/v1/projects/:projectId/access/users/:userId",
+    {
+      schema: {
+        params: Type.Object({ projectId: Type.String(), userId: Type.String() })
+      }
+    },
+    async (req) => {
+      const ctx = await authenticateProjectRequest(req.headers.authorization, req.params.projectId);
+      assertPermission(ctx, "users:assign_roles");
+      const targetId = req.params.userId;
+      if (targetId === ctx.actorId) {
+        throw new BrainError("BRAIN_ERR_CONFLICT", "Não é permitido excluir o próprio usuário autenticado.", 400);
+      }
+
+      revokeActorSessions(targetId);
+      const revokedTokensCount = mcpAuthRepo ? await mcpAuthRepo.revokeTokensByUser(ctx.tenantId, targetId) : 0;
+      if (opRepo && req.params.projectId !== "__global__" && ctx.allowedProjects.includes(req.params.projectId)) {
+        await opRepo.deleteUserFineGrainedPolicy(ctx, req.params.projectId, targetId).catch(() => false);
+        await opRepo.deleteUserRoleAssignment(ctx, req.params.projectId, targetId).catch(() => false);
+      }
+
+      const deletedFromDb = authRepo ? await authRepo.deleteUser(ctx.tenantId, targetId) : false;
+      if (!deletedFromDb) {
+        throw new BrainError("BRAIN_ERR_NOT_FOUND", `Usuário '${targetId}' não encontrado para exclusão.`, 404);
+      }
+
+      await recordAudit(ctx, {
+        tenantId: ctx.tenantId,
+        projectId: req.params.projectId === "__global__" ? "system" : req.params.projectId,
+        accessPolicyId: "restricted-security",
+        actorId: ctx.actorId,
+        actorType: ctx.actorType,
+        action: "revoke",
+        targetType: "user",
+        targetId,
+        metadata: { operation: "delete_user", revokedTokensCount }
+      });
+
+      return { deleted: true, userId: targetId, revokedTokensCount };
     }
   );
 

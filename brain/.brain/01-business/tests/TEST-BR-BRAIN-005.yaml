@@ -1,0 +1,11 @@
+id: TEST-BR-BRAIN-005
+title: "TEST-BR-BRAIN-005: masks secret values in dynamic system_settings while exposing non-secret settings"
+type: test
+status: approved
+access_policy: internal-project
+knowledgeLayer: verification
+sourceUri: tests/business-rules.test.ts
+relatedIds:
+  - BR-BRAIN-005
+description: >
+  Caso de teste automatizado em tests/business-rules.test.ts que verifica BR-BRAIN-005 (masks secret values in dynamic system_settings while exposing non-secret settings).

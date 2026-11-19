@@ -1,0 +1,11 @@
+id: TEST-BR-BRAIN-006
+title: "TEST-BR-BRAIN-006: isolates unlinked users (allowedProjects=[]) from project data while preserving CASL roles"
+type: test
+status: approved
+access_policy: internal-project
+knowledgeLayer: verification
+sourceUri: tests/business-rules.test.ts
+relatedIds:
+  - BR-BRAIN-006
+description: >
+  Caso de teste automatizado em tests/business-rules.test.ts que verifica BR-BRAIN-006 (isolates unlinked users (allowedProjects=[]) from project data while preserving CASL roles).

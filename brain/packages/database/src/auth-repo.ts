@@ -144,5 +144,14 @@ export class PgAuthRepository {
     }
     return row;
   }
+
+  async deleteUser(tenantId: string, userId: string): Promise<boolean> {
+    await this.db.delete(authVerificationTokens).where(eq(authVerificationTokens.userId, userId));
+    const rows = await this.db
+      .delete(authUsers)
+      .where(and(eq(authUsers.tenantId, tenantId), eq(authUsers.id, userId)))
+      .returning({ id: authUsers.id });
+    return rows.length > 0;
+  }
 }
 

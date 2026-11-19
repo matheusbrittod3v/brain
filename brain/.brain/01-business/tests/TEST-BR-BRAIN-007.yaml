@@ -1,0 +1,11 @@
+id: TEST-BR-BRAIN-007
+title: "TEST-BR-BRAIN-007: enforces dedicated permissions (projects:share and projects:shared:read) for globally shareable projects"
+type: test
+status: approved
+access_policy: internal-project
+knowledgeLayer: verification
+sourceUri: tests/business-rules.test.ts
+relatedIds:
+  - BR-BRAIN-007
+description: >
+  Caso de teste automatizado em tests/business-rules.test.ts que verifica BR-BRAIN-007 (enforces dedicated permissions (projects:share and projects:shared:read) for globally shareable projects).

@@ -5,6 +5,7 @@ const props = defineProps<{
   users: UnifiedUserRow[]
   roleOptions: Array<{ label: string; value: string }>
   canAssign: boolean
+  currentUserId?: string
 }>()
 
 const emit = defineEmits<{
@@ -12,7 +13,10 @@ const emit = defineEmits<{
   editScopes: [user: UnifiedUserRow]
   quickGrant: [userId: string]
   deleteAssignment: [userId: string]
+  deleteUser: [userId: string]
 }>()
+
+const confirmDeleteUserId = ref<string | null>(null)
 
 const search = ref('')
 const roleFilter = ref('all')
@@ -83,7 +87,12 @@ const filteredUsers = computed(() => {
     >
       <template #name-cell="{ row }">
         <div>
-          <div class="font-medium text-sm text-highlighted">{{ row.original.name }}</div>
+          <div class="flex items-center gap-1.5">
+            <span class="font-medium text-sm text-highlighted">{{ row.original.name }}</span>
+            <UBadge v-if="row.original.source" size="xs" variant="outline" color="neutral">
+              {{ row.original.source }}
+            </UBadge>
+          </div>
           <div class="text-[11px] text-muted font-mono">{{ row.original.email || row.original.id }}</div>
         </div>
       </template>
@@ -165,6 +174,29 @@ const filteredUsers = computed(() => {
             title="Remover atribuição do projeto"
             @click="emit('deleteAssignment', row.original.id)"
           />
+          <template v-if="canAssign && row.original.source === 'registered' && row.original.id !== currentUserId">
+            <UButton
+              v-if="confirmDeleteUserId === row.original.id"
+              size="xs"
+              color="error"
+              variant="solid"
+              icon="i-lucide-user-x"
+              @click="confirmDeleteUserId = null; emit('deleteUser', row.original.id)"
+            >
+              Confirmar
+            </UButton>
+            <UButton
+              v-else
+              size="xs"
+              color="error"
+              variant="soft"
+              icon="i-lucide-user-minus"
+              title="Excluir usuário do sistema e revogar tokens"
+              @click="confirmDeleteUserId = row.original.id"
+            >
+              Excluir
+            </UButton>
+          </template>
         </div>
       </template>
     </UTable>

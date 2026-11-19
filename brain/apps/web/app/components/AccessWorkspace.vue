@@ -7,8 +7,9 @@ import type {
   RoleItem,
   UnifiedUserRow
 } from './access/types'
+import type { AccessTokenRow } from './access/TokensTab.vue'
 
-const { projectId, apiFetch, notify, hasPermission } = useBrainApi()
+const { projectId, apiFetch, notify, hasPermission, currentUser } = useBrainApi()
 
 const activeTab = ref('assignments')
 const loading = ref(false)
@@ -18,6 +19,7 @@ const rolesList = ref<RoleItem[]>([])
 const usersList = ref<RegisteredUser[]>([])
 const assignmentsList = ref<AssignmentItem[]>([])
 const grantsList = ref<GrantItem[]>([])
+const tokensList = ref<AccessTokenRow[]>([])
 const permissionCatalog = ref<PermissionItem[]>([])
 
 // Overlay states
@@ -76,9 +78,14 @@ const unifiedUsers = computed<UnifiedUserRow[]>(() => {
   return [...map.values()]
 })
 
+const activeTokensCount = computed(() =>
+  tokensList.value.filter(t => !t.revokedAt && Date.parse(t.expiresAt) > Date.now()).length
+)
+
 const tabs = computed(() => [
   { label: 'Usuários & Vínculos', value: 'assignments', icon: 'i-lucide-users', badge: unifiedUsers.value.length },
   { label: 'Cargos & Permissões', value: 'roles', icon: 'i-lucide-shield', badge: rolesList.value.length },
+  { label: 'Tokens & OAuth', value: 'tokens', icon: 'i-lucide-key-round', badge: activeTokensCount.value },
   { label: 'Acesso Just-In-Time', value: 'grants', icon: 'i-lucide-clock', badge: grantsList.value.length }
 ])
 
@@ -87,12 +94,13 @@ async function loadAccessData() {
   loading.value = true
   const pid = encodeURIComponent(projectId.value || '__global__')
   try {
-    const [rRes, uRes, aRes, gRes, pRes] = await Promise.allSettled([
+    const [rRes, uRes, aRes, gRes, pRes, tRes] = await Promise.allSettled([
       apiFetch<{ roles: RoleItem[] }>(`/v1/projects/${pid}/access/roles`),
       apiFetch<{ users: RegisteredUser[] }>(`/v1/projects/${pid}/access/users`),
       apiFetch<{ assignments: AssignmentItem[] }>(`/v1/projects/${pid}/access/assignments`),
       apiFetch<{ grants: GrantItem[] }>(`/v1/projects/${pid}/access/grants`),
-      apiFetch<{ permissions: PermissionItem[] }>(`/v1/projects/${pid}/access/permissions`)
+      apiFetch<{ permissions: PermissionItem[] }>(`/v1/projects/${pid}/access/permissions`),
+      apiFetch<{ items?: AccessTokenRow[] }>('/v1/auth/mcp-tokens')
     ])
     if (rRes.status === 'fulfilled') rolesList.value = rRes.value.roles ?? []
     else accessError.value = rRes.reason instanceof Error ? rRes.reason.message : String(rRes.reason)
@@ -101,6 +109,7 @@ async function loadAccessData() {
     if (aRes.status === 'fulfilled') assignmentsList.value = aRes.value.assignments ?? []
     if (gRes.status === 'fulfilled') grantsList.value = gRes.value.grants ?? []
     if (pRes.status === 'fulfilled') permissionCatalog.value = pRes.value.permissions ?? []
+    if (tRes.status === 'fulfilled') tokensList.value = tRes.value.items ?? []
   } finally {
     loading.value = false
   }
@@ -154,6 +163,37 @@ async function deleteRole(roleId: string) {
     notify('Erro ao excluir cargo', err instanceof Error ? err.message : String(err), 'error')
   }
 }
+
+async function deleteUser(userId: string) {
+  try {
+    const pid = encodeURIComponent(projectId.value || '__global__')
+    await apiFetch(`/v1/projects/${pid}/access/users/${encodeURIComponent(userId)}`, { method: 'DELETE' })
+    notify('Usuário excluído', `Usuário ${userId} removido e tokens revogados.`, 'warning')
+    await loadAccessData()
+  } catch (err) {
+    notify('Erro ao excluir usuário', err instanceof Error ? err.message : String(err), 'error')
+  }
+}
+
+async function revokeToken(tokenId: string) {
+  try {
+    await apiFetch(`/v1/auth/mcp-tokens/${encodeURIComponent(tokenId)}`, { method: 'DELETE' })
+    notify('Token revogado', tokenId, 'warning')
+    await loadAccessData()
+  } catch (err) {
+    notify('Erro ao revogar token', err instanceof Error ? err.message : String(err), 'error')
+  }
+}
+
+async function revokeUserTokens(userId: string) {
+  try {
+    const res = await apiFetch<{ revokedCount: number }>(`/v1/auth/mcp-tokens/revoke-user/${encodeURIComponent(userId)}`, { method: 'POST' })
+    notify('Tokens do usuário revogados', `${res.revokedCount} token(s) revogado(s) para ${userId}.`, 'warning')
+    await loadAccessData()
+  } catch (err) {
+    notify('Erro ao revogar tokens', err instanceof Error ? err.message : String(err), 'error')
+  }
+}
 </script>
 
 <template>
@@ -201,8 +241,8 @@ async function deleteRole(roleId: string) {
           <div class="text-sm font-semibold text-highlighted mt-0.5">{{ rolesList.length }}</div>
         </div>
         <div>
-          <div class="text-[11px] text-muted">Vínculos no Projeto</div>
-          <div class="text-sm font-semibold text-success mt-0.5">{{ assignmentsList.length }}</div>
+          <div class="text-[11px] text-muted">Tokens MCP / OAuth</div>
+          <div class="text-sm font-semibold text-info mt-0.5">{{ activeTokensCount }}</div>
         </div>
         <div>
           <div class="text-[11px] text-muted">Grants Just-In-Time</div>
@@ -227,10 +267,12 @@ async function deleteRole(roleId: string) {
       :users="unifiedUsers"
       :role-options="roleSelectItems"
       :can-assign="hasPermission('users:assign_roles')"
+      :current-user-id="currentUser?.id"
       @edit-assignment="openAssignSlideover"
       @edit-scopes="openScopeEditor"
       @quick-grant="quickGrantForUser"
       @delete-assignment="deleteAssignment"
+      @delete-user="deleteUser"
     />
 
     <AccessRolesTab
@@ -240,6 +282,15 @@ async function deleteRole(roleId: string) {
       @create="openRoleEditor()"
       @edit="openRoleEditor"
       @delete="deleteRole"
+    />
+
+    <AccessTokensTab
+      v-else-if="activeTab === 'tokens'"
+      :tokens="tokensList"
+      :can-manage-all="hasPermission('users:assign_roles')"
+      @revoke-token="revokeToken"
+      @revoke-user-tokens="revokeUserTokens"
+      @open-create-token="mcpTokenModalOpen = true"
     />
 
     <AccessGrantsTab

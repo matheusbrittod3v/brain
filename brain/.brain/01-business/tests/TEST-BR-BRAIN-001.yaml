@@ -1,0 +1,11 @@
+id: TEST-BR-BRAIN-001
+title: "TEST-BR-BRAIN-001: enforces multi-tenant project and policy scope"
+type: test
+status: approved
+access_policy: internal-project
+knowledgeLayer: verification
+sourceUri: tests/business-rules.test.ts
+relatedIds:
+  - BR-BRAIN-001
+description: >
+  Caso de teste automatizado em tests/business-rules.test.ts que verifica BR-BRAIN-001 (enforces multi-tenant project and policy scope).

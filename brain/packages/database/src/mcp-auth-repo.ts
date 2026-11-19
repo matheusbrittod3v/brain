@@ -229,4 +229,14 @@ export class PgMcpAuthRepository {
       .returning({ id: authMcpTokens.id });
     return rows.length > 0;
   }
+
+  async revokeTokensByUser(tenantId: string, userId: string): Promise<number> {
+    await this.ensureTables();
+    const rows = await this.db
+      .update(authMcpTokens)
+      .set({ revokedAt: new Date() })
+      .where(and(eq(authMcpTokens.tenantId, tenantId), eq(authMcpTokens.userId, userId), isNull(authMcpTokens.revokedAt)))
+      .returning({ id: authMcpTokens.id });
+    return rows.length;
+  }
 }

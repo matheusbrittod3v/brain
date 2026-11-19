@@ -1,7 +1,7 @@
 import type { FastifyInstance } from "fastify";
 import type { AuditLogger } from "@brain/audit-engine";
 import type { AuthContext } from "@brain/auth";
-import type { PgAuthRepository, PgOperationalRepository } from "@brain/database";
+import type { PgAuthRepository, PgMcpAuthRepository, PgOperationalRepository } from "@brain/database";
 
 export interface ApiRouteDeps {
   app: FastifyInstance;
@@ -9,5 +9,6 @@ export interface ApiRouteDeps {
   recordAudit: (ctx: AuthContext, event: Parameters<AuditLogger["record"]>[0]) => Promise<unknown>;
   opRepo?: PgOperationalRepository;
   authRepo?: PgAuthRepository;
+  mcpAuthRepo?: PgMcpAuthRepository;
 }
 

@@ -1,0 +1,11 @@
+id: TEST-BR-BRAIN-009
+title: "TEST-BR-BRAIN-009: evaluates blast radius, contradiction alerts, and 700-line invariant"
+type: test
+status: approved
+access_policy: internal-project
+knowledgeLayer: verification
+sourceUri: tests/business-rules.test.ts
+relatedIds:
+  - BR-BRAIN-009
+description: >
+  Caso de teste automatizado em tests/business-rules.test.ts que verifica BR-BRAIN-009 (evaluates blast radius, contradiction alerts, and 700-line invariant).
