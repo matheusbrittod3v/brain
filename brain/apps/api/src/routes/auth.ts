@@ -356,30 +356,38 @@ export function registerAuthRoutes(
 
     if (deps.authRepo) {
       const exchanged = await deps.authRepo.exchangeOAuthDeviceCode(deviceCode);
-      if (exchanged && exchanged.clientId === clientId && exchanged.status === "approved" && exchanged.userId) {
-        const dbUser = await deps.authRepo.findUserById(exchanged.userId);
-        if (dbUser) {
-          const accessToken = await issueUserJwt({
-            sub: dbUser.id,
-            email: dbUser.email,
-            name: dbUser.name,
-            tenant_id: dbUser.tenantId,
-            roles: dbUser.roles,
-            allowed_projects: dbUser.allowedProjects,
-            allowed_policies: dbUser.allowedPolicies,
-            permissions: dbUser.customPermissions as never
-          });
-          return {
-            access_token: accessToken,
-            token_type: "Bearer",
-            expires_in: 3600,
-            user: {
-              id: dbUser.id,
+      if (exchanged && exchanged.clientId === clientId) {
+        if (exchanged.status === "pending") {
+          throw new BrainError("BRAIN_ERR_CONFLICT", "authorization_pending: aguardando aprovação no navegador.", 400);
+        }
+        if (exchanged.status === "rejected" || exchanged.status === "expired") {
+          throw new BrainError("BRAIN_ERR_UNAUTHORIZED", `Autorização ${exchanged.status}.`, 401);
+        }
+        if (exchanged.status === "approved" && exchanged.userId) {
+          const dbUser = await deps.authRepo.findUserById(exchanged.userId);
+          if (dbUser) {
+            const accessToken = await issueUserJwt({
+              sub: dbUser.id,
               email: dbUser.email,
               name: dbUser.name,
-              roles: dbUser.roles
-            }
-          };
+              tenant_id: dbUser.tenantId,
+              roles: dbUser.roles,
+              allowed_projects: dbUser.allowedProjects,
+              allowed_policies: dbUser.allowedPolicies,
+              permissions: dbUser.customPermissions as never
+            });
+            return {
+              access_token: accessToken,
+              token_type: "Bearer",
+              expires_in: 28800,
+              user: {
+                id: dbUser.id,
+                email: dbUser.email,
+                name: dbUser.name,
+                roles: dbUser.roles
+              }
+            };
+          }
         }
       }
     }
@@ -398,5 +406,45 @@ export function registerAuthRoutes(
     const ctx = await deps.authenticateRequest(req.headers.authorization);
     revokeActorSessions(ctx.actorId);
     return { revoked: true, actorId: ctx.actorId };
+  });
+
+  // 10. Gerar Token MCP / Personal Access Token para clientes externos (Codex, Cursor, Claude)
+  app.post<{
+    Body: { label?: string; expiresInDays?: number };
+  }>("/v1/auth/mcp-token", async (req) => {
+    const ctx = await deps.authenticateRequest(req.headers.authorization);
+    const days = Math.min(365, Math.max(1, Number(req.body?.expiresInDays ?? 90) || 90));
+    const label = (req.body?.label || "codex-mcp").trim();
+    const dbUser = deps.authRepo ? await deps.authRepo.findUserById(ctx.actorId) : null;
+    const token = await issueUserJwt(
+      {
+        sub: ctx.actorId,
+        email: dbUser?.email ?? `${ctx.actorId}@brain.local`,
+        name: `${dbUser?.name ?? ctx.actorId} (${label})`,
+        tenant_id: ctx.tenantId,
+        roles: dbUser?.roles ?? ctx.roles,
+        allowed_projects: dbUser?.allowedProjects ?? ctx.allowedProjects,
+        allowed_policies: dbUser?.allowedPolicies ?? ctx.allowedPolicies,
+        permissions: (dbUser?.customPermissions as never) ?? ctx.permissions,
+        actor_type: "agent"
+      },
+      undefined,
+      `${days}d`
+    );
+
+    const apiPort = process.env.PORT || "3333";
+    const mcpUrl = process.env.BRAIN_PUBLIC_API_URL
+      ? `${process.env.BRAIN_PUBLIC_API_URL.replace(/\/+$/, "")}/mcp`
+      : `http://localhost:${apiPort}/mcp`;
+
+    return {
+      token,
+      tokenType: "Bearer",
+      expiresInDays: days,
+      mcpUrl,
+      tenantId: ctx.tenantId,
+      actorId: ctx.actorId,
+      codexToml: `[mcp_servers.brain]\nurl = "${mcpUrl}"\nbearer_token_env_var = "BRAIN_MCP_TOKEN"\n\n# Ou com header direto:\n# [mcp_servers.brain.http_headers]\n# Authorization = "Bearer ${token}"`
+    };
   });
 }

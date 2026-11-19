@@ -1,4 +1,6 @@
 import { randomUUID } from "node:crypto";
+import { readFile } from "node:fs/promises";
+import { join } from "node:path";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { assertProjectAccess, type AuthContext } from "@brain/auth";
@@ -317,6 +319,56 @@ export function registerCoreRetrievalTools(
       const testKeys = new Set(tests.map((hit) => `${hit.projectId}:${hit.itemId}`));
       const files = related.filter((hit) => !testKeys.has(`${hit.projectId}:${hit.itemId}`) && hit.item?.type !== "code_symbol" && /\.[cm]?[jt]sx?$|\.(?:py|go|java|rs)$/.test(hit.item?.sourceUri ?? ""));
       return okJson({ projectId, targetId, related, symbols, files, tests, ...(page.nextCursor ? { nextCursor: page.nextCursor } : {}) });
+    }
+  );
+
+  server.tool(
+    "brain_resolve_workspace_project",
+    describeMcpTool(profile, "Detecta automaticamente o projectId a partir do diretório de trabalho (cwd) ou git remote, sem depender de IDs no .env."),
+    {
+      workspacePath: z.string().optional(),
+      repoUrl: z.string().optional()
+    },
+    async ({ workspacePath, repoUrl }) => {
+      const resolvedPath = workspacePath?.trim() || runtime.workspaceRoot || process.cwd();
+      let detectedRepoUrl = repoUrl?.trim();
+      if (!detectedRepoUrl) {
+        try {
+          const gitConfig = await readFile(join(resolvedPath, ".git", "config"), "utf8");
+          const match = gitConfig.match(/\[remote "origin"\][\s\S]*?url\s*=\s*(.+)/);
+          if (match?.[1]) detectedRepoUrl = match[1].trim();
+        } catch {
+          // .git/config not found in workspacePath
+        }
+      }
+
+      const dbMatch = runtime.opRepo
+        ? await runtime.opRepo.findProjectByWorkspace(ctx.tenantId, { workspaceRoot: resolvedPath, repoUrl: detectedRepoUrl })
+        : null;
+
+      if (dbMatch && ctx.allowedProjects.includes(dbMatch.projectId)) {
+        return okJson({
+          matched: true,
+          projectId: dbMatch.projectId,
+          name: dbMatch.name,
+          matchedBy: dbMatch.matchedBy,
+          workspacePath: resolvedPath,
+          repoUrl: detectedRepoUrl ?? null,
+          allowedProjects: ctx.allowedProjects
+        });
+      }
+
+      const folderName = resolvedPath.split("/").filter(Boolean).pop()?.toLowerCase() ?? "";
+      const fallbackId = ctx.allowedProjects.find((id) => id.toLowerCase() === folderName) ?? null;
+
+      return okJson({
+        matched: Boolean(fallbackId),
+        projectId: fallbackId,
+        matchedBy: fallbackId ? "allowed_projects_folder" : "none",
+        workspacePath: resolvedPath,
+        repoUrl: detectedRepoUrl ?? null,
+        allowedProjects: ctx.allowedProjects
+      });
     }
   );
 }

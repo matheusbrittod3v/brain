@@ -29,6 +29,7 @@ const editingRole = ref<RoleItem | null>(null)
 
 const scopeModalOpen = ref(false)
 const scopeTargetUser = ref<UnifiedUserRow | null>(null)
+const mcpTokenModalOpen = ref(false)
 
 const grantPresetActorId = ref('')
 
@@ -180,6 +181,9 @@ async function deleteRole(roleId: string) {
         >
           Novo Cargo
         </UButton>
+        <UButton size="sm" variant="soft" color="info" icon="i-lucide-key-round" @click="mcpTokenModalOpen = true">
+          Token MCP
+        </UButton>
         <UButton size="sm" variant="ghost" icon="i-lucide-refresh-cw" :loading="loading" @click="loadAccessData">
           Atualizar
         </UButton>
@@ -269,5 +273,7 @@ async function deleteRole(roleId: string) {
       :user="scopeTargetUser"
       @saved="loadAccessData"
     />
+
+    <AccessMcpTokenModal v-model:open="mcpTokenModalOpen" />
   </div>
 </template>

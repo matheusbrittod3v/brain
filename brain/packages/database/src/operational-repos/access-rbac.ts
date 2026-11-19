@@ -16,6 +16,8 @@ import { withTenantRls, type BrainDb } from "../client.js";
 import {
   customAccessPolicies,
   projectAccessMembers,
+  projectRepositoryHeads,
+  projects,
   temporaryAccessGrants
 } from "../schema.js";
 
@@ -446,6 +448,133 @@ export class PgAccessRbacRepo {
       effective = applyUserFineGrainedPolicy(effective, policy);
     }
     return effective;
+  }
+
+  /**
+   * Resolves allowed projects and policies dynamically from PostgreSQL for an authenticated actor.
+   * Falls back to env-configured defaults when no dynamic database scope is present.
+   */
+  async resolveDynamicMcpScope(
+    ctx: AuthContext,
+    fallbackProjects: readonly string[] = [],
+    fallbackPolicies: readonly string[] = []
+  ): Promise<AuthContext> {
+    const now = new Date();
+    const isAdmin =
+      ctx.actorType === "system" ||
+      ctx.roles.some((r) => ["admin", "owner", "org_admin", "superadmin"].includes(r.toLowerCase()));
+
+    const [tenantProjects, memberships, activeGrants] = await Promise.all([
+      this.db
+        .select({ id: projects.id })
+        .from(projects)
+        .where(eq(projects.tenantId, ctx.tenantId))
+        .catch(() => [] as Array<{ id: string }>),
+      this.db
+        .select({
+          projectId: projectAccessMembers.projectId,
+          allowedPolicies: projectAccessMembers.allowedPolicies
+        })
+        .from(projectAccessMembers)
+        .where(and(eq(projectAccessMembers.tenantId, ctx.tenantId), eq(projectAccessMembers.actorId, ctx.actorId)))
+        .catch(() => [] as Array<{ projectId: string; allowedPolicies: string[] }>),
+      this.db
+        .select({
+          projectId: temporaryAccessGrants.projectId,
+          policyIds: temporaryAccessGrants.policyIds
+        })
+        .from(temporaryAccessGrants)
+        .where(
+          and(
+            eq(temporaryAccessGrants.tenantId, ctx.tenantId),
+            eq(temporaryAccessGrants.actorId, ctx.actorId),
+            gt(temporaryAccessGrants.expiresAt, now)
+          )
+        )
+        .catch(() => [] as Array<{ projectId: string; policyIds: string[] }>)
+    ]);
+
+    const projectSet = new Set<string>([...ctx.allowedProjects, ...fallbackProjects]);
+    const policySet = new Set<string>([...ctx.allowedPolicies, ...fallbackPolicies, "public-org", "internal-project"]);
+
+    if (isAdmin) {
+      for (const p of tenantProjects) projectSet.add(p.id);
+      policySet.add("confidential-business");
+      policySet.add("restricted-security");
+    } else {
+      for (const m of memberships) {
+        projectSet.add(m.projectId);
+        for (const pol of m.allowedPolicies) policySet.add(pol);
+      }
+      for (const g of activeGrants) {
+        projectSet.add(g.projectId);
+        for (const pol of g.policyIds) policySet.add(pol);
+      }
+      if (projectSet.size === 0 && ctx.roles.includes("developer")) {
+        for (const p of tenantProjects) projectSet.add(p.id);
+      }
+    }
+
+    return {
+      ...ctx,
+      allowedProjects: Array.from(projectSet).filter(Boolean),
+      allowedPolicies: Array.from(policySet).filter(Boolean)
+    };
+  }
+
+  /**
+   * Finds a registered project in PostgreSQL matching a workspace path or repository URL/slug.
+   */
+  async findProjectByWorkspace(
+    tenantId: string,
+    params: { workspaceRoot?: string; repoUrl?: string }
+  ): Promise<{ projectId: string; name: string; matchedBy: string } | null> {
+    const normalizeRepo = (raw: string) =>
+      raw
+        .trim()
+        .toLowerCase()
+        .replace(/\.git$/, "")
+        .replace(/^git@github\.com:/, "github.com/")
+        .replace(/^https?:\/\//, "");
+
+    const targetRepo = params.repoUrl ? normalizeRepo(params.repoUrl) : "";
+    const targetPath = params.workspaceRoot?.trim().toLowerCase() ?? "";
+    const folderName = targetPath.split("/").filter(Boolean).pop() ?? "";
+
+    const [repoHeads, tenantProjects] = await Promise.all([
+      this.db
+        .select({ projectId: projectRepositoryHeads.projectId, repository: projectRepositoryHeads.repository })
+        .from(projectRepositoryHeads)
+        .where(eq(projectRepositoryHeads.tenantId, tenantId))
+        .catch(() => [] as Array<{ projectId: string; repository: string }>),
+      this.db
+        .select({ id: projects.id, name: projects.name, knowledgeRoot: projects.knowledgeRoot })
+        .from(projects)
+        .where(eq(projects.tenantId, tenantId))
+        .catch(() => [] as Array<{ id: string; name: string; knowledgeRoot: string }>)
+    ]);
+
+    if (targetRepo) {
+      const repoMatch = repoHeads.find((h) => {
+        const norm = normalizeRepo(h.repository);
+        return norm === targetRepo || targetRepo.endsWith(`/${norm}`) || norm.endsWith(`/${targetRepo}`);
+      });
+      if (repoMatch) {
+        const proj = tenantProjects.find((p) => p.id === repoMatch.projectId);
+        return { projectId: repoMatch.projectId, name: proj?.name ?? repoMatch.projectId, matchedBy: "repository" };
+      }
+    }
+
+    if (folderName) {
+      const folderMatch = tenantProjects.find(
+        (p) => p.id.toLowerCase() === folderName || p.name.toLowerCase() === folderName
+      );
+      if (folderMatch) {
+        return { projectId: folderMatch.id, name: folderMatch.name, matchedBy: "workspace_folder" };
+      }
+    }
+
+    return null;
   }
 }
 

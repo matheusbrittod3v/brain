@@ -1,5 +1,4 @@
 import type { FastifyInstance } from "fastify";
-import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import type { HandoffStore } from "@brain/agent-handoff";
 import type { BrainRunnerQueue } from "@brain/agent-runner";
 import type { ApprovalQueue, PostgresApprovalQueue } from "@brain/approval-engine";
@@ -17,10 +16,10 @@ import type { PgAuthRepository, PgOperationalRepository } from "@brain/database"
 import type { KnowledgeGraphStore, PostgresGraphStore } from "@brain/graph";
 import { scanForSecrets } from "@brain/ingestion";
 import type { PostgresKnowledgeRepository } from "@brain/knowledge";
-import { createBrainMcpServer, createRunnerSchedule } from "@brain/mcp-server";
 import type { PostgresMemoryManager } from "@brain/memory";
 import type { AsyncRetrievalEngine, PostgresRetrievalEngine } from "@brain/retrieval";
 import { assertSecretScanClean } from "../services/ai-worker.js";
+import { registerMcpGatewayRoutes } from "./mcp-gateway.js";
 
 export type DeveloperProfileData = {
   tenantId: string;
@@ -207,45 +206,8 @@ export function registerSystemRoutes(
     return { deleted };
   });
 
-  // Universal Agent Gateway + MCP Streamable HTTP (Item 7 & 37)
-  app.get("/gateway", async () => ({
-    gateway: "brain-universal-agent-gateway",
-    deploymentMode,
-    transports: ["streamable-http", "stdio", "rest"],
-    mcpEndpoint: "/mcp",
-    toolsCount: 58,
-    pgStoresEnabled: Boolean(pgGraph && pgRetrieval)
-  }));
-
-  app.post("/mcp", async (req, reply) => {
-    const ctx = await authenticateRequest(req.headers.authorization, configuredApiKey, "default-org", allowedProjects, undefined, allowedPolicies);
-    const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined });
-    const mcpRuntime = {
-      graph: pgGraph ?? graph,
-      retrieval: queryAwareRetrieval,
-      contextEngine,
-      handoffs,
-      runner,
-      scheduleRunnerTask: (process.env.DATABASE_SYSTEM_URL ?? process.env.DATABASE_URL)
-        ? async (input: Parameters<typeof createRunnerSchedule>[0] & { cron: string }) => ({
-            scheduleId: await createRunnerSchedule(input, input.cron, process.env.DATABASE_SYSTEM_URL ?? process.env.DATABASE_URL!)
-          })
-        : undefined,
-      opRepo,
-      memory: pgMemory,
-      knowledge: pgKnowledge,
-      crossServiceRegistry: pgCrossService ?? crossService,
-      approvals: pgApprovals,
-      registeredProjects,
-      audit: {
-        record: (event: Parameters<AuditLogger["record"]>[0]) => recordAudit(ctx, event)
-      }
-    };
-    const mcpServer = createBrainMcpServer(mcpRuntime as never, ctx, "internal-project", "service");
-    await mcpServer.connect(transport);
-    reply.hijack();
-    await transport.handleRequest(req.raw, reply.raw, req.body);
-  });
+  // Universal Agent Gateway + MCP Streamable HTTP + OAuth Discovery
+  registerMcpGatewayRoutes(app, deps);
 
   return { getDeveloperProfile };
 }

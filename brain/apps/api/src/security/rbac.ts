@@ -65,7 +65,12 @@ const PUBLIC_AUTH_ROUTES = new Set([
   "POST /v1/auth/verify-email",
   "POST /v1/auth/oauth/device/code",
   "GET /v1/auth/oauth/session/:userCode",
-  "POST /v1/auth/oauth/token"
+  "POST /v1/auth/oauth/token",
+  "GET /.well-known/oauth-protected-resource",
+  "GET /.well-known/oauth-authorization-server",
+  "POST /mcp",
+  "GET /mcp",
+  "DELETE /mcp"
 ]);
 
 const SIGNED_WEBHOOK_ROUTES = new Set([
