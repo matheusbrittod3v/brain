@@ -10,6 +10,10 @@
   ],
   "packageManager": "bun@1.4.4",
   "scripts": {
+    "init": "bun scripts/init.ts",
+    "init:start": "bun scripts/init.ts --start",
+    "init:infra": "bun scripts/init.ts --infra",
+    "init:doctor": "bun scripts/init.ts --check",
     "build": "turbo run build",
     "typecheck": "turbo run typecheck",
     "test": "turbo run test",
@@ -23,8 +27,8 @@
     "start:worker": "bun --filter @brain/worker start",
     "db:bootstrap-roles": "bun --filter @brain/database db:bootstrap-roles",
     "db:migrate": "bun --filter @brain/database db:migrate",
-    "infra:up": "docker compose -f infra/docker/docker-compose.yml up -d",
-    "infra:down": "docker compose -f infra/docker/docker-compose.yml down"
+    "infra:up": "docker-compose -f infra/docker/docker-compose.yml up -d || docker compose -f infra/docker/docker-compose.yml up -d",
+    "infra:down": "docker-compose -f infra/docker/docker-compose.yml down || docker compose -f infra/docker/docker-compose.yml down"
   },
   "engines": {
     "node": ">=22.0.0"
