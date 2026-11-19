@@ -232,6 +232,7 @@ export function buildApp(
     opRepo,
     operationalDb,
     authRepo,
+    mcpAuthRepo,
     pgTemporal,
     pgCrossService,
     upsertKnowledgeItem,
@@ -306,7 +307,8 @@ export function buildApp(
 
   registerAuthRoutes(app, {
     authenticateRequest: (h) => authenticateRequest(h, configuredApiKey, "default-org", allowedProjects, undefined, allowedPolicies),
-    authRepo
+    authRepo,
+    mcpAuthRepo
   });
   registerRealtimeRoutes(app, {
     realtime,
@@ -357,6 +359,7 @@ export function buildApp(
     recordAudit,
     opRepo,
     authRepo,
+    mcpAuthRepo,
     pgGraph,
     graph,
     queryAwareRetrieval,

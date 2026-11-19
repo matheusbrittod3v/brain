@@ -1,5 +1,7 @@
 import { spawn } from "node:child_process";
-import { chmod, mkdir, readFile, writeFile } from "node:fs/promises";
+import { createHash, randomBytes } from "node:crypto";
+import { chmod, mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { createServer } from "node:http";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import * as readline from "node:readline";
@@ -7,8 +9,11 @@ import * as readline from "node:readline";
 export interface StoredMcpCredentials {
   apiUrl: string;
   accessToken: string;
+  refreshToken?: string;
+  expiresAt?: number;
   tenantId?: string;
   actorId?: string;
+  email?: string;
   savedAt: string;
 }
 
@@ -24,13 +29,23 @@ export async function loadStoredCredentials(): Promise<StoredMcpCredentials | nu
     return {
       apiUrl: parsed.apiUrl.replace(/\/+$/, ""),
       accessToken: parsed.accessToken,
+      refreshToken: parsed.refreshToken,
+      expiresAt: parsed.expiresAt,
       tenantId: parsed.tenantId,
       actorId: parsed.actorId,
+      email: parsed.email,
       savedAt: parsed.savedAt ?? new Date().toISOString()
     };
   } catch {
     return null;
   }
+}
+
+async function saveStoredCredentials(creds: StoredMcpCredentials): Promise<void> {
+  const credsPath = getCredentialsPath();
+  await mkdir(dirname(credsPath), { recursive: true });
+  await writeFile(credsPath, JSON.stringify(creds, null, 2), "utf8");
+  await chmod(credsPath, 0o600).catch(() => {});
 }
 
 function tryOpenBrowser(url: string): void {
@@ -40,88 +55,195 @@ function tryOpenBrowser(url: string): void {
     const child = spawn(cmd, args, { detached: true, stdio: "ignore" });
     child.unref();
   } catch {
-    // Non-fatal: user can open the printed URL manually
+    // Non-fatal
   }
 }
 
 /**
- * Interactive OAuth2 Device Flow login (`brain-mcp login`) that stores a user JWT in `~/.brain/credentials.json`.
+ * Interactive OAuth 2.1 PKCE login (`brain-mcp login`) with automatic browser callback (no code typing).
  */
 export async function runMcpLoginFlow(apiUrlInput?: string): Promise<void> {
   const apiUrl = (apiUrlInput || process.env.BRAIN_API_URL || "http://localhost:3333").replace(/\/+$/, "");
   const webUrl = (process.env.BRAIN_WEB_URL || "http://localhost:3000").replace(/\/+$/, "");
-  const clientId = "brain-mcp-cli";
 
-  const codeRes = await fetch(`${apiUrl}/v1/auth/oauth/device/code`, {
+  const codeVerifier = randomBytes(32).toString("base64url");
+  const codeChallenge = createHash("sha256").update(codeVerifier).digest("base64url");
+  const state = randomBytes(16).toString("hex");
+
+  const { code, redirectUri, clientId } = await new Promise<{ code: string; redirectUri: string; clientId: string }>(
+    (resolve, reject) => {
+      const server = createServer(async (req, res) => {
+        try {
+          const url = new URL(req.url || "/", "http://127.0.0.1");
+          if (url.pathname !== "/callback") {
+            res.writeHead(404).end();
+            return;
+          }
+          const err = url.searchParams.get("error");
+          const authCode = url.searchParams.get("code");
+          const returnedState = url.searchParams.get("state");
+          if (err || !authCode || returnedState !== state) {
+            res.writeHead(400, { "content-type": "text/html; charset=utf-8" });
+            res.end("<h3>Autorização cancelada ou inválida. Você pode fechar esta aba.</h3>");
+            server.close();
+            reject(new Error(err || "Callback OAuth inválido."));
+            return;
+          }
+          res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
+          res.end("<h3>Brain MCP autenticado com sucesso! Você já pode fechar esta aba.</h3>");
+          server.close();
+          resolve({ code: authCode, redirectUri: boundRedirectUri, clientId: registeredClientId });
+        } catch (e) {
+          server.close();
+          reject(e);
+        }
+      });
+
+      let boundRedirectUri = "";
+      let registeredClientId = "brain-mcp-cli";
+      server.listen(0, "127.0.0.1", async () => {
+        try {
+          const addr = server.address();
+          if (!addr || typeof addr === "string") throw new Error("Falha ao abrir porta local de callback.");
+          boundRedirectUri = `http://127.0.0.1:${addr.port}/callback`;
+
+          const regRes = await fetch(`${apiUrl}/oauth/register`, {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({
+              client_name: "Brain MCP CLI (stdio)",
+              redirect_uris: [boundRedirectUri],
+              grant_types: ["authorization_code", "refresh_token"],
+              scope: "projects:all knowledge:read knowledge:write"
+            })
+          });
+          if (regRes.ok) {
+            const reg = (await regRes.json()) as { client_id?: string };
+            if (reg.client_id) registeredClientId = reg.client_id;
+          }
+
+          const authUrl = new URL(`${webUrl}/auth/oauth`);
+          authUrl.searchParams.set("response_type", "code");
+          authUrl.searchParams.set("client_id", registeredClientId);
+          authUrl.searchParams.set("redirect_uri", boundRedirectUri);
+          authUrl.searchParams.set("code_challenge", codeChallenge);
+          authUrl.searchParams.set("code_challenge_method", "S256");
+          authUrl.searchParams.set("scope", "projects:all knowledge:read knowledge:write");
+          authUrl.searchParams.set("state", state);
+
+          console.error(`\n[brain-mcp] Abrindo navegador para aprovação 1-clique:\n  ${authUrl.toString()}\n`);
+          tryOpenBrowser(authUrl.toString());
+        } catch (e) {
+          server.close();
+          reject(e);
+        }
+      });
+    }
+  );
+
+  const tokenRes = await fetch(`${apiUrl}/oauth/token`, {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ clientId, clientName: "Brain MCP CLI (stdio)", scope: "projects:all" })
+    body: JSON.stringify({
+      grant_type: "authorization_code",
+      code,
+      redirect_uri: redirectUri,
+      client_id: clientId,
+      code_verifier: codeVerifier
+    })
   });
-
-  if (!codeRes.ok) {
-    throw new Error(`Falha ao iniciar OAuth Device Flow em ${apiUrl}: HTTP ${codeRes.status}`);
+  if (!tokenRes.ok) {
+    throw new Error(`Falha ao trocar código por token: HTTP ${tokenRes.status} ${await tokenRes.text()}`);
   }
-
-  const codeData = (await codeRes.json()) as {
-    device_code: string;
-    user_code: string;
-    verification_uri: string;
-    expires_in: number;
-    interval: number;
+  const tokenData = (await tokenRes.json()) as {
+    access_token: string;
+    refresh_token?: string;
+    expires_in?: number;
   };
+  await saveStoredCredentials({
+    apiUrl,
+    accessToken: tokenData.access_token,
+    refreshToken: tokenData.refresh_token,
+    expiresAt: tokenData.expires_in ? Date.now() + tokenData.expires_in * 1000 : undefined,
+    savedAt: new Date().toISOString()
+  });
+  console.error(`[brain-mcp] Autenticado com sucesso! Credenciais salvas em ${getCredentialsPath()}`);
+}
 
-  const verifyUrl = `${webUrl}${codeData.verification_uri}?code=${encodeURIComponent(codeData.user_code)}`;
-  console.error(`\n[brain-mcp] Abra o link abaixo para aprovar a conexão:\n  ${verifyUrl}\n\nCódigo de verificação: ${codeData.user_code}\n`);
-  tryOpenBrowser(verifyUrl);
+export async function runMcpWhoami(): Promise<void> {
+  const creds = await loadStoredCredentials();
+  if (!creds) {
+    console.log(JSON.stringify({ authenticated: false, credentialsFile: getCredentialsPath(), hint: "Execute 'brain-mcp login' para autenticar." }, null, 2));
+    return;
+  }
+  const res = await fetch(`${creds.apiUrl}/v1/auth/me`, {
+    headers: { authorization: `Bearer ${creds.accessToken}` }
+  }).catch(() => null);
+  const session = res?.ok ? await res.json().catch(() => null) : null;
+  console.log(
+    JSON.stringify(
+      {
+        authenticated: Boolean(session),
+        apiUrl: creds.apiUrl,
+        actorId: creds.actorId,
+        email: creds.email,
+        expiresAt: creds.expiresAt ? new Date(creds.expiresAt).toISOString() : null,
+        credentialsFile: getCredentialsPath(),
+        session
+      },
+      null,
+      2
+    )
+  );
+}
 
-  const deadline = Date.now() + (codeData.expires_in || 600) * 1000;
-  const pollMs = Math.max(1500, (codeData.interval || 2) * 1000);
+export async function runMcpLogout(): Promise<void> {
+  const creds = await loadStoredCredentials();
+  if (creds) {
+    await fetch(`${creds.apiUrl}/v1/auth/mcp-tokens/revoke-current`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${creds.accessToken}` }
+    }).catch(() => {});
+  }
+  await rm(getCredentialsPath(), { force: true });
+  console.error(`[brain-mcp] Sessão encerrada e credenciais removidas de ${getCredentialsPath()}`);
+}
 
-  while (Date.now() < deadline) {
-    await new Promise((r) => setTimeout(r, pollMs));
-    const tokenRes = await fetch(`${apiUrl}/v1/auth/oauth/token`, {
+async function refreshIfNeeded(creds: StoredMcpCredentials, force = false): Promise<StoredMcpCredentials> {
+  if (!creds.refreshToken) return creds;
+  const nearExpiry = creds.expiresAt ? creds.expiresAt - Date.now() < 5 * 60 * 1000 : false;
+  if (!force && !nearExpiry) return creds;
+
+  try {
+    const res = await fetch(`${creds.apiUrl}/oauth/token`, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ deviceCode: codeData.device_code, clientId })
+      body: JSON.stringify({ grant_type: "refresh_token", refresh_token: creds.refreshToken })
     });
-
-    if (tokenRes.ok) {
-      const tokenData = (await tokenRes.json()) as {
-        access_token: string;
-        user?: { id?: string; email?: string };
-      };
-      const credsPath = getCredentialsPath();
-      await mkdir(dirname(credsPath), { recursive: true });
-      const payload: StoredMcpCredentials = {
-        apiUrl,
-        accessToken: tokenData.access_token,
-        actorId: tokenData.user?.id,
-        savedAt: new Date().toISOString()
-      };
-      await writeFile(credsPath, JSON.stringify(payload, null, 2), "utf8");
-      await chmod(credsPath, 0o600).catch(() => {});
-      console.error(`[brain-mcp] Autenticado como ${tokenData.user?.email ?? tokenData.user?.id ?? "usuário"}. Credenciais salvas em ${credsPath}`);
-      return;
-    }
-
-    const errText = await tokenRes.text().catch(() => "");
-    if (tokenRes.status === 400 && errText.includes("authorization_pending")) {
-      continue;
-    }
-    if (tokenRes.status >= 401) {
-      throw new Error(`Autorização rejeitada ou expirada (${tokenRes.status}): ${errText}`);
-    }
+    if (!res.ok) return creds;
+    const data = (await res.json()) as { access_token: string; refresh_token?: string; expires_in?: number };
+    const updated: StoredMcpCredentials = {
+      ...creds,
+      accessToken: data.access_token,
+      refreshToken: data.refresh_token ?? creds.refreshToken,
+      expiresAt: data.expires_in ? Date.now() + data.expires_in * 1000 : creds.expiresAt,
+      savedAt: new Date().toISOString()
+    };
+    await saveStoredCredentials(updated);
+    return updated;
+  } catch {
+    return creds;
   }
-
-  throw new Error("Tempo limite excedido aguardando aprovação OAuth2.");
 }
 
 /**
- * Proxies stdio JSON-RPC messages to the authenticated `/mcp` Streamable HTTP endpoint.
+ * Proxies stdio JSON-RPC messages to the authenticated `/mcp` Streamable HTTP endpoint with session & auto-refresh.
  */
-export async function runStdioHttpProxy(credentials: StoredMcpCredentials): Promise<void> {
+export async function runStdioHttpProxy(initialCredentials: StoredMcpCredentials): Promise<void> {
+  let creds = initialCredentials;
+  let mcpSessionId: string | null = null;
   const rl = readline.createInterface({ input: process.stdin, crlfDelay: Infinity });
-  const endpoint = `${credentials.apiUrl}/mcp`;
+  const endpoint = `${creds.apiUrl}/mcp`;
 
   for await (const line of rl) {
     const trimmed = line.trim();
@@ -136,15 +258,28 @@ export async function runStdioHttpProxy(credentials: StoredMcpCredentials): Prom
     }
 
     try {
-      const res = await fetch(endpoint, {
-        method: "POST",
-        headers: {
-          "content-type": "application/json",
-          accept: "application/json, text/event-stream",
-          authorization: `Bearer ${credentials.accessToken}`
-        },
-        body: trimmed
-      });
+      creds = await refreshIfNeeded(creds);
+      const sendRequest = (token: string) =>
+        fetch(endpoint, {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            accept: "application/json, text/event-stream",
+            authorization: `Bearer ${token}`,
+            "x-brain-client": "brain-mcp-stdio-proxy",
+            ...(mcpSessionId ? { "mcp-session-id": mcpSessionId } : {})
+          },
+          body: trimmed
+        });
+
+      let res = await sendRequest(creds.accessToken);
+      if (res.status === 401 && creds.refreshToken) {
+        creds = await refreshIfNeeded(creds, true);
+        res = await sendRequest(creds.accessToken);
+      }
+
+      const sid = res.headers.get("mcp-session-id");
+      if (sid) mcpSessionId = sid;
 
       const contentType = res.headers.get("content-type") ?? "";
       const bodyText = await res.text();
@@ -159,9 +294,7 @@ export async function runStdioHttpProxy(credentials: StoredMcpCredentials): Prom
         for (const sseLine of bodyText.split(/\r?\n/)) {
           if (sseLine.startsWith("data:")) {
             const data = sseLine.slice(5).trim();
-            if (data && data !== "[DONE]") {
-              process.stdout.write(`${data}\n`);
-            }
+            if (data && data !== "[DONE]") process.stdout.write(`${data}\n`);
           }
         }
       } else if (bodyText.trim()) {
@@ -180,4 +313,3 @@ export async function runStdioHttpProxy(credentials: StoredMcpCredentials): Prom
     }
   }
 }
-

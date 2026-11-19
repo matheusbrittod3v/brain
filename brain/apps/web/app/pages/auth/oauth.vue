@@ -2,16 +2,24 @@
 const route = useRoute()
 const { apiFetch, apiKey, currentUser, setSessionToken, refreshAuthSession, notify } = useBrainApi()
 
-const userCode = ref(String(route.query.code ?? '').trim().toUpperCase())
-const session = ref<{
-  userCode: string
-  clientId: string
-  clientName: string
-  scope: string
-  status: string
-  expiresAt: string | number
-} | null>(null)
-const loadingSession = ref(false)
+// OAuth 2.1 PKCE params
+const clientId = computed(() => String(route.query.client_id ?? '').trim())
+const redirectUri = computed(() => String(route.query.redirect_uri ?? '').trim())
+const codeChallenge = computed(() => String(route.query.code_challenge ?? '').trim())
+const codeChallengeMethod = computed(() => String(route.query.code_challenge_method ?? 'S256').trim())
+const requestedScope = computed(() => String(route.query.scope ?? 'projects:all').trim())
+const oauthState = computed(() => String(route.query.state ?? '').trim())
+const isPkceMode = computed(() => Boolean(clientId.value && redirectUri.value && codeChallenge.value))
+
+// Auto-discovered pending Device Flow sessions (no code typing required)
+const queryUserCode = computed(() => String(route.query.code ?? '').trim().toUpperCase())
+const pendingList = ref<Array<{ userCode: string; clientId: string; clientName: string; scope: string; status: string }>>([])
+const clientInfo = ref<{ clientId: string; clientName: string; scope: string } | null>(null)
+const availableProjects = ref<Array<{ id: string; name: string }>>([])
+const selectedProjects = ref<string[]>([])
+const restrictProjects = ref(false)
+
+const loading = ref(false)
 const submitting = ref(false)
 const doneMessage = ref<string | null>(null)
 const errorMessage = ref<string | null>(null)
@@ -20,18 +28,32 @@ const email = ref('')
 const password = ref('')
 const loggingIn = ref(false)
 
-async function loadSession() {
-  const code = userCode.value.trim().toUpperCase()
-  if (!code) return
-  loadingSession.value = true
+async function loadConsentContext() {
+  loading.value = true
   errorMessage.value = null
   try {
-    session.value = await apiFetch(`/v1/auth/oauth/session/${encodeURIComponent(code)}`)
+    if (isPkceMode.value) {
+      clientInfo.value = await apiFetch<{ clientId: string; clientName: string; scope: string }>(
+        `/v1/auth/oauth/client/${encodeURIComponent(clientId.value)}`
+      ).catch(() => ({ clientId: clientId.value, clientName: clientId.value, scope: requestedScope.value }))
+    } else if (queryUserCode.value) {
+      const s = await apiFetch<{ userCode: string; clientId: string; clientName: string; scope: string; status: string }>(
+        `/v1/auth/oauth/session/${encodeURIComponent(queryUserCode.value)}`
+      )
+      pendingList.value = s.status === 'pending' ? [s] : []
+    } else if (apiKey.value) {
+      const res = await apiFetch<{ items?: typeof pendingList.value }>('/v1/auth/oauth/pending')
+      pendingList.value = res.items ?? []
+    }
+
+    if (apiKey.value) {
+      const res = await apiFetch<{ items?: Array<{ id: string; name: string }> }>('/v1/projects').catch(() => ({ items: [] }))
+      availableProjects.value = res.items ?? []
+    }
   } catch (err) {
-    session.value = null
     errorMessage.value = err instanceof Error ? err.message : String(err)
   } finally {
-    loadingSession.value = false
+    loading.value = false
   }
 }
 
@@ -39,12 +61,13 @@ async function handleLogin() {
   loggingIn.value = true
   errorMessage.value = null
   try {
-    const res = await apiFetch<{ token: string; user: { id: string; email: string; name: string; tenantId: string; roles: string[] } }>('/v1/auth/login', {
+    const res = await apiFetch<{ token: string; user: { id: string; email: string; name: string } }>('/v1/auth/login', {
       method: 'POST',
       body: JSON.stringify({ email: email.value, password: password.value })
     })
     setSessionToken(res.token)
     await refreshAuthSession()
+    await loadConsentContext()
     notify('Autenticado', `Bem-vindo, ${res.user.name}`, 'success')
   } catch (err) {
     errorMessage.value = err instanceof Error ? err.message : String(err)
@@ -53,17 +76,24 @@ async function handleLogin() {
   }
 }
 
-async function decide(approve: boolean) {
+async function approvePkce() {
   submitting.value = true
   errorMessage.value = null
   try {
-    const endpoint = approve ? '/v1/auth/oauth/approve' : '/v1/auth/oauth/reject'
-    const res = await apiFetch<{ status: string; message?: string }>(endpoint, {
+    const res = await apiFetch<{ code: string; redirectTo: string }>('/v1/auth/oauth/authorize', {
       method: 'POST',
-      body: JSON.stringify({ userCode: userCode.value.trim().toUpperCase() })
+      body: JSON.stringify({
+        clientId: clientId.value,
+        redirectUri: redirectUri.value,
+        codeChallenge: codeChallenge.value,
+        codeChallengeMethod: codeChallengeMethod.value,
+        scope: requestedScope.value,
+        allowedProjects: restrictProjects.value ? selectedProjects.value : [],
+        state: oauthState.value || undefined
+      })
     })
-    doneMessage.value = res.message || (approve ? 'Conexão MCP autorizada! Você já pode voltar ao terminal/Codex.' : 'Solicitação rejeitada.')
-    await loadSession()
+    doneMessage.value = 'Autorizado! Redirecionando para o cliente MCP...'
+    window.location.href = res.redirectTo
   } catch (err) {
     errorMessage.value = err instanceof Error ? err.message : String(err)
   } finally {
@@ -71,66 +101,130 @@ async function decide(approve: boolean) {
   }
 }
 
-onMounted(() => {
-  if (userCode.value) loadSession()
-})
+function rejectPkce() {
+  try {
+    const target = new URL(redirectUri.value)
+    target.searchParams.set('error', 'access_denied')
+    if (oauthState.value) target.searchParams.set('state', oauthState.value)
+    window.location.href = target.toString()
+  } catch {
+    doneMessage.value = 'Solicitação cancelada.'
+  }
+}
+
+async function decidePending(userCode: string, approve: boolean) {
+  submitting.value = true
+  errorMessage.value = null
+  try {
+    const endpoint = approve ? '/v1/auth/oauth/approve' : '/v1/auth/oauth/reject'
+    const res = await apiFetch<{ status: string; message?: string }>(endpoint, {
+      method: 'POST',
+      body: JSON.stringify({ userCode })
+    })
+    doneMessage.value = res.message || (approve ? 'Conexão MCP autorizada! Você já pode voltar ao terminal/Codex.' : 'Solicitação rejeitada.')
+    pendingList.value = pendingList.value.filter((p) => p.userCode !== userCode)
+  } catch (err) {
+    errorMessage.value = err instanceof Error ? err.message : String(err)
+  } finally {
+    submitting.value = false
+  }
+}
+
+function toggleProject(id: string) {
+  selectedProjects.value = selectedProjects.value.includes(id)
+    ? selectedProjects.value.filter((p) => p !== id)
+    : [...selectedProjects.value, id]
+}
+
+onMounted(loadConsentContext)
 </script>
 
 <template>
   <div class="min-h-screen flex items-center justify-center bg-default p-6">
-    <UCard class="w-full max-w-md border border-default">
+    <UCard class="w-full max-w-lg border border-default">
       <template #header>
         <div class="flex items-center gap-2.5">
           <UIcon name="i-lucide-shield-check" class="w-5 h-5 text-primary" />
           <div>
             <h1 class="text-base font-semibold text-highlighted">Autorizar Cliente MCP / CLI</h1>
-            <p class="text-xs text-muted">OAuth2 Device Flow — Brain</p>
+            <p class="text-xs text-muted">{{ isPkceMode ? 'OAuth 2.1 Automático (PKCE)' : 'Aprovação em 1 Clique — Brain' }}</p>
           </div>
         </div>
       </template>
 
       <div class="space-y-4">
-        <div class="flex gap-2">
-          <UInput v-model="userCode" placeholder="ABCD-1234" class="flex-1 font-mono uppercase" @keyup.enter="loadSession" />
-          <UButton variant="soft" :loading="loadingSession" @click="loadSession">Verificar</UButton>
-        </div>
-
         <UAlert v-if="errorMessage" color="error" variant="subtle" :description="errorMessage" />
         <UAlert v-if="doneMessage" color="success" variant="subtle" icon="i-lucide-check-circle-2" :description="doneMessage" />
 
-        <div v-if="session" class="rounded-lg border border-default bg-elevated/40 p-3.5 space-y-1.5 text-xs">
-          <div class="flex justify-between">
-            <span class="text-muted">Cliente:</span>
-            <span class="font-medium text-highlighted">{{ session.clientName }}</span>
-          </div>
-          <div class="flex justify-between">
-            <span class="text-muted">Escopo:</span>
-            <span class="font-mono text-default">{{ session.scope }}</span>
-          </div>
-          <div class="flex justify-between">
-            <span class="text-muted">Status:</span>
-            <UBadge :color="session.status === 'approved' ? 'success' : session.status === 'pending' ? 'warning' : 'neutral'" size="xs">
-              {{ session.status }}
-            </UBadge>
-          </div>
-        </div>
-
-        <div v-if="!apiKey" class="space-y-3 pt-2 border-t border-default">
-          <p class="text-xs text-muted">Faça login para aprovar esta conexão:</p>
+        <div v-if="!apiKey" class="space-y-3">
+          <p class="text-xs text-muted">Entre na sua conta para aprovar esta conexão em 1 clique:</p>
           <UInput v-model="email" type="email" placeholder="seu@email.com" class="w-full" />
           <UInput v-model="password" type="password" placeholder="Senha" class="w-full" @keyup.enter="handleLogin" />
-          <UButton color="primary" block :loading="loggingIn" @click="handleLogin">Entrar</UButton>
+          <UButton color="primary" block :loading="loggingIn" @click="handleLogin">Entrar e Continuar</UButton>
         </div>
 
-        <div v-else-if="session && session.status === 'pending'" class="space-y-2 pt-2 border-t border-default">
+        <template v-else-if="isPkceMode">
+          <div class="rounded-lg border border-default bg-elevated/40 p-3.5 space-y-2 text-xs">
+            <div class="flex justify-between">
+              <span class="text-muted">Cliente:</span>
+              <span class="font-medium text-highlighted">{{ clientInfo?.clientName || clientId }}</span>
+            </div>
+            <div class="flex justify-between">
+              <span class="text-muted">Escopo:</span>
+              <span class="font-mono text-default">{{ requestedScope }}</span>
+            </div>
+            <div class="flex justify-between gap-2">
+              <span class="text-muted shrink-0">Callback:</span>
+              <span class="font-mono text-[11px] text-muted truncate">{{ redirectUri }}</span>
+            </div>
+          </div>
+
+          <div v-if="availableProjects.length > 0" class="rounded-lg border border-default p-3 space-y-2">
+            <label class="flex items-center gap-2 text-xs font-medium text-highlighted cursor-pointer">
+              <input v-model="restrictProjects" type="checkbox" class="rounded border-default" />
+              Restringir acesso a projetos específicos
+            </label>
+            <div v-if="restrictProjects" class="flex flex-wrap gap-1.5 pt-1">
+              <UButton
+                v-for="proj in availableProjects"
+                :key="proj.id"
+                size="xs"
+                :variant="selectedProjects.includes(proj.id) ? 'solid' : 'outline'"
+                :color="selectedProjects.includes(proj.id) ? 'primary' : 'neutral'"
+                @click="toggleProject(proj.id)"
+              >
+                {{ proj.name || proj.id }}
+              </UButton>
+            </div>
+          </div>
+
           <p class="text-xs text-muted">
             Conectado como <strong class="text-highlighted">{{ currentUser?.email ?? currentUser?.name }}</strong>.
           </p>
           <div class="grid grid-cols-2 gap-2">
-            <UButton color="neutral" variant="outline" :loading="submitting" @click="decide(false)">Rejeitar</UButton>
-            <UButton color="primary" icon="i-lucide-check" :loading="submitting" @click="decide(true)">Aprovar</UButton>
+            <UButton color="neutral" variant="outline" :disabled="submitting" @click="rejectPkce">Rejeitar</UButton>
+            <UButton color="primary" icon="i-lucide-check" :loading="submitting" @click="approvePkce">Aprovar e Conectar</UButton>
           </div>
-        </div>
+        </template>
+
+        <template v-else>
+          <div v-if="loading" class="text-xs text-muted py-4 text-center">Carregando solicitações pendentes...</div>
+          <div v-else-if="pendingList.length === 0" class="text-xs text-muted py-4 text-center">
+            Nenhuma solicitação pendente. Conecte pelo Codex ou execute <code class="font-mono">brain-mcp login</code>.
+          </div>
+          <div v-else class="space-y-2.5">
+            <div v-for="item in pendingList" :key="item.userCode" class="rounded-lg border border-primary/40 bg-elevated/40 p-3.5 space-y-2.5">
+              <div class="flex items-center justify-between text-xs">
+                <span class="font-semibold text-highlighted">{{ item.clientName }}</span>
+                <span class="font-mono text-muted">{{ item.scope }}</span>
+              </div>
+              <div class="grid grid-cols-2 gap-2">
+                <UButton size="sm" color="neutral" variant="outline" :loading="submitting" @click="decidePending(item.userCode, false)">Rejeitar</UButton>
+                <UButton size="sm" color="primary" icon="i-lucide-check" :loading="submitting" @click="decidePending(item.userCode, true)">Aprovar</UButton>
+              </div>
+            </div>
+          </div>
+        </template>
       </div>
     </UCard>
   </div>

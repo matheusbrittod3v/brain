@@ -13,7 +13,8 @@ const {
   hasPermission
 } = useBrainApi()
 
-const workspace = ref<'projects' | 'inbox' | 'knowledge' | 'search' | 'agents' | 'impact' | 'operations' | 'access' | 'enterprise'>('projects')
+const workspace = ref<'projects' | 'inbox' | 'knowledge' | 'search' | 'agents' | 'impact' | 'operations' | 'access' | 'enterprise' | 'profile'>('projects')
+const profileInitialTab = ref<'overview' | 'oauth' | 'tokens'>('overview')
 const sidebarCollapsed = ref(false)
 const paletteOpen = ref(false)
 const newProjectOpen = ref(false)
@@ -114,7 +115,8 @@ const allNavItems = computed<Array<{ id: WorkspaceKey; label: string; icon: stri
   { id: 'impact', label: 'Análise de Impacto', icon: 'i-lucide-zap', permission: 'menu:impact' },
   { id: 'operations', label: 'Operação & FinOps', icon: 'i-lucide-activity', permission: 'menu:operations' },
   { id: 'access', label: 'Acesso & Políticas', icon: 'i-lucide-shield', permission: 'menu:access' },
-  { id: 'enterprise', label: 'Visões Corporativas', icon: 'i-lucide-radar', permission: 'menu:enterprise' }
+  { id: 'enterprise', label: 'Visões Corporativas', icon: 'i-lucide-radar', permission: 'menu:enterprise' },
+  { id: 'profile', label: 'Perfil & Conexões MCP', icon: 'i-lucide-user-cog', permission: 'menu:projects' }
 ])
 
 const navItems = computed(() => {
@@ -181,8 +183,8 @@ const commandGroups = computed(() => [
         label: 'Conectar Agente / MCP (OAuth2)',
         icon: 'i-lucide-bot',
         onSelect: () => {
-          authModalTab.value = 'oauth'
-          authModalOpen.value = true
+          profileInitialTab.value = 'oauth'
+          workspace.value = 'profile'
           paletteOpen.value = false
         }
       },
@@ -296,7 +298,7 @@ defineShortcuts({
             color="neutral"
             block
             class="justify-start"
-            @click="authModalTab = 'login'; authModalOpen = true"
+            @click="profileInitialTab = 'overview'; workspace = 'profile'"
           >
             <UAvatar :alt="currentUser.name || currentUser.email" size="2xs" />
             <div v-if="!collapsed" class="flex items-center justify-between flex-1 min-w-0 gap-1.5">
@@ -338,7 +340,7 @@ defineShortcuts({
               variant="soft"
               color="primary"
               icon="i-lucide-bot"
-              @click="authModalTab = 'oauth'; authModalOpen = true"
+              @click="profileInitialTab = 'oauth'; workspace = 'profile'"
             >
               <span class="hidden md:inline">OAuth2 IA &amp; MCP</span>
             </UButton>
@@ -420,6 +422,9 @@ defineShortcuts({
 
         <!-- WORKSPACE: ENTERPRISE VIEWS -->
         <EnterpriseWorkspace v-else-if="workspace === 'enterprise'" key="enterprise" />
+
+        <!-- WORKSPACE: USER PROFILE & MCP -->
+        <ProfileWorkspace v-else-if="workspace === 'profile'" key="profile" :initial-tab="profileInitialTab" />
           </Transition>
         </div>
       </template>

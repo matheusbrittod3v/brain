@@ -12,7 +12,7 @@ import {
 } from "@brain/auth";
 import type { ContextEngine } from "@brain/context-engine";
 import type { CrossServiceContractRegistry, PostgresCrossServiceRegistry } from "@brain/cross-service";
-import type { PgAuthRepository, PgOperationalRepository } from "@brain/database";
+import type { PgAuthRepository, PgMcpAuthRepository, PgOperationalRepository } from "@brain/database";
 import type { KnowledgeGraphStore, PostgresGraphStore } from "@brain/graph";
 import { scanForSecrets } from "@brain/ingestion";
 import type { PostgresKnowledgeRepository } from "@brain/knowledge";
@@ -43,6 +43,7 @@ export function registerSystemRoutes(
     recordAudit: (ctx: AuthContext, event: Parameters<AuditLogger["record"]>[0]) => Promise<unknown>;
     opRepo?: PgOperationalRepository;
     authRepo?: PgAuthRepository;
+    mcpAuthRepo?: PgMcpAuthRepository;
     pgGraph?: PostgresGraphStore;
     graph: KnowledgeGraphStore;
     queryAwareRetrieval: AsyncRetrievalEngine;

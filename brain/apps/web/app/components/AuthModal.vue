@@ -18,13 +18,12 @@ const emit = defineEmits<{
 }>()
 
 const tabs = computed(() => {
-  const list: Array<{ label: string; value: 'login' | 'register' | 'oauth'; icon: string }> = [
+  const list: Array<{ label: string; value: 'login' | 'register'; icon: string }> = [
     { label: 'Entrar', value: 'login', icon: 'i-lucide-lock' }
   ]
   if (authConfig.value.registrationEnabled) {
     list.push({ label: 'Criar Conta', value: 'register', icon: 'i-lucide-user-plus' })
   }
-  list.push({ label: 'OAuth2 IA & MCP', value: 'oauth', icon: 'i-lucide-bot' })
   return list
 })
 
@@ -159,7 +158,8 @@ async function approveOAuth() {
           </div>
         </UCard>
 
-        <!-- Tabs -->
+        <!-- Tabs (somente quando não autenticado) -->
+        <template v-if="!currentUser">
         <div role="tablist" class="flex flex-wrap gap-1.5 p-1 rounded-xl bg-slate-950/90 border border-slate-800">
           <button
             v-for="tab in tabs"
@@ -228,50 +228,7 @@ async function approveOAuth() {
             </div>
           </UForm>
         </div>
-
-        <!-- Tab: OAuth2 IA & MCP -->
-        <div v-else-if="authModalTab === 'oauth'" class="space-y-4">
-          <UAlert
-            color="primary"
-            variant="subtle"
-            icon="i-lucide-sparkles"
-            title="Autorização OAuth2 para Agentes & MCP"
-            description="Digite o código de 8 dígitos exibido pelo Cursor, Claude Code ou plugin MCP para conceder acesso vinculado à sua conta."
-          />
-
-          <div class="flex gap-2">
-            <UInput
-              v-model="userCode"
-              placeholder="XXXX-XXXX"
-              class="flex-1 font-mono uppercase tracking-widest"
-              maxlength="9"
-            />
-            <UButton :loading="checkingOAuth" :disabled="userCode.length < 4" @click="checkOAuthCode">
-              Verificar
-            </UButton>
-          </div>
-
-          <UCard v-if="pendingOAuth" variant="outline" class="border-primary/40">
-            <div class="space-y-3">
-              <div class="flex items-center justify-between">
-                <div>
-                  <div class="font-semibold text-sm">{{ pendingOAuth.clientName }}</div>
-                  <div class="text-xs text-muted font-mono">{{ pendingOAuth.clientId }}</div>
-                </div>
-                <UBadge color="warning" variant="subtle">Aguardando</UBadge>
-              </div>
-              <p class="text-xs text-muted">
-                Escopo solicitado: <code>{{ pendingOAuth.scope }}</code>
-              </p>
-              <div class="flex justify-end gap-2">
-                <UButton color="neutral" variant="ghost" size="sm" @click="pendingOAuth = null">Cancelar</UButton>
-                <UButton color="primary" size="sm" :loading="approvingOAuth" icon="i-lucide-check" @click="approveOAuth">
-                  Autorizar Conexão
-                </UButton>
-              </div>
-            </div>
-          </UCard>
-        </div>
+        </template>
       </div>
     </template>
   </USlideover>

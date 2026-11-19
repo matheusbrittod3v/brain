@@ -551,4 +551,48 @@ export const authPasskeys = pgTable("auth_passkeys", {
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull()
 });
 
+export const oauthRegisteredClients = pgTable("oauth_registered_clients", {
+  clientId: text("client_id").primaryKey(),
+  clientName: text("client_name").notNull(),
+  redirectUris: text("redirect_uris").array().default([]).notNull(),
+  grantTypes: text("grant_types").array().default(["authorization_code", "refresh_token"]).notNull(),
+  scope: text("scope").default("projects:all").notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull()
+});
+
+export const oauthAuthCodes = pgTable("oauth_auth_codes", {
+  code: text("code").primaryKey(),
+  clientId: text("client_id").notNull(),
+  userId: text("user_id")
+    .notNull()
+    .references(() => authUsers.id, { onDelete: "cascade" }),
+  redirectUri: text("redirect_uri").notNull(),
+  codeChallenge: text("code_challenge").notNull(),
+  codeChallengeMethod: text("code_challenge_method").default("S256").notNull(),
+  scope: text("scope").default("projects:all").notNull(),
+  allowedProjects: text("allowed_projects").array().default([]).notNull(),
+  expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+  consumedAt: timestamp("consumed_at", { withTimezone: true }),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull()
+});
+
+export const authMcpTokens = pgTable("auth_mcp_tokens", {
+  id: text("id").primaryKey(),
+  tenantId: text("tenant_id").notNull(),
+  userId: text("user_id")
+    .notNull()
+    .references(() => authUsers.id, { onDelete: "cascade" }),
+  clientId: text("client_id").default("codex-mcp").notNull(),
+  clientName: text("client_name").default("Codex / MCP Client").notNull(),
+  label: text("label").notNull(),
+  tokenHash: text("token_hash").notNull().unique(),
+  refreshTokenHash: text("refresh_token_hash").unique(),
+  scopes: text("scopes").array().default(["projects:all"]).notNull(),
+  allowedProjects: text("allowed_projects").array().default([]).notNull(),
+  lastUsedAt: timestamp("last_used_at", { withTimezone: true }),
+  expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+  revokedAt: timestamp("revoked_at", { withTimezone: true }),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull()
+});
+
 

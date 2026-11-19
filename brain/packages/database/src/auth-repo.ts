@@ -1,4 +1,4 @@
-import { eq } from "drizzle-orm";
+import { and, desc, eq, gt } from "drizzle-orm";
 import type { BrainDb } from "./client.js";
 import { authOAuthSessions, authUsers, authVerificationTokens } from "./schema.js";
 
@@ -107,6 +107,23 @@ export class PgAuthRepository {
   async findOAuthSessionByUserCode(userCode: string) {
     const rows = await this.db.select().from(authOAuthSessions).where(eq(authOAuthSessions.userCode, userCode.toUpperCase())).limit(1);
     return rows[0] ?? null;
+  }
+
+  async listPendingOAuthSessions() {
+    return this.db
+      .select({
+        userCode: authOAuthSessions.userCode,
+        clientId: authOAuthSessions.clientId,
+        clientName: authOAuthSessions.clientName,
+        scope: authOAuthSessions.scope,
+        status: authOAuthSessions.status,
+        expiresAt: authOAuthSessions.expiresAt,
+        createdAt: authOAuthSessions.createdAt
+      })
+      .from(authOAuthSessions)
+      .where(and(eq(authOAuthSessions.status, "pending"), gt(authOAuthSessions.expiresAt, new Date())))
+      .orderBy(desc(authOAuthSessions.createdAt))
+      .limit(20);
   }
 
   async approveOAuthSession(userCode: string, userId: string) {

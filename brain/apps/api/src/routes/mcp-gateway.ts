@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import type { HandoffStore } from "@brain/agent-handoff";
@@ -7,12 +8,13 @@ import type { AuditLogger } from "@brain/audit-engine";
 import { authenticateRequest, type AuthContext } from "@brain/auth";
 import type { ContextEngine } from "@brain/context-engine";
 import type { CrossServiceContractRegistry, PostgresCrossServiceRegistry } from "@brain/cross-service";
-import type { PgOperationalRepository } from "@brain/database";
+import type { PgMcpAuthRepository, PgOperationalRepository } from "@brain/database";
 import type { KnowledgeGraphStore, PostgresGraphStore } from "@brain/graph";
 import type { PostgresKnowledgeRepository } from "@brain/knowledge";
 import { createBrainMcpServer, createRunnerSchedule } from "@brain/mcp-server";
 import type { PostgresMemoryManager } from "@brain/memory";
 import type { AsyncRetrievalEngine, PostgresRetrievalEngine } from "@brain/retrieval";
+import { sha256Hex } from "./oauth-pkce.js";
 
 export interface McpGatewayDeps {
   deploymentMode: "local" | "cloud";
@@ -21,6 +23,7 @@ export interface McpGatewayDeps {
   allowedPolicies: readonly string[];
   recordAudit: (ctx: AuthContext, event: Parameters<AuditLogger["record"]>[0]) => Promise<unknown>;
   opRepo?: PgOperationalRepository;
+  mcpAuthRepo?: PgMcpAuthRepository;
   pgGraph?: PostgresGraphStore;
   graph: KnowledgeGraphStore;
   queryAwareRetrieval: AsyncRetrievalEngine;
@@ -46,19 +49,36 @@ function resolveOrigins(req: FastifyRequest): { apiOrigin: string; webOrigin: st
 }
 
 /**
- * Registers OAuth Discovery metadata endpoints and the Streamable HTTP MCP gateway (`POST`/`GET`/`DELETE /mcp`)
- * with dynamic PostgreSQL RBAC & project scope resolution.
+ * Registers OAuth 2.1 Discovery (RFC 9728 / RFC 8414) and stateful Streamable HTTP MCP gateway
+ * (`POST`/`GET`/`DELETE /mcp`) with PostgreSQL token tracking, dynamic RBAC scope, and client audit attribution.
  */
 export function registerMcpGatewayRoutes(app: FastifyInstance, deps: McpGatewayDeps): void {
-  app.get("/gateway", async () => ({
-    gateway: "brain-universal-agent-gateway",
-    deploymentMode: deps.deploymentMode,
-    transports: ["streamable-http", "stdio", "rest"],
-    mcpEndpoint: "/mcp",
-    oauthDiscovery: "/.well-known/oauth-protected-resource",
-    toolsCount: 59,
-    pgStoresEnabled: Boolean(deps.pgGraph && deps.pgRetrieval)
-  }));
+  const activeSessions = new Map<string, StreamableHTTPServerTransport>();
+
+  app.get("/gateway", async (req) => {
+    const { apiOrigin, webOrigin } = resolveOrigins(req);
+    return {
+      gateway: "brain-universal-agent-gateway",
+      deploymentMode: deps.deploymentMode,
+      transports: ["streamable-http", "stdio", "rest"],
+      mcpEndpoint: "/mcp",
+      oauthDiscovery: "/.well-known/oauth-protected-resource",
+      toolsCount: 59,
+      activeMcpSessions: activeSessions.size,
+      pgStoresEnabled: Boolean(deps.pgGraph && deps.pgRetrieval),
+      auth: {
+        methods: ["oauth2_pkce", "oauth2_device_flow", "bearer_jwt", "stdio_credentials_file"],
+        oauthProtectedResource: `${apiOrigin}/.well-known/oauth-protected-resource`,
+        oauthAuthorizationServer: `${apiOrigin}/.well-known/oauth-authorization-server`,
+        registrationEndpoint: `${apiOrigin}/oauth/register`,
+        tokenEndpoint: `${apiOrigin}/oauth/token`,
+        deviceCodeEndpoint: `${apiOrigin}/v1/auth/oauth/device/code`,
+        webApprovalUrl: `${webOrigin}/auth/oauth`,
+        uiTokenGenerator: `${webOrigin} -> Acesso, CASL & Políticas -> Token MCP (POST ${apiOrigin}/v1/auth/mcp-token)`,
+        cliLoginCommand: "brain-mcp login"
+      }
+    };
+  });
 
   app.get("/.well-known/oauth-protected-resource", async (req) => {
     const { apiOrigin } = resolveOrigins(req);
@@ -75,10 +95,11 @@ export function registerMcpGatewayRoutes(app: FastifyInstance, deps: McpGatewayD
     return {
       issuer: apiOrigin,
       authorization_endpoint: `${webOrigin}/auth/oauth`,
-      token_endpoint: `${apiOrigin}/v1/auth/oauth/token`,
+      token_endpoint: `${apiOrigin}/oauth/token`,
+      registration_endpoint: `${apiOrigin}/oauth/register`,
       device_authorization_endpoint: `${apiOrigin}/v1/auth/oauth/device/code`,
       response_types_supported: ["code", "token"],
-      grant_types_supported: ["urn:ietf:params:oauth:grant-type:device_code"],
+      grant_types_supported: ["authorization_code", "refresh_token", "urn:ietf:params:oauth:grant-type:device_code"],
       token_endpoint_auth_methods_supported: ["none"],
       code_challenge_methods_supported: ["S256"]
     };
@@ -87,13 +108,27 @@ export function registerMcpGatewayRoutes(app: FastifyInstance, deps: McpGatewayD
   const handleMcpRequest = async (req: FastifyRequest, reply: FastifyReply) => {
     const rawAuth = req.headers.authorization || (typeof req.headers["x-api-key"] === "string" ? `Bearer ${req.headers["x-api-key"]}` : undefined);
     if (!rawAuth) {
-      const { apiOrigin } = resolveOrigins(req);
+      const { apiOrigin, webOrigin } = resolveOrigins(req);
       reply
         .code(401)
         .header("WWW-Authenticate", `Bearer resource_metadata="${apiOrigin}/.well-known/oauth-protected-resource"`)
         .send({
           error: "BRAIN_ERR_UNAUTHORIZED",
-          message: "Autenticação Bearer ou OAuth2 necessária para acessar /mcp."
+          message: "Autenticação Bearer ou OAuth2 necessária para acessar /mcp.",
+          login: {
+            howToAuthenticate: [
+              `1) OAuth 2.1 PKCE (automático): registre cliente em POST ${apiOrigin}/oauth/register, abra ${webOrigin}/auth/oauth e troque o código em POST ${apiOrigin}/oauth/token.`,
+              `2) OAuth2 Device Flow: POST ${apiOrigin}/v1/auth/oauth/device/code, aprove em ${webOrigin}/auth/oauth?code=<user_code> e faça polling em POST ${apiOrigin}/v1/auth/oauth/token.`,
+              `3) Bearer Token / CLI: gere em ${webOrigin} -> Acesso, CASL & Políticas -> Token MCP ou execute 'brain-mcp login'.`
+            ],
+            oauthProtectedResource: `${apiOrigin}/.well-known/oauth-protected-resource`,
+            oauthAuthorizationServer: `${apiOrigin}/.well-known/oauth-authorization-server`,
+            registrationEndpoint: `${apiOrigin}/oauth/register`,
+            tokenEndpoint: `${apiOrigin}/oauth/token`,
+            deviceCodeEndpoint: `${apiOrigin}/v1/auth/oauth/device/code`,
+            webApprovalUrl: `${webOrigin}/auth/oauth`,
+            cliLoginCommand: "brain-mcp login"
+          }
         });
       return;
     }
@@ -107,20 +142,58 @@ export function registerMcpGatewayRoutes(app: FastifyInstance, deps: McpGatewayD
       deps.allowedPolicies
     );
 
+    const rawBearer = rawAuth.replace(/^Bearer\s+/i, "").trim();
+    const tokenRecord = deps.mcpAuthRepo && rawBearer
+      ? await deps.mcpAuthRepo.findActiveTokenByHash(sha256Hex(rawBearer)).catch(() => null)
+      : null;
+    if (tokenRecord) {
+      deps.mcpAuthRepo?.touchLastUsed(tokenRecord.id).catch(() => {});
+    }
+
     let ctx = deps.opRepo
       ? await deps.opRepo.resolveDynamicMcpScope(baseCtx, deps.allowedProjects, deps.allowedPolicies)
       : baseCtx;
+
+    if (tokenRecord && tokenRecord.allowedProjects.length > 0) {
+      const restricted = new Set(tokenRecord.allowedProjects);
+      ctx = { ...ctx, allowedProjects: ctx.allowedProjects.filter((p) => restricted.has(p)) };
+    }
 
     if (!deps.opRepo && ctx.roles.some((r) => ["admin", "owner"].includes(r.toLowerCase()))) {
       const mergedProjects = new Set([...ctx.allowedProjects, ...deps.registeredProjects.keys()]);
       ctx = { ...ctx, allowedProjects: Array.from(mergedProjects) };
     }
 
+    const sessionId = typeof req.headers["mcp-session-id"] === "string" ? req.headers["mcp-session-id"] : undefined;
+    if (sessionId && activeSessions.has(sessionId)) {
+      const existingTransport = activeSessions.get(sessionId)!;
+      reply.hijack();
+      await existingTransport.handleRequest(req.raw, reply.raw, req.body);
+      if (req.method === "DELETE") {
+        activeSessions.delete(sessionId);
+      }
+      return;
+    }
+
     const auditPolicyId =
       process.env.BRAIN_AUDIT_POLICY_ID ||
       (ctx.allowedPolicies.includes("internal-project") ? "internal-project" : ctx.allowedPolicies[0] || "public-org");
 
-    const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined });
+    const clientName =
+      tokenRecord?.clientName ||
+      (typeof req.headers["x-brain-client"] === "string" ? req.headers["x-brain-client"] : "mcp-http-client");
+    const clientId = tokenRecord?.clientId || clientName;
+
+    const transport = new StreamableHTTPServerTransport({
+      sessionIdGenerator: () => randomUUID(),
+      onsessioninitialized: (sid) => {
+        activeSessions.set(sid, transport);
+      }
+    });
+    transport.onclose = () => {
+      if (transport.sessionId) activeSessions.delete(transport.sessionId);
+    };
+
     const mcpRuntime = {
       graph: deps.pgGraph ?? deps.graph,
       retrieval: deps.queryAwareRetrieval,
@@ -139,7 +212,16 @@ export function registerMcpGatewayRoutes(app: FastifyInstance, deps: McpGatewayD
       approvals: deps.pgApprovals,
       registeredProjects: deps.registeredProjects,
       audit: {
-        record: (event: Parameters<AuditLogger["record"]>[0]) => deps.recordAudit(ctx, event)
+        record: (event: Parameters<AuditLogger["record"]>[0]) =>
+          deps.recordAudit(ctx, {
+            ...event,
+            metadata: {
+              ...(event.metadata ?? {}),
+              mcpClientId: clientId,
+              mcpClientName: clientName,
+              ...(tokenRecord ? { mcpTokenId: tokenRecord.id } : {})
+            }
+          })
       }
     };
 
@@ -153,4 +235,3 @@ export function registerMcpGatewayRoutes(app: FastifyInstance, deps: McpGatewayD
   app.get("/mcp", handleMcpRequest);
   app.delete("/mcp", handleMcpRequest);
 }
-

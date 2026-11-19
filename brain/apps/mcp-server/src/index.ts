@@ -4,11 +4,12 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import { createAppPostgresClient, type RlsSessionContext } from "@brain/audit-engine";
 import { assertPolicyAccess, type AuthContext } from "@brain/auth";
 import { MCP_CONNECTION_PROFILES, type McpConnectionProfileName } from "./connection-profile.js";
-import { loadStoredCredentials, runMcpLoginFlow, runStdioHttpProxy } from "./cli-auth.js";
+import { loadStoredCredentials, runMcpLoginFlow, runMcpLogout, runMcpWhoami, runStdioHttpProxy } from "./cli-auth.js";
 import { registerExtendedMcpTools } from "./extended-tools.js";
 import { createBrainRuntime, createSqlBrainRuntime, type BrainRuntime, type CreateSqlBrainRuntimeOptions, type McpContextEngineContract, type McpRetrievalContract } from "./runtime.js";
 import { registerCoreGovernanceTools } from "./tools/core-governance.js";
 import { registerCoreRetrievalTools } from "./tools/core-retrieval.js";
+import { registerBrainResourcesAndPrompts } from "./resources-prompts.js";
 
 export { cancelRunnerSchedule, createRunnerSchedule, listRunnerSchedules } from "./runner-schedules.js";
 export {
@@ -39,13 +40,25 @@ export function createBrainMcpServer(
   registerCoreRetrievalTools(server, runtime, ctx, auditPolicyId, profile);
   registerCoreGovernanceTools(server, runtime, ctx, auditPolicyId, profile);
   registerExtendedMcpTools(server, runtime, ctx, auditPolicyId, profile);
+  registerBrainResourcesAndPrompts(server, runtime, ctx);
 
   return server;
 }
 
 if (process.argv[1]?.endsWith("index.js") || process.argv[1]?.endsWith("brain-mcp")) {
-  if (process.argv[2] === "login") {
+  const subcommand = process.argv[2];
+  if (subcommand === "login") {
     runMcpLoginFlow(process.argv[3]).catch((err) => {
+      console.error(err instanceof Error ? err.message : err);
+      process.exit(1);
+    });
+  } else if (subcommand === "whoami") {
+    runMcpWhoami().catch((err) => {
+      console.error(err instanceof Error ? err.message : err);
+      process.exit(1);
+    });
+  } else if (subcommand === "logout") {
+    runMcpLogout().catch((err) => {
       console.error(err instanceof Error ? err.message : err);
       process.exit(1);
     });

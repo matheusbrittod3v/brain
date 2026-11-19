@@ -65,9 +65,13 @@ const PUBLIC_AUTH_ROUTES = new Set([
   "POST /v1/auth/verify-email",
   "POST /v1/auth/oauth/device/code",
   "GET /v1/auth/oauth/session/:userCode",
+  "GET /v1/auth/oauth/client/:clientId",
   "POST /v1/auth/oauth/token",
+  "POST /oauth/register",
+  "POST /oauth/token",
   "GET /.well-known/oauth-protected-resource",
   "GET /.well-known/oauth-authorization-server",
+  "GET /gateway",
   "POST /mcp",
   "GET /mcp",
   "DELETE /mcp"

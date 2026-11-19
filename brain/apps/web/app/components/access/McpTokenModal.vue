@@ -2,28 +2,50 @@
 const open = defineModel<boolean>('open', { default: false })
 const { apiFetch, notify } = useBrainApi()
 
+interface McpTokenItem {
+  id: string
+  clientId: string
+  clientName: string
+  label: string
+  lastUsedAt: string | null
+  expiresAt: string
+  revokedAt: string | null
+  createdAt: string
+}
+
 const label = ref('codex-mcp')
 const expiresInDays = ref(90)
 const generating = ref(false)
+const loadingTokens = ref(false)
+const tokens = ref<McpTokenItem[]>([])
 const generated = ref<{
+  tokenId?: string
   token: string
   mcpUrl: string
   expiresInDays: number
   codexToml: string
 } | null>(null)
 
+async function loadTokens() {
+  loadingTokens.value = true
+  try {
+    const res = await apiFetch<{ items?: McpTokenItem[] }>('/v1/auth/mcp-tokens')
+    tokens.value = res.items ?? []
+  } catch {
+    tokens.value = []
+  } finally {
+    loadingTokens.value = false
+  }
+}
+
 async function generateToken() {
   generating.value = true
   try {
-    generated.value = await apiFetch<{
-      token: string
-      mcpUrl: string
-      expiresInDays: number
-      codexToml: string
-    }>('/v1/auth/mcp-token', {
+    generated.value = await apiFetch('/v1/auth/mcp-token', {
       method: 'POST',
       body: JSON.stringify({ label: label.value.trim() || 'codex-mcp', expiresInDays: expiresInDays.value })
     })
+    await loadTokens()
     notify('Token MCP gerado', 'Copie o bloco TOML ou o Bearer Token para conectar no Codex.', 'success')
   } catch (err) {
     notify('Erro ao gerar token', err instanceof Error ? err.message : String(err), 'error')
@@ -32,14 +54,28 @@ async function generateToken() {
   }
 }
 
+async function revokeToken(tokenId: string) {
+  try {
+    await apiFetch(`/v1/auth/mcp-tokens/${encodeURIComponent(tokenId)}`, { method: 'DELETE' })
+    await loadTokens()
+    notify('Token revogado', 'O cliente MCP não poderá mais usar este token.', 'warning')
+  } catch (err) {
+    notify('Erro ao revogar', err instanceof Error ? err.message : String(err), 'error')
+  }
+}
+
 async function copyText(text: string, title: string) {
   await navigator.clipboard.writeText(text)
   notify(title, 'Conteúdo copiado para a área de transferência.', 'success')
 }
+
+watch(open, (isOpen) => {
+  if (isOpen) loadTokens()
+})
 </script>
 
 <template>
-  <UModal v-model:open="open" title="Conectar Codex / MCP via HTTP (sem .env)" description="Gere um Bearer Token pessoal com escopo dinâmico automático direto do PostgreSQL.">
+  <UModal v-model:open="open" title="Conectar Codex / MCP & Tokens Ativos" description="Gere Bearer Tokens ou gerencie clientes OAuth 2.1 conectados ao PostgreSQL.">
     <template #body>
       <div class="space-y-4">
         <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -89,6 +125,30 @@ async function copyText(text: string, title: string) {
               </UButton>
             </div>
             <pre class="rounded-lg border border-default bg-elevated p-3 text-[11px] font-mono text-default overflow-x-auto whitespace-pre-wrap">{{ generated.codexToml }}</pre>
+          </div>
+        </div>
+
+        <div class="pt-3 border-t border-default space-y-2">
+          <div class="flex items-center justify-between">
+            <span class="text-xs font-semibold text-highlighted">Clientes &amp; Tokens Conectados</span>
+            <UButton size="xs" variant="ghost" icon="i-lucide-refresh-cw" :loading="loadingTokens" @click="loadTokens" />
+          </div>
+          <div v-if="tokens.length === 0" class="text-xs text-muted py-2">Nenhum token MCP emitido ainda.</div>
+          <div v-else class="space-y-1.5 max-h-48 overflow-y-auto">
+            <div
+              v-for="item in tokens"
+              :key="item.id"
+              class="flex items-center justify-between gap-2 rounded-lg border border-default bg-elevated/40 px-3 py-2 text-xs"
+            >
+              <div class="min-w-0">
+                <div class="font-medium text-highlighted truncate">{{ item.label }}</div>
+                <div class="text-[11px] text-muted">
+                  {{ item.lastUsedAt ? `Último uso: ${new Date(item.lastUsedAt).toLocaleString()}` : 'Nunca usado' }}
+                </div>
+              </div>
+              <UBadge v-if="item.revokedAt" color="neutral" size="xs">Revogado</UBadge>
+              <UButton v-else size="xs" color="error" variant="soft" @click="revokeToken(item.id)">Revogar</UButton>
+            </div>
           </div>
         </div>
       </div>

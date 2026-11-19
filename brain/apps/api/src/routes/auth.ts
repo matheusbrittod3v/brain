@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import type { FastifyInstance } from "fastify";
 import {
   EmailService,
@@ -10,7 +11,8 @@ import {
   type AuthContext
 } from "@brain/auth";
 import { BrainError } from "@brain/core";
-import type { PgAuthRepository } from "@brain/database";
+import type { PgAuthRepository, PgMcpAuthRepository } from "@brain/database";
+import { registerOAuthPkceRoutes, sha256Hex } from "./oauth-pkce.js";
 
 export function registerAuthRoutes(
   app: FastifyInstance,
@@ -18,9 +20,11 @@ export function registerAuthRoutes(
     authenticateRequest: (headerValue: string | undefined) => Promise<AuthContext>;
     emailService?: EmailService;
     authRepo?: PgAuthRepository;
+    mcpAuthRepo?: PgMcpAuthRepository;
   }
 ) {
   const emailService = deps.emailService ?? new EmailService();
+  registerOAuthPkceRoutes(app, deps);
 
   // 1. Configuração pública de autenticação
   app.get("/v1/auth/config", async () => {
@@ -270,7 +274,14 @@ export function registerAuthRoutes(
     };
   });
 
-  // 7. OAuth2: Consultar detalhes de sessão pendente (Web UI)
+  // 7. OAuth2: Listar sessões pendentes para aprovação 1-clique (sem digitar código)
+  app.get("/v1/auth/oauth/pending", async (req) => {
+    await deps.authenticateRequest(req.headers.authorization);
+    const items = deps.authRepo ? await deps.authRepo.listPendingOAuthSessions() : [];
+    return { items };
+  });
+
+  // 7b. OAuth2: Consultar detalhes de sessão pendente (Web UI)
   app.get<{
     Params: { userCode: string };
   }>("/v1/auth/oauth/session/:userCode", async (req) => {
@@ -437,7 +448,24 @@ export function registerAuthRoutes(
       ? `${process.env.BRAIN_PUBLIC_API_URL.replace(/\/+$/, "")}/mcp`
       : `http://localhost:${apiPort}/mcp`;
 
+    const tokenId = `mcpt_${randomUUID()}`;
+    if (deps.mcpAuthRepo) {
+      await deps.mcpAuthRepo.createMcpToken({
+        id: tokenId,
+        tenantId: ctx.tenantId,
+        userId: ctx.actorId,
+        clientId: label,
+        clientName: label,
+        label,
+        tokenHash: sha256Hex(token),
+        scopes: ["projects:all"],
+        allowedProjects: dbUser?.allowedProjects ?? ctx.allowedProjects,
+        expiresAt: new Date(Date.now() + days * 24 * 60 * 60 * 1000)
+      });
+    }
+
     return {
+      tokenId,
       token,
       tokenType: "Bearer",
       expiresInDays: days,

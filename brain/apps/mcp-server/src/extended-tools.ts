@@ -7,6 +7,8 @@ import { registerExtendedAccessRbacTools } from "./tools/extended/access-rbac.js
 import { registerExtendedIngestionTools } from "./tools/extended/ingestion-knowledge.js";
 import { registerExtendedRunnerOpsTools } from "./tools/extended/runner-ops.js";
 import { registerExtendedSkillsSpecsTools } from "./tools/extended/skills-specs.js";
+import { registerPlatformOpsTools } from "./tools/extended/platform-ops.js";
+import { registerCodeTopologyTools } from "./tools/extended/code-topology.js";
 
 export function registerExtendedMcpTools(
   server: McpServer,
@@ -19,5 +21,7 @@ export function registerExtendedMcpTools(
   registerExtendedRunnerOpsTools(server, runtime, ctx, auditPolicyId, profile);
   registerExtendedAccessRbacTools(server, runtime, ctx, profile);
   registerExtendedSkillsSpecsTools(server, runtime, ctx, profile);
+  registerPlatformOpsTools(server, runtime, ctx, auditPolicyId, profile);
+  registerCodeTopologyTools(server, runtime, ctx, auditPolicyId, profile);
   registerSubagentMcpTools(server, runtime, ctx, auditPolicyId, profile);
 }
