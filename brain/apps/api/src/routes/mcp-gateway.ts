@@ -61,25 +61,18 @@ export function registerMcpGatewayRoutes(app: FastifyInstance, deps: McpGatewayD
     : undefined;
 
   app.get("/gateway", async (req) => {
-    const { apiOrigin, webOrigin } = resolveOrigins(req);
+    const { apiOrigin } = resolveOrigins(req);
     return {
       gateway: "brain-universal-agent-gateway",
       deploymentMode: deps.deploymentMode,
       transports: ["streamable-http", "stdio", "rest"],
       mcpEndpoint: "/mcp",
       oauthDiscovery: "/.well-known/oauth-protected-resource",
-      toolsCount: 59,
       activeMcpSessions: activeSessions.size,
-      pgStoresEnabled: Boolean(deps.pgGraph && deps.pgRetrieval),
       auth: {
-        methods: ["oauth2_pkce", "bearer_jwt", "stdio_credentials_file"],
+        methods: ["oauth2_pkce", "bearer"],
         oauthProtectedResource: `${apiOrigin}/.well-known/oauth-protected-resource`,
-        oauthAuthorizationServer: `${apiOrigin}/.well-known/oauth-authorization-server`,
-        registrationEndpoint: `${apiOrigin}/oauth/register`,
-        tokenEndpoint: `${apiOrigin}/oauth/token`,
-        webApprovalUrl: `${webOrigin}/auth/oauth`,
-        uiTokenGenerator: `${webOrigin} -> Acesso, CASL & Políticas -> Token MCP (POST ${apiOrigin}/v1/auth/mcp-token)`,
-        cliLoginCommand: "brain-mcp login"
+        oauthAuthorizationServer: `${apiOrigin}/.well-known/oauth-authorization-server`
       }
     };
   });
@@ -123,25 +116,14 @@ export function registerMcpGatewayRoutes(app: FastifyInstance, deps: McpGatewayD
   const handleMcpRequest = async (req: FastifyRequest, reply: FastifyReply) => {
     const rawAuth = req.headers.authorization || (typeof req.headers["x-api-key"] === "string" ? `Bearer ${req.headers["x-api-key"]}` : undefined);
     if (!rawAuth) {
-      const { apiOrigin, webOrigin } = resolveOrigins(req);
+      const { apiOrigin } = resolveOrigins(req);
       reply
         .code(401)
         .header("WWW-Authenticate", `Bearer resource_metadata="${apiOrigin}/.well-known/oauth-protected-resource"`)
         .send({
           error: "BRAIN_ERR_UNAUTHORIZED",
-          message: "Autenticação Bearer ou OAuth2 necessária para acessar /mcp.",
-          login: {
-            howToAuthenticate: [
-              `1) OAuth 2.1 PKCE (automático): registre cliente em POST ${apiOrigin}/oauth/register, abra ${webOrigin}/auth/oauth e troque o código em POST ${apiOrigin}/oauth/token.`,
-              `2) Bearer Token / CLI: gere em ${webOrigin} -> Acesso, CASL & Políticas -> Token MCP ou execute 'brain-mcp login'.`
-            ],
-            oauthProtectedResource: `${apiOrigin}/.well-known/oauth-protected-resource`,
-            oauthAuthorizationServer: `${apiOrigin}/.well-known/oauth-authorization-server`,
-            registrationEndpoint: `${apiOrigin}/oauth/register`,
-            tokenEndpoint: `${apiOrigin}/oauth/token`,
-            webApprovalUrl: `${webOrigin}/auth/oauth`,
-            cliLoginCommand: "brain-mcp login"
-          }
+          message: "Autenticação OAuth 2.1 (PKCE) ou Bearer necessária.",
+          oauth_protected_resource: `${apiOrigin}/.well-known/oauth-protected-resource`
         });
       return;
     }
