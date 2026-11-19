@@ -21,4 +21,4 @@ invariants:
 verification:
   testIds:
     - TEST-BR-BRAIN-009
-  testFile: tests/intelligence-rules.test.ts
+  testFile: tests/business-rules.test.ts

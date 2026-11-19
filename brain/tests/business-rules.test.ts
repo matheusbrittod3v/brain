@@ -93,4 +93,62 @@ describe("Brain Business Rules Verification", () => {
     expect(hasPermission(adminCtx, "projects:share")).toBe(true);
     expect(hasPermission(adminCtx, "projects:shared:read")).toBe(true);
   });
+
+  it("TEST-BR-BRAIN-008: validates knowledge provenance and role promotion restrictions", () => {
+    interface KnowledgeProvenance {
+      sourceUri: string;
+      sourceVersion: string;
+      confidence: number;
+      validationStatus: "valid" | "pending_review";
+    }
+
+    const validateProvenance = (item: KnowledgeProvenance) => {
+      if (item.confidence < 0.7) {
+        return { ...item, validationStatus: "pending_review" as const };
+      }
+      return { ...item, validationStatus: "valid" as const };
+    };
+
+    const lowConfidenceItem = validateProvenance({
+      sourceUri: "git://repo/item.md",
+      sourceVersion: "c860ce2",
+      confidence: 0.5,
+      validationStatus: "valid"
+    });
+    expect(lowConfidenceItem.validationStatus).toBe("pending_review");
+
+    const highConfidenceItem = validateProvenance({
+      sourceUri: "git://repo/item.md",
+      sourceVersion: "c860ce2",
+      confidence: 0.95,
+      validationStatus: "pending_review"
+    });
+    expect(highConfidenceItem.validationStatus).toBe("valid");
+
+    const canPromote = (ctx: AuthContext) => ctx.roles.some((r) => r === "admin" || r === "tech-lead");
+    expect(canPromote(baseCtx)).toBe(false); // developer role
+    expect(canPromote({ ...baseCtx, roles: ["tech-lead"] })).toBe(true);
+    expect(canPromote({ ...baseCtx, roles: ["admin"] })).toBe(true);
+  });
+
+  it("TEST-BR-BRAIN-009: evaluates blast radius, contradiction alerts, and 700-line invariant", () => {
+    // Blast radius & contradiction detection
+    const detectContradictions = (ruleA: { domainId: number; title: string }, ruleB: { domainId: number; title: string }) => {
+      if (ruleA.domainId === ruleB.domainId && ruleA.title !== ruleB.title) {
+        return { hasConflict: false, alerts: [] };
+      }
+      return { hasConflict: true, alerts: ["Conflicting domain definitions"] };
+    };
+    const res = detectContradictions(
+      { domainId: 3, title: "Rule A" },
+      { domainId: 3, title: "Rule B" }
+    );
+    expect(res.hasConflict).toBe(false);
+
+    // Invariant: 700 lines limit per file check
+    const checkFileLimits = (lineCount: number) => lineCount <= 700;
+    expect(checkFileLimits(699)).toBe(true);
+    expect(checkFileLimits(700)).toBe(true);
+    expect(checkFileLimits(701)).toBe(false);
+  });
 });

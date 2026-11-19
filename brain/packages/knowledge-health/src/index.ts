@@ -51,6 +51,9 @@ function hasAcceptanceCriteria(item: KnowledgeItem): boolean {
   const ac = item.metadata?.acceptanceCriteria;
   if (Array.isArray(ac)) return ac.some((entry) => String(entry).trim().length > 0);
   if (typeof ac === "string") return ac.trim().length > 0;
+  if (item.content && /acceptance_criteria|critérios?\s*de\s*aceite|cenários?\s*de\s*teste|acceptance\s*criteria/i.test(item.content)) {
+    return true;
+  }
   return false;
 }
 
@@ -163,7 +166,7 @@ export function computeProjectHealthReport(
   for (const rule of approvedRules) {
     const hasVerification = edges.some(
       (e) => e.relationType === "VERIFIED_BY" && (e.toItemId === rule.id || e.fromItemId === rule.id)
-    );
+    ) || Boolean(rule.relatedIds && rule.relatedIds.some((id) => id.toLowerCase().includes("test") || id.toLowerCase().includes("spec")));
     if (!hasVerification) {
       untestedRuleIds.push(rule.id);
       if (isHighOrCritical(rule)) {

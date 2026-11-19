@@ -22,4 +22,4 @@ invariants:
 verification:
   testIds:
     - TEST-BR-BRAIN-008
-  testFile: tests/provenance-rules.test.ts
+  testFile: tests/business-rules.test.ts

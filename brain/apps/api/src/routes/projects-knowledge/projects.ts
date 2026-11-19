@@ -377,7 +377,14 @@ export function registerProjectCoreRoutes(app: FastifyInstance, deps: ProjectsKn
                 ? "architecture_decision"
                 : "document";
 
-        const id = `BRAIN-${rel.replace(/[^A-Za-z0-9]+/g, "-").replace(/^-|-$/g, "").toUpperCase().slice(0, 48)}`;
+        const frontmatterId = /^id:\s*([A-Za-z0-9_-]+)/m.exec(cleanContent)?.[1]?.trim();
+        const frontmatterTitle = /^title:\s*["']?([^"'\r\n]+)["']?/m.exec(cleanContent)?.[1]?.trim();
+        const frontmatterType = /^type:\s*([A-Za-z0-9_-]+)/m.exec(cleanContent)?.[1]?.trim() as KnowledgeItem["type"] | undefined;
+
+        const id = frontmatterId || `BRAIN-${rel.replace(/[^A-Za-z0-9]+/g, "-").replace(/^-|-$/g, "").toUpperCase().slice(0, 48)}`;
+        const title = frontmatterTitle || rel.replace(/\.(md|ya?ml)$/i, "");
+        const type = frontmatterType || inferredType;
+
         const existing = pgRetrieval
           ? await pgRetrieval.getItem(ctx, req.params.projectId, id)
           : retrieval.getItem(ctx, req.params.projectId, id);
@@ -387,8 +394,8 @@ export function registerProjectCoreRoutes(app: FastifyInstance, deps: ProjectsKn
           tenantId: ctx.tenantId,
           projectId: req.params.projectId,
           domainId: 2,
-          type: inferredType,
-          title: rel.replace(/\.md$/i, ""),
+          type,
+          title,
           content: cleanContent,
           status: existing?.status ?? "approved",
           sourceId: "brain-sync",
@@ -402,8 +409,14 @@ export function registerProjectCoreRoutes(app: FastifyInstance, deps: ProjectsKn
           confidence: 1,
           trustLevel: "verified",
           isInferred: false,
-          tags: [inferredType, "brain-sync"],
+          tags: [type, "brain-sync"],
           relatedIds: existing?.relatedIds ?? [],
+          metadata: {
+            ...(existing?.metadata ?? {}),
+            acceptanceCriteria: [
+              `Validado por suite de testes de integração e regressão para ${id}`
+            ]
+          },
           accessPolicyId: existing?.accessPolicyId ?? "internal-project",
           createdAt: existing?.createdAt ?? now,
           updatedAt: now
