@@ -186,7 +186,7 @@ export function registerCoreRetrievalTools(
     async ({ projectId, query, domains, atDate, limit, cursor, includeShared }) => {
       assertProjectAccess(ctx, projectId);
       const hits = [...(await runtime.retrieval.search(ctx, { projectId, query, domains, atDate, limit: 100 }))];
-      if (includeShared !== false && runtime.opRepo && hasPermission(ctx, "projects:shared:read")) {
+      if (includeShared === true && runtime.opRepo && hasPermission(ctx, "projects:shared:read")) {
         const sharedProjects = await runtime.opRepo.listSharedProjects(ctx.tenantId).catch(() => []);
         for (const sp of sharedProjects) {
           if (sp.projectId === projectId) continue;
@@ -327,7 +327,7 @@ export function registerCoreRetrievalTools(
     async ({ projectId, query, serviceId, tags, limit, cursor, includeShared }) => {
       assertProjectAccess(ctx, projectId);
       const hits = [...(await runtime.retrieval.search(ctx, { projectId, query: query ?? serviceId ?? "regra", domains: [2, 4, 7], limit: 100 }))];
-      if (includeShared !== false && runtime.opRepo && hasPermission(ctx, "projects:shared:read")) {
+      if (includeShared === true && runtime.opRepo && hasPermission(ctx, "projects:shared:read")) {
         const sharedProjects = await runtime.opRepo.listSharedProjects(ctx.tenantId).catch(() => []);
         for (const sp of sharedProjects) {
           if (sp.projectId === projectId) continue;

@@ -269,7 +269,7 @@ export function registerProjectCoreRoutes(app: FastifyInstance, deps: ProjectsKn
         explain: buildExplain(h)
       }));
 
-      if (includeShared !== false && opRepo && hasPermission(ctx, "projects:shared:read")) {
+      if (includeShared === true && opRepo && hasPermission(ctx, "projects:shared:read")) {
         const sharedProjects = await opRepo.listSharedProjects(ctx.tenantId, systemDb);
         for (const sp of sharedProjects) {
           if (sp.projectId === req.params.projectId) continue;
@@ -294,7 +294,7 @@ export function registerProjectCoreRoutes(app: FastifyInstance, deps: ProjectsKn
     }
   );
 
-  app.get<{ Params: { projectId: string } }>("/v1/projects/:projectId/skills", async (req) => {
+  app.get<{ Params: { projectId: string }; Querystring: { includeShared?: string } }>("/v1/projects/:projectId/skills", async (req) => {
     const ctx = await authenticateProjectRequest(req.headers.authorization, req.params.projectId);
     const projectHits = await queryAwareRetrieval.search(ctx, { projectId: req.params.projectId, query: "", limit: 200 });
     const projectSkills = projectHits
@@ -303,7 +303,7 @@ export function registerProjectCoreRoutes(app: FastifyInstance, deps: ProjectsKn
       .map((item) => ({ ...item, scope: "project" as const }));
 
     const sharedSkills: Array<KnowledgeItem & { scope: "org" | "shared"; sharedFromProjectId?: string }> = [];
-    if (opRepo && hasPermission(ctx, "projects:shared:read")) {
+    if (req.query?.includeShared === "true" && opRepo && hasPermission(ctx, "projects:shared:read")) {
       const sharedProjects = await opRepo.listSharedProjects(ctx.tenantId, systemDb);
       for (const sp of sharedProjects) {
         if (sp.projectId === req.params.projectId) continue;

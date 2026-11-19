@@ -18,9 +18,10 @@ export function registerExtendedSkillsSpecsTools(
     describeMcpTool(profile, "Lista todas as Skills centralizadas (.brain/skills) do projeto e globais da organização (__org__) para agentes de IA."),
     {
       projectId: z.string().min(1),
-      includeContent: z.boolean().default(false)
+      includeContent: z.boolean().default(false),
+      includeShared: z.boolean().optional().default(false)
     },
-    async ({ projectId, includeContent }) => {
+    async ({ projectId, includeContent, includeShared }) => {
       assertProjectAccess(ctx, projectId);
       const hits = await runtime.retrieval.search(ctx, { projectId, query: "", limit: 200 });
       const projectSkills = hits
@@ -60,7 +61,7 @@ export function registerExtendedSkillsSpecsTools(
         }
       }
       const sharedSkills: Array<typeof projectSkills[number] & { sharedFromProjectId?: string }> = [];
-      if (runtime.opRepo && hasPermission(ctx, "projects:shared:read")) {
+      if (includeShared === true && runtime.opRepo && hasPermission(ctx, "projects:shared:read")) {
         const sharedProjects = await runtime.opRepo.listSharedProjects(ctx.tenantId).catch(() => []);
         for (const sp of sharedProjects) {
           if (sp.projectId === projectId) continue;
