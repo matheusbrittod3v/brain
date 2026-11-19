@@ -487,6 +487,51 @@ export class PgOperationalRepository extends PgRunnerHandoffsRepo {
     return withTenantRls(this.db, ctx, (tx) => run(tx as unknown as BrainDb));
   }
 
+  async updateProject(
+    ctx: AuthContext,
+    projectId: string,
+    patch: { name?: string; description?: string; knowledgeRoot?: string; isShared?: boolean },
+    systemDb?: BrainDb
+  ) {
+    const run = async (tx: BrainDb) => {
+      const updates: Record<string, unknown> = {};
+      if (patch.name !== undefined) updates.name = patch.name;
+      if (patch.description !== undefined) updates.description = patch.description;
+      if (patch.knowledgeRoot !== undefined) updates.knowledgeRoot = patch.knowledgeRoot;
+      if (patch.isShared !== undefined) updates.isShared = patch.isShared;
+      if (Object.keys(updates).length === 0) return null;
+      const [updated] = await tx
+        .update(projects)
+        .set(updates)
+        .where(and(eq(projects.tenantId, ctx.tenantId), eq(projects.id, projectId)))
+        .returning();
+      if (!updated) return null;
+      return {
+        projectId: updated.id,
+        tenantId: updated.tenantId,
+        name: updated.name,
+        description: updated.description ?? undefined,
+        knowledgeRoot: updated.knowledgeRoot,
+        isShared: Boolean(updated.isShared),
+        createdAt: updated.createdAt.toISOString()
+      };
+    };
+    if (systemDb) return run(systemDb);
+    return withTenantRls(this.db, ctx, (tx) => run(tx as unknown as BrainDb));
+  }
+
+  async deleteProject(ctx: AuthContext, projectId: string, systemDb?: BrainDb): Promise<boolean> {
+    const run = async (tx: BrainDb) => {
+      const rows = await tx
+        .delete(projects)
+        .where(and(eq(projects.tenantId, ctx.tenantId), eq(projects.id, projectId)))
+        .returning({ id: projects.id });
+      return rows.length > 0;
+    };
+    if (systemDb) return run(systemDb);
+    return withTenantRls(this.db, ctx, (tx) => run(tx as unknown as BrainDb));
+  }
+
   async registerProject(
     ctx: AuthContext,
     input: { projectId: string; name: string; description?: string; knowledgeRoot?: string; isShared?: boolean }

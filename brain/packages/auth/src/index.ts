@@ -58,6 +58,8 @@ export const PERMISSION_CATALOG = [
   { id: "proposals:decide", group: "Propostas", label: "Aprovar, revisar ou rejeitar propostas" },
   // Projetos & Agentes
   { id: "projects:create", group: "Projetos & Runner", label: "Criar e atualizar projetos" },
+  { id: "projects:edit", group: "Projetos & Runner", label: "Editar nome, descrição e configurações de projetos" },
+  { id: "projects:delete", group: "Projetos & Runner", label: "Excluir projetos permanentemente" },
   { id: "projects:share", group: "Projetos & Runner", label: "Marcar projeto como compartilhável e reutilizável globalmente" },
   { id: "projects:shared:read", group: "Projetos & Runner", label: "Consultar e reutilizar skills, regras e dados de projetos compartilhados" },
   { id: "runner:view", group: "Projetos & Runner", label: "Ver execuções do Brain Runner" },

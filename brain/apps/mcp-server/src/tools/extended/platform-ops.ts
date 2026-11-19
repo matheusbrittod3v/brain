@@ -63,6 +63,55 @@ export function registerPlatformOpsTools(
   );
 
   server.tool(
+    "brain_update_project",
+    describeMcpTool(profile, "Edita metadados de um projeto (nome, descrição, knowledgeRoot e isShared; requer projects:edit)."),
+    {
+      projectId: z.string().min(1),
+      name: z.string().min(1).optional(),
+      description: z.string().optional(),
+      knowledgeRoot: z.string().optional(),
+      isShared: z.boolean().optional()
+    },
+    async ({ projectId, name, description, knowledgeRoot, isShared }) => {
+      assertProjectAccess(ctx, projectId);
+      assertPermission(ctx, "projects:edit");
+      if (isShared !== undefined) assertPermission(ctx, "projects:share");
+      const patch = {
+        ...(name !== undefined ? { name: name.trim() } : {}),
+        ...(description !== undefined ? { description: description.trim() } : {}),
+        ...(knowledgeRoot !== undefined ? { knowledgeRoot: knowledgeRoot.trim() || ".brain/" } : {}),
+        ...(isShared !== undefined ? { isShared } : {})
+      };
+      const updated = runtime.opRepo
+        ? await runtime.opRepo.updateProject(ctx, projectId, patch)
+        : null;
+      if (!updated) {
+        return okJson({ updated: false, projectId, reason: "Projeto não encontrado ou repositório indisponível." });
+      }
+      return okJson({ updated: true, projectId, project: updated });
+    }
+  );
+
+  server.tool(
+    "brain_delete_project",
+    describeMcpTool(profile, "Exclui permanentemente um projeto do Brain (requer permissão projects:delete)."),
+    {
+      projectId: z.string().min(1)
+    },
+    async ({ projectId }) => {
+      assertProjectAccess(ctx, projectId);
+      assertPermission(ctx, "projects:delete");
+      if (!runtime.opRepo) {
+        return okJson({ deleted: false, reason: "PostgreSQL operational repository unavailable." });
+      }
+      const deleted = await runtime.opRepo.deleteProject(ctx, projectId);
+      runtime.registeredProjects?.delete(`${ctx.tenantId}:${projectId}`);
+      runtime.retrieval.invalidateCache?.(ctx.tenantId, projectId);
+      return okJson({ deleted, projectId });
+    }
+  );
+
+  server.tool(
     "brain_list_shared_projects",
     describeMcpTool(profile, "Lista projetos marcados como compartilháveis/reutilizáveis (isShared=true) e suas skills, regras de negócio e especificações globais (requer projects:shared:read)."),
     {

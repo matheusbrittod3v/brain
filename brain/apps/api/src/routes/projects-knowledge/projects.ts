@@ -189,6 +189,75 @@ export function registerProjectCoreRoutes(app: FastifyInstance, deps: ProjectsKn
     }
   );
 
+  app.put<{
+    Params: { projectId: string };
+    Body: { name?: string; description?: string; knowledgeRoot?: string; isShared?: boolean };
+  }>("/v1/projects/:projectId", async (req) => {
+    const projectId = req.params.projectId;
+    const ctx = await authenticateProjectRequest(req.headers.authorization, projectId);
+    assertPermission(ctx, "projects:edit");
+    if (req.body?.isShared !== undefined) {
+      assertPermission(ctx, "projects:share");
+    }
+    const patch = {
+      ...(req.body?.name !== undefined ? { name: req.body.name.trim() } : {}),
+      ...(req.body?.description !== undefined ? { description: req.body.description.trim() } : {}),
+      ...(req.body?.knowledgeRoot !== undefined ? { knowledgeRoot: req.body.knowledgeRoot.trim() || ".brain/" } : {}),
+      ...(req.body?.isShared !== undefined ? { isShared: Boolean(req.body.isShared) } : {})
+    };
+    const updated = opRepo
+      ? await opRepo.updateProject(ctx, projectId, patch, systemDb)
+      : (() => {
+          const key = `${ctx.tenantId}:${projectId}`;
+          const existing = registeredProjects.get(key);
+          if (!existing) return null;
+          const next = { ...existing, ...patch };
+          registeredProjects.set(key, next as typeof existing);
+          return next;
+        })();
+    if (!updated) {
+      throw new BrainError("BRAIN_ERR_NOT_FOUND", `Projeto '${projectId}' não encontrado.`, 404);
+    }
+    await recordAudit(ctx, {
+      tenantId: ctx.tenantId,
+      projectId,
+      accessPolicyId: "internal-project",
+      actorId: ctx.actorId,
+      actorType: ctx.actorType,
+      action: "update",
+      targetType: "project",
+      targetId: projectId,
+      metadata: patch
+    }).catch(() => undefined);
+    return { updated: true, project: updated };
+  });
+
+  app.delete<{ Params: { projectId: string } }>("/v1/projects/:projectId", async (req) => {
+    const projectId = req.params.projectId;
+    const ctx = await authenticateProjectRequest(req.headers.authorization, projectId);
+    assertPermission(ctx, "projects:delete");
+    const deleted = opRepo
+      ? await opRepo.deleteProject(ctx, projectId, systemDb)
+      : registeredProjects.delete(`${ctx.tenantId}:${projectId}`);
+    if (!deleted) {
+      throw new BrainError("BRAIN_ERR_NOT_FOUND", `Projeto '${projectId}' não encontrado.`, 404);
+    }
+    registeredProjects.delete(`${ctx.tenantId}:${projectId}`);
+    queryAwareRetrieval.invalidateCache?.(ctx.tenantId, projectId);
+    await recordAudit(ctx, {
+      tenantId: ctx.tenantId,
+      projectId,
+      accessPolicyId: "restricted-security",
+      actorId: ctx.actorId,
+      actorType: ctx.actorType,
+      action: "revoke",
+      targetType: "project",
+      targetId: projectId,
+      metadata: { operation: "delete_project" }
+    }).catch(() => undefined);
+    return { deleted: true, projectId };
+  });
+
   app.get<{ Params: { projectId: string } }>("/v1/projects/:projectId/overview", async (req) => {
     const ctx = await authenticateProjectRequest(req.headers.authorization, req.params.projectId);
     const hits = await queryAwareRetrieval.search(ctx, { projectId: req.params.projectId, query: "", limit: 200 });

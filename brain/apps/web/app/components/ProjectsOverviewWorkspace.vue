@@ -44,7 +44,7 @@ const emit = defineEmits<{
   navigate: [workspace: 'inbox' | 'knowledge' | 'search' | 'agents' | 'impact' | 'operations']
 }>()
 
-const { apiFetch, notify, hasPermission, liveSyncTick } = useBrainApi()
+const { apiFetch, notify, hasPermission, liveSyncTick, triggerLiveRefresh } = useBrainApi()
 
 const currentProject = computed(() =>
   props.projectsList?.find(p => p.projectId === props.projectId)
@@ -206,6 +206,66 @@ const loadingOnboarding = ref(false)
 const onboardingGuide = ref<any>(null)
 const dailyChangesOpen = ref(false)
 const interactiveTourOpen = ref(false)
+const editProjectOpen = ref(false)
+const savingProject = ref(false)
+const editForm = reactive({
+  name: '',
+  description: '',
+  knowledgeRoot: '.brain/',
+  isShared: false
+})
+const deleteProjectOpen = ref(false)
+const deletingProject = ref(false)
+const deleteConfirmSlug = ref('')
+
+function openEditProject() {
+  editForm.name = currentProject.value?.name || props.projectId
+  editForm.description = currentProject.value?.description || ''
+  editForm.knowledgeRoot = '.brain/'
+  editForm.isShared = isCurrentShared.value
+  editProjectOpen.value = true
+}
+
+async function saveProjectEdit() {
+  if (!props.projectId || !editForm.name.trim()) return
+  savingProject.value = true
+  try {
+    await apiFetch(`/v1/projects/${encodeURIComponent(props.projectId)}`, {
+      method: 'PUT',
+      body: JSON.stringify({
+        name: editForm.name.trim(),
+        description: editForm.description.trim(),
+        knowledgeRoot: editForm.knowledgeRoot.trim() || '.brain/',
+        ...(hasPermission('projects:share') ? { isShared: editForm.isShared } : {})
+      })
+    })
+    notify('Projeto atualizado', editForm.name.trim(), 'success')
+    editProjectOpen.value = false
+    triggerLiveRefresh()
+    emit('refresh')
+  } catch (err) {
+    notify('Erro ao editar projeto', err instanceof Error ? err.message : String(err), 'error')
+  } finally {
+    savingProject.value = false
+  }
+}
+
+async function confirmDeleteProject() {
+  if (!props.projectId || deleteConfirmSlug.value.trim() !== props.projectId) return
+  deletingProject.value = true
+  try {
+    await apiFetch(`/v1/projects/${encodeURIComponent(props.projectId)}`, { method: 'DELETE' })
+    notify('Projeto excluído', props.projectId, 'warning')
+    deleteProjectOpen.value = false
+    deleteConfirmSlug.value = ''
+    triggerLiveRefresh()
+    emit('refresh')
+  } catch (err) {
+    notify('Erro ao excluir projeto', err instanceof Error ? err.message : String(err), 'error')
+  } finally {
+    deletingProject.value = false
+  }
+}
 
 async function openOnboarding() {
   onboardingOpen.value = true
@@ -230,6 +290,26 @@ async function openOnboarding() {
       icon="i-lucide-folder-git-2"
     >
       <template #actions>
+        <UButton
+          v-if="projectId && hasPermission('projects:edit')"
+          size="sm"
+          variant="soft"
+          color="neutral"
+          icon="i-lucide-pencil"
+          @click="openEditProject"
+        >
+          Editar
+        </UButton>
+        <UButton
+          v-if="projectId && hasPermission('projects:delete')"
+          size="sm"
+          variant="soft"
+          color="error"
+          icon="i-lucide-trash-2"
+          @click="deleteConfirmSlug = ''; deleteProjectOpen = true"
+        >
+          Excluir
+        </UButton>
         <UButton
           v-if="projectId && hasPermission('projects:share')"
           size="sm"
@@ -514,5 +594,59 @@ async function openOnboarding() {
     <!-- Modais de Mudanças Diárias e Tour Interativo -->
     <DailyChangesModal v-model:open="dailyChangesOpen" :project-id="projectId" />
     <InteractiveTourModal v-model:open="interactiveTourOpen" :project-id="projectId" />
+
+    <UModal v-model:open="editProjectOpen" :title="`Editar Projeto — ${projectId}`">
+      <template #body>
+        <div class="space-y-3">
+          <UFormField label="Nome do Projeto">
+            <UInput v-model="editForm.name" class="w-full" />
+          </UFormField>
+          <UFormField label="Descrição">
+            <UTextarea v-model="editForm.description" :rows="2" class="w-full" />
+          </UFormField>
+          <UFormField label="Pasta de Conhecimento">
+            <UInput v-model="editForm.knowledgeRoot" class="w-full font-mono text-xs" />
+          </UFormField>
+          <label v-if="hasPermission('projects:share')" class="flex items-center gap-2 text-xs text-highlighted cursor-pointer">
+            <input v-model="editForm.isShared" type="checkbox" class="rounded border-default" />
+            Compartilhável Global (consultável por outros projetos e agentes MCP)
+          </label>
+        </div>
+      </template>
+      <template #footer>
+        <div class="flex justify-end gap-2">
+          <UButton variant="ghost" @click="editProjectOpen = false">Cancelar</UButton>
+          <UButton color="primary" :loading="savingProject" @click="saveProjectEdit">Salvar</UButton>
+        </div>
+      </template>
+    </UModal>
+
+    <UModal v-model:open="deleteProjectOpen" :title="`Excluir Projeto — ${projectId}`">
+      <template #body>
+        <div class="space-y-3 text-xs">
+          <UAlert
+            color="error"
+            variant="subtle"
+            icon="i-lucide-alert-triangle"
+            title="Ação permanente"
+            :description="`Digite '${projectId}' abaixo para confirmar a exclusão do projeto.`"
+          />
+          <UInput v-model="deleteConfirmSlug" :placeholder="projectId" class="w-full font-mono" />
+        </div>
+      </template>
+      <template #footer>
+        <div class="flex justify-end gap-2">
+          <UButton variant="ghost" @click="deleteProjectOpen = false">Cancelar</UButton>
+          <UButton
+            color="error"
+            :disabled="deleteConfirmSlug.trim() !== projectId"
+            :loading="deletingProject"
+            @click="confirmDeleteProject"
+          >
+            Excluir Definitivamente
+          </UButton>
+        </div>
+      </template>
+    </UModal>
   </div>
 </template>
